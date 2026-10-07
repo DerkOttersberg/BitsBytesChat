@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { tmpdir } from "node:os"
 import { BBArtifacts } from "./bitsbytes-artifacts"
@@ -41,6 +41,27 @@ test("one malformed artifact does not discard the remaining document registry", 
   await f.artifacts.start()
   expect(f.artifacts.items.map(item => item.id)).toEqual(["saved"])
   expect((await readdir(f.folder)).some(name => name.startsWith("artifacts-recovery-"))).toBe(true)
+})
+
+test("an unreadable artifact registry is not treated as empty or replaced", async () => {
+  const f = await fixture()
+  const saved = { id: "saved", sessionID: "ses_saved", path: join(f.folder, "saved.html"), filename: "saved.html", hash: "saved-hash", revision: 1, updated: 1, kind: "html" as const, status: "ready" as const, pdf: "", error: "" }
+  f.artifacts.items = [saved]
+  await mkdir(join(f.folder, "artifacts.json"))
+  await expect(f.artifacts.start()).rejects.toThrow()
+  expect(f.artifacts.items).toEqual([saved])
+  expect((await stat(join(f.folder, "artifacts.json"))).isDirectory()).toBe(true)
+  expect((await readdir(f.folder)).filter(name => name.startsWith("artifacts-recovery-"))).toEqual([])
+})
+
+test("independent recovery attempts retain separate exact copies", async () => {
+  const f = await fixture(), source = '{"damaged":"Original 🌿 bytes"}'
+  await writeFile(join(f.folder, "artifacts.json"), source)
+  await Promise.all(Array.from({ length: 10 }, () => f.artifacts.start()))
+  const copies = (await readdir(f.folder)).filter(name => name.startsWith("artifacts-recovery-"))
+  expect(copies).toHaveLength(10)
+  for (const copy of copies) expect(await readFile(join(f.folder, copy), "utf8")).toBe(source)
+  expect(await readFile(join(f.folder, "artifacts.json"), "utf8")).toBe(source)
 })
 
 const integration = process.env.BB_ARTIFACT_PYTHON ? test : test.skip

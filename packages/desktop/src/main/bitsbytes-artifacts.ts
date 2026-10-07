@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { basename, extname, join } from "node:path"
 import { copyFile, mkdir, open, readFile, realpath, rename, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
@@ -19,16 +19,18 @@ export class BBArtifacts {
   constructor(private root: string, _python: string, private assets: string, private changed: (artifact: DocumentArtifact, published?: boolean) => void) { this.runtime = new BBArtifactRuntime(root, assets) }
   async start() {
     await mkdir(this.root, { recursive: true })
-    const source = await readFile(join(this.root, "artifacts.json"), "utf8").catch(() => "[]")
-    try {
-      const stored: unknown = JSON.parse(source)
-      if (!Array.isArray(stored)) throw new Error("Invalid artifact journal")
-      this.items = stored.filter(validArtifact)
-      if (this.items.length !== stored.length) await writeFile(join(this.root, `artifacts-recovery-${Date.now()}.json`), source)
-    } catch {
-      await writeFile(join(this.root, `artifacts-recovery-${Date.now()}.json`), source)
-      this.items = []
-    }
+    const source = await readFile(join(this.root, "artifacts.json"), "utf8").catch(error => {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return "[]"
+      throw error
+    })
+    let stored: unknown
+    try { stored = JSON.parse(source) } catch {}
+    const recovered = Array.isArray(stored) ? stored.filter(validArtifact) : []
+    // A failed recovery copy must not be mistaken for invalid JSON or discard
+    // valid neighboring records. Keep the original readable before adopting it.
+    if (!Array.isArray(stored) || recovered.length !== stored.length)
+      await writeFile(join(this.root, `artifacts-recovery-${randomUUID()}.json`), source)
+    this.items = recovered
     for (const item of this.items) {
       item.kind ??= "document"; item.mime ??= "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       item.source ??= join(this.root, "previews/sources", item.hash + ".docx")
