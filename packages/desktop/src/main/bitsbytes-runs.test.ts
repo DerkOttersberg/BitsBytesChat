@@ -88,6 +88,20 @@ test("Stop during engine inspection keeps the queued request paused until Resume
   await new Promise(resolve => setTimeout(resolve, 20))
 })
 
+test("Stop releases host waiting after admission is confirmed and its queue is empty", async () => {
+  const f = await fixture()
+  f.runs.close(); f.runs.get("ses_test").paused = true
+  await f.runs.call("admit", { prompt: f.prompt("msg_confirmed") })
+  f.runs.get("ses_test").paused = false; f.state.busy = false
+  await f.runs.pump("ses_test"); await f.runs.pump("ses_test")
+  expect(f.runs.get("ses_test").queue).toHaveLength(0)
+  expect(f.runs.get("ses_test").awaiting).toBe(true)
+  await f.runs.call("stop", { sessionID: "ses_test" })
+  expect(f.runs.get("ses_test").awaiting).toBe(false)
+  expect(JSON.parse(await readFile(join(f.folder, "chat-runs.json"), "utf8")).ses_test.awaiting).toBe(false)
+  expect(f.sent).toHaveLength(1)
+})
+
 test("Delete during engine inspection cannot dispatch the removed request", async () => {
   const folder = await mkdtemp(join(tmpdir(), "bb-runs-test-"))
   const entered = Promise.withResolvers<void>()

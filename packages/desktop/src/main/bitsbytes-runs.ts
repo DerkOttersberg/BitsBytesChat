@@ -121,7 +121,7 @@ export class BBRuns {
       if (!Array.isArray(ids) || new Set(ids).size !== chat.queue.length || chat.queue.some(item => !ids.includes(item.id) || item.status === "sending")) throw new Error("bb.error.deliveryConflict")
       chat.queue.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id))
     }
-    if (action === "stop") { chat.paused = true; this.admissions.get(chat.sessionID)?.abort(); if (chat.goal?.status === "active") { chat.goal.elapsed = Date.now() - chat.goal.started; chat.goal.status = "paused"; chat.goal.reason = "stopped" } }
+    if (action === "stop") { chat.paused = true; chat.awaiting = false; this.admissions.get(chat.sessionID)?.abort(); if (chat.goal?.status === "active") { chat.goal.elapsed = Date.now() - chat.goal.started; chat.goal.status = "paused"; chat.goal.reason = "stopped" } }
     if (action === "resume") { chat.paused = false; for (const entry of chat.queue) if (entry.status === "failed") entry.status = "pending" }
     if (action === "goal-pause" && chat.goal) { chat.goal.elapsed = Date.now() - chat.goal.started; chat.goal.status = "paused" }
     if (action === "goal-resume" && chat.goal) { if (chat.goal.budget && chat.goal.tokens >= chat.goal.budget) throw new Error("bb.error.goalBudget"); chat.goal.status = "active"; chat.goal.reason = ""; chat.goal.continuations = 0; chat.paused = false }

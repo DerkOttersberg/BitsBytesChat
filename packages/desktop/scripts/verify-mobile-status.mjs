@@ -4,22 +4,49 @@ import { createServer } from "node:http"
 import { mkdir, readFile, writeFile, symlink } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { randomUUID } from "node:crypto"
+import { bbt } from "../src/bitsbytes/copy.ts"
 
 const root = resolve("../..")
 const { _electron, chromium } = createRequire(join(root, ".tools/qa/package.json"))("playwright")
 const profile = join(root, ".tools/qa/mobile-status-" + randomUUID()),
   data = join(profile, "BitsBytesChat")
 const report = { checks: [], errors: [], responseBytes: [], providerRequests: 0, frozenSourceReachedProvider: false }
+const slow = {
+  entered: Promise.withResolvers(),
+  release: Promise.withResolvers(),
+  disconnected: Promise.withResolvers(),
+}
+async function bounded(promise, label) {
+  let timer
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(Error(label)), 20000)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
 const source = "FROZEN-SOURCE-SENTINEL\n" + "Nederlandse bron 🌿 ".repeat(6000)
 const fixture = createServer(async (request, response) => {
   let body = ""
   for await (const chunk of request) body += chunk
   report.providerRequests++
   const input = JSON.parse(body)
-  report.frozenSourceReachedProvider ||= (input.messages ?? []).some(message =>
-    (typeof message.content === "string" ? [message.content] : (message.content ?? []).filter(part => part.type === "text").map(part => part.text))
-      .some(text => text.includes(source)),
+  report.frozenSourceReachedProvider ||= (input.messages ?? []).some((message) =>
+    (typeof message.content === "string"
+      ? [message.content]
+      : (message.content ?? []).filter((part) => part.type === "text").map((part) => part.text)
+    ).some((text) => text.includes(source)),
   )
+  if (body.includes("slow-stop-marker")) {
+    response.on("close", () => slow.disconnected.resolve())
+    slow.entered.resolve()
+    await slow.release.promise
+    if (response.destroyed) return
+  }
   response.writeHead(200, { "content-type": "text/event-stream" })
   response.end(
     "data: " +
@@ -139,7 +166,7 @@ try {
   }
   assert.ok(approved)
   await phone.locator("#app").waitFor({ state: "visible" })
-  const chat = async (label) => {
+  const chat = async (label, id = session.id) => {
     const result = await phone.evaluate(async (id) => {
       const response = await fetch("/api", {
         method: "POST",
@@ -148,7 +175,7 @@ try {
       })
       if (!response.ok) throw Error("Chat HTTP " + response.status)
       return response.text()
-    }, session.id)
+    }, id)
     const value = JSON.parse(result)
     report.responseBytes.push({
       label,
@@ -187,6 +214,75 @@ try {
   assert.equal(await phone.getByText("Resume probe", { exact: true }).count(), 1)
   assert.equal(await phone.getByText(source, { exact: true }).count(), 0)
   check("Phone Resume submits the preserved source once, clears waiting and keeps its durable host snapshot")
+  if (process.env.BB_PHONE_STATUS_CHECK !== "stop") {
+    await call("runs.admit", {
+      prompt: {
+        ...prompt,
+        id: prompt.id + "c",
+        text: "Invalid source probe",
+        legacyParts: [{ type: "file", url: "bitsbytes://invalid/context" }],
+      },
+    })
+    for (let index = 0; index < 100; index++) {
+      if ((await call("runs.get", { sessionID: session.id })).error) break
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    const error = await chat("missing-source-error")
+    assert.equal(error.run.error, bbt("bb.error.invalidRequest"))
+    assert.match((await call("runs.get", { sessionID: session.id })).error, /bb\.error\.invalidRequest/)
+    await phone
+      .locator("#queue-status")
+      .getByText(bbt("bb.error.invalidRequest"), { exact: true })
+      .waitFor({ timeout: 15000 })
+    assert.equal(report.providerRequests, 1)
+    check(
+      "Phone shows the existing recovery copy while the host keeps its error key and does not admit an invalid source",
+    )
+  }
+  if (process.env.BB_PHONE_STATUS_CHECK !== "copy") {
+    await phone.locator("#menu-button").click()
+    await phone.locator("#drawer-body").getByRole("button", { name: "New chat", exact: true }).click()
+    await phone.waitForFunction(
+      (previous) => localStorage.getItem("bb.session") && localStorage.getItem("bb.session") !== previous,
+      session.id,
+    )
+    const stopID = await phone.evaluate(() => localStorage.getItem("bb.session"))
+    await phone.locator("#model").selectOption(JSON.stringify({ providerID: "status-qa", modelID: "fixture" }))
+    await phone.locator("#prompt").fill("slow-stop-marker")
+    await phone.locator("#send").click()
+    await bounded(slow.entered.promise, "The Stop fixture did not reach the provider")
+    for (let index = 0; index < 100; index++) {
+      if (!(await call("runs.get", { sessionID: stopID })).queue.length) break
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    const active = await call("runs.get", { sessionID: stopID })
+    assert.equal(active.queue.length, 0)
+    assert.equal(active.awaiting, true)
+    const stopResponse = phone.waitForResponse(response => response.url().endsWith("/api") && response.request().postDataJSON()?.method === "stop")
+    await phone.locator("#stop").click()
+    const acknowledgement = await stopResponse
+    assert.ok(acknowledgement.ok())
+    const stopBody = await acknowledgement.text()
+    report.stopResponse = { status: acknowledgement.status(), bytes: Buffer.byteLength(stopBody) }
+    assert.doesNotThrow(() => JSON.parse(stopBody))
+    await bounded(slow.disconnected.promise, "Stop did not disconnect its stalled provider request")
+    const stopped = await chat("stopped", stopID)
+    report.stopHost = {
+      paused: stopped.run.paused,
+      awaiting: stopped.run.awaiting,
+      queued: stopped.run.queue.length,
+      busy: Boolean(stopped.status && stopped.status.type !== "idle"),
+    }
+    assert.equal(stopped.run.paused, true)
+    assert.equal(stopped.run.awaiting, false)
+    assert.equal(report.stopHost.busy, false)
+    await phone.locator("#stop").waitFor({ state: "hidden", timeout: 15000 })
+    assert.equal(await phone.locator("#notice").isVisible(), false)
+    assert.equal(report.providerRequests, 2)
+    check(
+      "Phone Stop aborts its active provider, clears host waiting after acknowledgement and restores the idle composer",
+    )
+  }
   assert.deepEqual(report.errors, [])
   check("Phone timeline stays compact with no renderer errors")
 } catch (error) {
@@ -194,6 +290,7 @@ try {
   console.error(error)
   process.exitCode = 1
 } finally {
+  slow.release.resolve()
   await writeFile(
     join(root, ".tools/qa/results", process.env.BB_MOBILE_STATUS_REPORT || "mobile-status-before.json"),
     JSON.stringify(report, null, 2),

@@ -6,6 +6,7 @@ import { mkdtemp, readFile, appendFile, rm } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { tmpdir } from "node:os"
 import { BBMobile } from "./bitsbytes-mobile"
+import { bbt } from "../bitsbytes/copy"
 
 const calls: { method: string; args: Record<string, unknown>; directory?: string }[] = []
 let mobile: BBMobile,
@@ -14,10 +15,11 @@ let mobile: BBMobile,
   cookie = ""
 const sessions = [{ id: "ses_shared", title: "Laptop conversation", directory: "C:/mobile-test/shared-project" }]
 const frozenSource = "SAVED-QUEUE-CONTEXT 🌿 ".repeat(6000)
+const sessionRead = { held: false, entered: Promise.withResolvers<void>(), release: Promise.withResolvers<void>() }
 const savedRun = {
   sessionID: "ses_shared",
   queue: [{ id: "msg_pending", status: "pending", delivery: "queue", prompt: { text: frozenSource } }],
-  last: { text: frozenSource },
+  last: { text: frozenSource, directory: undefined as string | undefined },
   awaiting: false,
   paused: true,
   error: "",
@@ -70,12 +72,17 @@ const host = {
           ],
         },
       ] as T
-    if (path === "/session/ses_shared") return sessions[0] as T
+    if (path === "/session/ses_shared") {
+      if (sessionRead.held) { sessionRead.entered.resolve(); await sessionRead.release.promise }
+      return sessions[0] as T
+    }
+    if (path.endsWith("/abort")) return true as T
     if (path.includes("/reply")) return true as T
     throw Error(path)
   },
   call: async (method: string, args: Record<string, unknown>) => {
     calls.push({ method, args })
+    if (method === "runs.stop") savedRun.paused = true
     return method === "access.get" ? { mode: "ask" } : { ok: true }
   },
   rpc: async (method: string) => {
@@ -210,6 +217,38 @@ test("HTTPS status omits frozen prompt context while the host retains its queue"
   })
   assert.equal(host.runs.get().queue[0].prompt.text, frozenSource)
   assert.equal(host.runs.get().last.text, frozenSource)
+})
+
+test("HTTPS queue status resolves recovery copy while preserving the host error key", async () => {
+  savedRun.error = "bb.error.deliveryUnknown"
+  try {
+    const response = await api("chat", { sessionID: "ses_shared" })
+    assert.equal(response.status, 200)
+    assert.equal(JSON.parse(response.body).run.error, bbt("bb.error.deliveryUnknown"))
+    assert.equal(savedRun.error, "bb.error.deliveryUnknown")
+  } finally { savedRun.error = "" }
+})
+
+test("phone Stop pauses the host before waiting for engine session metadata", { timeout: 5000 }, async () => {
+  savedRun.paused = false; sessionRead.held = true
+  const offset = calls.length, stopping = api("stop", { sessionID: "ses_shared" })
+  try {
+    await sessionRead.entered.promise
+    assert.equal(savedRun.paused, true)
+    assert.ok(calls.slice(offset).some(row => row.method === "runs.stop"))
+    assert.equal(calls.slice(offset).some(row => row.method.endsWith("/abort")), false)
+  } finally { sessionRead.held = false; sessionRead.release.resolve(); await stopping }
+})
+
+test("phone Stop uses a known host directory without another metadata read", async () => {
+  savedRun.last.directory = sessions[0].directory
+  const offset = calls.length
+  try {
+    const response = await api("stop", { sessionID: "ses_shared" })
+    assert.equal(response.status, 200)
+    assert.equal(calls.slice(offset).some(row => row.method === "/session/ses_shared"), false)
+    assert.equal(calls.findLast(row => row.method === "/session/ses_shared/abort")?.directory, sessions[0].directory)
+  } finally { savedRun.last.directory = undefined }
 })
 
 test("resumable upload journal, exact retries, interruption tail and device revocation", async () => {
