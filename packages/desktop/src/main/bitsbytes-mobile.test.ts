@@ -13,13 +13,22 @@ let mobile: BBMobile,
   port: number,
   cookie = ""
 const sessions = [{ id: "ses_shared", title: "Laptop conversation", directory: "C:/mobile-test/shared-project" }]
+const frozenSource = "SAVED-QUEUE-CONTEXT 🌿 ".repeat(6000)
+const savedRun = {
+  sessionID: "ses_shared",
+  queue: [{ id: "msg_pending", status: "pending", delivery: "queue", prompt: { text: frozenSource } }],
+  last: { text: frozenSource },
+  awaiting: false,
+  paused: true,
+  error: "",
+}
 const host = {
   get root() {
     return root
   },
   assets: resolve("resources/bitsbytes"),
   settings: { engine: "parakeet" },
-  runs: { get: () => ({ queue: [], awaiting: false, paused: false }) },
+  runs: { get: () => savedRun },
   artifacts: { items: [], content: async () => ({ text: "" }) },
   skills: async () => [],
   engineFetch: async <T>(path: string, options: RequestInit = {}, directory?: string): Promise<T> => {
@@ -185,6 +194,22 @@ test("HTTPS pairing, shared sessions and credential boundary", async () => {
   )
   assert.equal((await http("/", "GET", undefined, { host: `untrusted.invalid:${port}` })).status, 403)
   assert.equal((await api("arbitrary.engine.proxy", {})).status, 400)
+})
+
+test("HTTPS status omits frozen prompt context while the host retains its queue", async () => {
+  const response = await api("chat", { sessionID: "ses_shared" })
+  assert.equal(response.status, 200)
+  assert.equal(response.body.includes("SAVED-QUEUE-CONTEXT"), false)
+  assert.ok(Buffer.byteLength(response.body) < 1024)
+  assert.deepEqual(JSON.parse(response.body).run, {
+    sessionID: "ses_shared",
+    queue: [{ id: "msg_pending", status: "pending", delivery: "queue" }],
+    awaiting: false,
+    paused: true,
+    error: "",
+  })
+  assert.equal(host.runs.get().queue[0].prompt.text, frozenSource)
+  assert.equal(host.runs.get().last.text, frozenSource)
 })
 
 test("resumable upload journal, exact retries, interruption tail and device revocation", async () => {

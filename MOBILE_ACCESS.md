@@ -12,7 +12,7 @@ The phone connects to the **same engine and sessions on your Windows computer**.
 
 Keep the computer awake with the mobile-enabled app running. It may be minimized. Closing the app, sleeping the computer or disconnecting its network disconnects the phone; reopening and reconnecting restores access. **Revoke** removes an individual device. **Disable mobile access** stops the listener.
 
-The unreleased reliability branch keeps the composer available during a temporary startup failure and retries connection metadata. A metadata read that stalls for 15 seconds is cancelled so subsequent polls can reconnect. Delayed responses from an earlier visit cannot replace the latest chat after switching away and back. Unsent drafts remain on the phone; this retry does not resend messages or upload audio.
+The unreleased reliability branch keeps the composer available during a temporary startup failure and retries connection metadata. A metadata read that stalls for 15 seconds is cancelled so subsequent polls can reconnect. Delayed responses from an earlier visit cannot replace the latest chat after switching away and back. Large queued sources no longer enlarge every status poll; the host retains the full request for explicit Resume. Unsent drafts remain on the phone; this retry does not resend messages or upload audio.
 
 ### If the phone times out
 

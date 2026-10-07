@@ -483,6 +483,7 @@ export class BBMobile {
         this.host.engineFetch<{ sessionID: string }[]>("/permission", {}, session.directory),
         this.host.engineFetch<{ sessionID: string }[]>("/question", {}, session.directory),
       ])
+      const run = this.host.runs.get(id)
       return {
         title: session.title,
         // The phone only needs visible message parts. Full attachment context stays
@@ -497,7 +498,15 @@ export class BBMobile {
         })),
         status: status[id],
         access,
-        run: this.host.runs.get(id),
+        // Polling needs queue status, not frozen prompts, drafts or saved history.
+        // The host retains those sources for admission and explicit Resume.
+        run: {
+          sessionID: run.sessionID,
+          paused: run.paused,
+          awaiting: run.awaiting,
+          error: run.error,
+          queue: run.queue.map(row => ({ id: row.id, status: row.status, delivery: row.delivery })),
+        },
         permissions: permissions.filter((row) => row.sessionID === id),
         questions: questions.filter((row) => row.sessionID === id),
       }
