@@ -40,23 +40,26 @@ export class BBRuns {
   constructor(private root: string, private inspect: (prompt: RunPrompt, options?: InspectionOptions) => Promise<Inspection>, private dispatch: (prompt: RunPrompt, signal?: AbortSignal) => Promise<DispatchResult>, private changed: (sessionID: string) => void) {}
   async start() {
     await mkdir(this.root, { recursive: true })
-    const source = await readFile(join(this.root, "chat-runs.json"), "utf8").catch(() => "{}")
-    try {
-      const stored: unknown = JSON.parse(source)
-      if (!stored || typeof stored !== "object" || Array.isArray(stored)) throw new Error("Invalid chat run journal")
-      const entries = Object.entries(stored).flatMap(([id, chat]) => { const recovered = recoverChatRun(id, chat); return recovered ? [[id, recovered] as const] : [] })
-      this.chats = Object.assign(Object.create(null), Object.fromEntries(entries))
-      if (JSON.stringify(this.chats) !== JSON.stringify(stored)) await writeFile(join(this.root, `chat-runs-recovery-${Date.now()}-${randomBytes(6).toString("hex")}.json`), source)
-    } catch {
-      await writeFile(join(this.root, `chat-runs-recovery-${Date.now()}-${randomBytes(6).toString("hex")}.json`), source)
-      this.chats = Object.create(null)
-    }
+    const source = await readFile(join(this.root, "chat-runs.json"), "utf8").catch(error => {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return "{}"
+      throw error
+    })
+    let stored: unknown
+    try { stored = JSON.parse(source) } catch {}
+    const entries = stored && typeof stored === "object" && !Array.isArray(stored)
+      ? Object.entries(stored).flatMap(([id, chat]) => { const recovered = recoverChatRun(id, chat); return recovered ? [[id, recovered] as const] : [] })
+      : []
+    const recovered = Object.assign(Object.create(null), Object.fromEntries(entries))
+    if (JSON.stringify(recovered) !== JSON.stringify(stored)) await writeFile(join(this.root, `chat-runs-recovery-${Date.now()}-${randomBytes(6).toString("hex")}.json`), source)
+    this.chats = recovered
     for (const chat of Object.values(this.chats)) {
       if (chat.queue.length) chat.paused = true
       for (const item of chat.queue) if (item.status === "sending") item.status = "uncertain"
       if (chat.goal?.status === "active") { chat.goal.status = "paused"; chat.goal.reason = "restart" }
     }
-    await this.persist()
+    await this.persist().catch(error => {
+      for (const chat of Object.values(this.chats)) this.storageFailure(chat, error)
+    })
     this.timer = setInterval(() => { for (const chat of Object.values(this.chats)) if (chat.queue.length || chat.awaiting || chat.goal?.status === "active") void this.pump(chat.sessionID) }, 1000)
     this.timer.unref()
   }
@@ -244,16 +247,17 @@ export class BBRuns {
       }
       chat.error = failure
       if (chat.goal?.status === "active" && /429|quota|rate.?limit/i.test(chat.error)) { chat.goal.status = "usageLimited"; chat.goal.reason = chat.error }
-      await this.save(chat).catch(saveError => {
-        // Background work cannot acknowledge this state as durable. Pause in
-        // memory, notify the UI and leave the previous journal intact for recovery.
-        chat.paused = true; chat.awaiting = false; chat.error = String(saveError)
-        if (chat.goal?.status === "active") {
-          chat.goal.status = "paused"; chat.goal.reason = chat.error; chat.goal.elapsed = Date.now() - chat.goal.started
-        }
-        this.changed(chat.sessionID)
-      })
+      await this.save(chat).catch(error => this.storageFailure(chat, error))
     } finally { this.admissions.delete(id); this.active.delete(id) }
+  }
+  private storageFailure(chat: ChatRun, error: unknown) {
+    // Unsaved background/startup state is usable only while paused. Preserve
+    // the previous journal and keep explicit mutations dependent on a saved write.
+    chat.paused = true; chat.awaiting = false; chat.error = String(error)
+    if (chat.goal?.status === "active") {
+      chat.goal.status = "paused"; chat.goal.reason = chat.error; chat.goal.elapsed = Date.now() - chat.goal.started
+    }
+    this.changed(chat.sessionID)
   }
   private unsent(chat: ChatRun, item: QueuedInput, priorSentAt: number | undefined) {
     item.status = priorSentAt === undefined ? "pending" : "uncertain"

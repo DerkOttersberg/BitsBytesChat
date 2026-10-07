@@ -51,7 +51,7 @@ const url = 'http://127.0.0.1:' + fixture.address().port
 await mkdir(data + '/config/opencode', { recursive: true })
 await symlink(process.env.LOCALAPPDATA + '/BitsBytesChat/runtime', data + '/runtime', 'junction')
 await writeFile(data + '/config/opencode/opencode.json', JSON.stringify({ provider: { 'bitsbytes-qa': { name: 'Local QA', npm: '@ai-sdk/openai-compatible', options: { baseURL: url + '/v1', apiKey: 'fixture-only' }, models: { 'qa-model': { name: 'QA model', limit: { context: 128000, output: 8192 }, variants: { low: { reasoningEffort: 'low' }, high: { reasoningEffort: 'high' } } } } } }, model: 'bitsbytes-qa/qa-model' }))
-const app = await _electron.launch({ executablePath: process.env.BB_QA_EXECUTABLE || join(root, `packages/desktop/dist/${version}/win-unpacked/BitsBytesChat.exe`), ...(process.env.BB_QA_MAIN ? { args: [process.env.BB_QA_MAIN] } : {}), env: { ...process.env, LOCALAPPDATA: profile }, timeout: 90000 })
+const app = await _electron.launch({ executablePath: process.env.BB_QA_EXECUTABLE || join(root, `packages/desktop/dist/${version}/win-unpacked/BitsBytesChat.exe`), ...(process.env.BB_QA_MAIN ? { args: [process.env.BB_QA_MAIN] } : {}), env: { ...process.env, BB_QA_ISOLATED: "1", LOCALAPPDATA: profile }, timeout: 90000 })
 await app.evaluate(({ BrowserWindow }) => { for (const window of BrowserWindow.getAllWindows()) window.hide() })
 let page, call, engine, bridge
 const sessions = []

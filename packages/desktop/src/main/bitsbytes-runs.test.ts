@@ -520,3 +520,53 @@ test("a failed retry journal preserves an earlier uncertain attempt and reconcil
   expect(chat.queue).toHaveLength(0)
   expect(f.sent).toHaveLength(0)
 })
+
+test("startup keeps a readable saved journal paused when its temporary write path is blocked", async () => {
+  const f = await fixture()
+  f.runs.close(); f.runs.get("ses_test").paused = true
+  await f.runs.call("goal-draft", { sessionID: "ses_test", enabled: true })
+  await f.runs.call("admit", { prompt: f.prompt("msg_saved_startup", "Keep the complete saved source 🌿") })
+  await f.runs.call("plan", { sessionID: "ses_test", text: "Keep the saved plan" })
+  const saved = JSON.parse(await readFile(join(f.folder, "chat-runs.json"), "utf8"))
+  saved.ses_test.paused = false; saved.ses_test.awaiting = true
+  saved.ses_test.queue[0].status = "sending"; saved.ses_test.queue[0].sentAt = 42
+  const source = JSON.stringify(saved)
+  await writeFile(join(f.folder, "chat-runs.json"), source)
+  const temporary = join(f.folder, "chat-runs.json.tmp")
+  await mkdir(temporary)
+  let inspections = 0, dispatched = 0
+  const restored = new BBRuns(f.folder, async () => { inspections++; return f.state }, async () => { dispatched++ }, () => undefined)
+  fixtures.push({ runs: restored, folder: f.folder })
+  await restored.start(); restored.close()
+  const chat = restored.get("ses_test")
+  expect(chat.paused).toBe(true)
+  expect(chat.awaiting).toBe(false)
+  expect(chat.error).toContain("chat-runs.json.tmp")
+  expect(chat.queue[0].status).toBe("uncertain")
+  expect(chat.queue[0].sentAt).toBe(42)
+  expect(chat.queue[0].prompt).toEqual(saved.ses_test.queue[0].prompt)
+  expect(chat.goal?.status).toBe("paused")
+  expect(chat.goal?.objective).toBe(saved.ses_test.goal.objective)
+  expect(chat.plan).toEqual(saved.ses_test.plan)
+  expect(await readFile(join(f.folder, "chat-runs.json"), "utf8")).toBe(source)
+  await restored.pump(chat.sessionID)
+  expect(inspections).toBe(0)
+  expect(dispatched).toBe(0)
+  await expect(restored.call("admit", { prompt: chat.queue[0].prompt })).rejects.toThrow()
+  await rmdir(temporary)
+  await restored.call("stop", { sessionID: chat.sessionID })
+  const recovered = JSON.parse(await readFile(join(f.folder, "chat-runs.json"), "utf8")).ses_test
+  expect(recovered.paused).toBe(true)
+  expect(recovered.queue[0].prompt).toEqual(saved.ses_test.queue[0].prompt)
+  expect(recovered.queue[0].sentAt).toBe(42)
+})
+
+test("an unreadable journal is not treated as an empty saved state", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "bb-runs-test-"))
+  const path = join(folder, "chat-runs.json")
+  await mkdir(path)
+  const runs = new BBRuns(folder, async () => ({ busy: false, messages: [] }), async () => undefined, () => undefined)
+  fixtures.push({ runs, folder })
+  await expect(runs.start()).rejects.toThrow()
+  expect(await readdir(folder)).toEqual(["chat-runs.json"])
+})

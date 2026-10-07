@@ -108,7 +108,7 @@ try {
     executablePath:
       process.env.BB_QA_EXECUTABLE || join(root, "packages/desktop/node_modules/electron/dist/electron.exe"),
     args: [process.env.BB_QA_MAIN || join(root, "packages/desktop")],
-    env: { ...process.env, LOCALAPPDATA: profile },
+    env: { ...process.env, BB_QA_ISOLATED: "1", LOCALAPPDATA: profile },
     timeout: 90000,
   })
   const desktop = await app.firstWindow()

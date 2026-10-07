@@ -31,7 +31,7 @@ let launchedID
 try {
   await mkdir(join(profile, 'BitsBytesChat'), { recursive: true })
   await symlink(join(process.env.LOCALAPPDATA, 'BitsBytesChat/runtime'), join(profile, 'BitsBytesChat/runtime'), 'junction')
-  const env = { ...process.env, LOCALAPPDATA: profile, ELECTRON_RUN_AS_NODE: '1', ELECTRON_NO_ASAR: '1' }
+  const env = { ...process.env, BB_QA_ISOLATED: "1", LOCALAPPDATA: profile, ELECTRON_RUN_AS_NODE: '1', ELECTRON_NO_ASAR: '1' }
   // This disposable headless Electron helper exercises recovery without touching the user's app.
   fixture = spawn(executable, ['-e', 'setInterval(() => {}, 1000)'], { env, windowsHide: true, stdio: 'ignore' })
   await new Promise(resolve => setTimeout(resolve, 1200))

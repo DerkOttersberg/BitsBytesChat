@@ -46,7 +46,7 @@ const check = (name) => { report.checks.push(name); console.log("PASS", name) }
 const app = await _electron.launch({
   executablePath: process.env.BB_LIVE_EXECUTABLE || join(root, "packages/desktop/node_modules/electron/dist/electron.exe"),
   ...(process.env.BB_LIVE_EXECUTABLE ? {} : { args: [join(root, "packages/desktop")] }),
-  env: { ...process.env, LOCALAPPDATA: profile }, timeout: 90000,
+  env: { ...process.env, BB_QA_ISOLATED: "1", LOCALAPPDATA: profile }, timeout: 90000,
 })
 let page, call, engine
 // Refresh tokens can rotate. Preserve updates only if the user's encrypted store has

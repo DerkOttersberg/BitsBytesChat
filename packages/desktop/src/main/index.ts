@@ -277,7 +277,10 @@ const main = Effect.gen(function* () {
       }),
     ),
   )
-  app.setAsDefaultProtocolClient("bitsbytes-chat")
+  // Disposable QA and development profiles must not replace the installed URL handler.
+  if (app.isPackaged && !TEST_ONBOARDING && process.env.BB_QA_ISOLATED !== "1") {
+    app.setAsDefaultProtocolClient("bitsbytes-chat")
+  }
   registerRendererProtocol()
   setDockIcon()
   const updater = setupAutoUpdater(stopSidecars)

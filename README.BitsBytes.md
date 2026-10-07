@@ -24,6 +24,8 @@ A background queue write failure pauses automatic work and shows its error witho
 
 Damaged saved panel layouts retain usable neighboring tabs instead of preventing a chat from opening. The original layout remains available in a local recovery copy.
 
+A temporary startup journal-write failure preserves saved work and opens chats paused. Unreadable journals remain protected. Development and isolated QA launches leave the installed Windows URL handler alone.
+
 ## New in 0.3.4
 
 - Unconfirmed engine admission now becomes a visible recoverable request after its timeout, without an endless busy state or automatic duplicate. A late acknowledgement reconciles the original message.
