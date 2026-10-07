@@ -346,7 +346,7 @@ export class BitsBytes {
       for (const path of paths) artifacts.push(await this.publish(path, sessionID))
       return { artifacts }
     }
-    if (name === "inspect_artifact") { if (this.runs.chats[sessionID]?.last?.mode === "plan" && !existsSync(this.artifacts.runtime.python)) throw new Error("bb.error.artifactSetup"); return this.artifacts.runtime.call("inspect", { path: args.path }, signal) }
+    if (name === "inspect_artifact") { if (this.runs.chats[sessionID]?.last?.mode === "plan" && !existsSync(this.artifacts.runtime.python)) throw new Error("bb.error.artifactSetup"); return this.artifacts.runtime.call("inspect_source", { path: args.path, folder: join(this.root, "artifacts/inspection"), source_id: args.source_id, part: args.part }, signal) }
     if (name === "read_artifact_pages") return this.artifacts.pages(String(args.id), Number(args.start ?? 0))
     if (name === "create_artifact" || name === "run_artifact_script") {
       if (!sessionID) throw new Error("bb.error.invalidRequest")

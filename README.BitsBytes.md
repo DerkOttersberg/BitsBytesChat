@@ -10,6 +10,12 @@ For the phone, open **Settings → Mobile access**, enable it and pair your phon
 
 If a Python environment points at an absent installation, startup repairs its home from the compatible pinned interpreter already installed in the app's runtime, preserving packages and a backup of the configuration. An unavailable audio worker shows a repair action in **Settings → Audio** while chat and mobile access continue to open. **Set up local components** now repairs existing environments as well as creating missing ones.
 
+## Unreleased follow-up
+
+Reliability changes on `chat-reliability` preserve queue controls during slow engine reads, recover temporary phone polling failures and damaged chat journals, and release closed browser resources. Busy queue polling avoids repeatedly downloading the full history.
+
+Large document inspections use saved numbered source parts, so the agent can read a complete source in bounded responses. Subsequent parts keep the inspected version even if its original file changes; a fresh inspection reads the latest file. Small Office/PDF/text inspections keep their structured results. These changes are verified source work; the published installer remains `v0.3.4`. See `VERIFICATION.md` for evidence and limits.
+
 ## New in 0.3.4
 
 - Unconfirmed engine admission now becomes a visible recoverable request after its timeout, without an endless busy state or automatic duplicate. A late acknowledgement reconciles the original message.

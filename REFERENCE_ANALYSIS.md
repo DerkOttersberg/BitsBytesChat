@@ -8,6 +8,8 @@ The phone remains a control surface for the same Windows engine. Its recovery ch
 
 Long histories also matter during background queue control. The host previously reread the entire transcript on every busy poll. It now uses status-only reads while a never-sent normal request waits, retaining full history for steering, uncertain admission/retry reconciliation and Goal evidence. A local 128-message comparison removes 20 history downloads per 20 busy polls in both engine protocols; idle completion still retrieves the complete history. The performance figures and their scope are recorded in `VERIFICATION.md`.
 
+The same principle now applies to document tools: a long source should remain available without requiring one oversized tool response. Large inspections produce numbered parts from a saved snapshot, while ordinary templates keep their structured inspection. Tests verify exact reconstruction and stable source identity across later tool calls. The actual engine/MCP fixture exercises this under Ask access. This improves source handling; it does not imply that a model has read parts it never requested or gained a larger context window.
+
 ## Morning review — 7 October 2026
 
 The comparison uses public behavior and local tests. It does not reproduce private ChatGPT, Codex or Claude internals.

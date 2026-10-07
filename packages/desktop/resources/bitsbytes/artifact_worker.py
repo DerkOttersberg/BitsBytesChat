@@ -3,9 +3,11 @@ import csv
 import hashlib
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 import sys
+import time
 import zipfile
 import uuid
 
@@ -62,6 +64,103 @@ def inspect(path):
     else:
         info['text'] = path.read_text(encoding='utf-8-sig') if path.suffix.lower() in TEXT else ''
     return info
+
+
+def inspect_source(path, folder, source_id=None, part=0):
+    if type(part) is not int or part < 0 or (source_id is None and part != 0):
+        raise ValueError('bb.error.inspectionPart')
+    folder = Path(folder)
+    if source_id is not None:
+        return read_inspection_part(path, folder, source_id, part)
+    info = inspect(path)
+    try:
+        unchanged = hashlib.sha256(Path(info['path']).read_bytes()).hexdigest() == info['hash']
+    except OSError:
+        unchanged = False
+    if not unchanged:
+        raise ValueError('bb.error.inspectionChanged')
+    text = json.dumps(info, ensure_ascii=False, default=str)
+    if len(text) <= 32768:
+        return info
+    encoded = text.encode('utf-8')
+    if len(encoded) > 64 * 1024 * 1024:
+        raise ValueError('bb.error.inspectionTooLarge')
+    source_id = hashlib.sha256(encoded).hexdigest()
+    snapshot = folder / source_id
+    snapshot.mkdir(parents=True, exist_ok=True)
+    hashes = []
+    for index, offset in enumerate(range(0, len(text), 16384)):
+        chunk = text[offset:offset + 16384].encode('utf-8')
+        hashes.append(hashlib.sha256(chunk).hexdigest())
+        write_inspection_file(snapshot / f'{index}.txt', chunk)
+    metadata = {key: info[key] for key in ('path', 'kind', 'mime', 'size', 'hash')}
+    metadata.update(source_id=source_id, format='json', characters=len(text), parts=hashes)
+    # Publish the manifest last. An interrupted extraction cannot expose a
+    # complete snapshot until every immutable part has reached disk.
+    write_inspection_file(snapshot / 'manifest.json', json.dumps(metadata, ensure_ascii=False).encode('utf-8'))
+    return read_inspection_part(path, folder, source_id, 0)
+
+
+def write_inspection_file(path, data):
+    temporary = path.with_name(uuid.uuid4().hex + '.tmp')
+    try:
+        temporary.write_bytes(data)
+        for attempt in range(50):
+            # Concurrent extractors produce identical bytes. Avoid replacing a
+            # completed file while another Windows process is reading it.
+            try:
+                if path.stat().st_size == len(data) and path.read_bytes() == data:
+                    return
+            except OSError:
+                pass
+            try:
+                os.replace(temporary, path)
+                return
+            except PermissionError:
+                if attempt == 49:
+                    raise ValueError('bb.error.inspectionCache')
+                time.sleep(0.01)
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def read_inspection_part(path, folder, source_id, part):
+    if not isinstance(source_id, str) or not re.fullmatch('[a-f0-9]{64}', source_id):
+        raise ValueError('bb.error.inspectionCache')
+    snapshot = folder / source_id
+    try:
+        if (snapshot / 'manifest.json').stat().st_size > 1024 * 1024:
+            raise ValueError('Oversized snapshot manifest')
+        metadata = json.loads((snapshot / 'manifest.json').read_text(encoding='utf-8'))
+        hashes = metadata['parts']
+        if (metadata['source_id'] != source_id or metadata['format'] != 'json'
+                or Path(metadata['path']).resolve() != Path(path).resolve()
+                or not isinstance(metadata['kind'], str) or not isinstance(metadata['mime'], str)
+                or type(metadata['size']) is not int or not 1 <= metadata['size'] <= 256 * 1024 * 1024
+                or not isinstance(metadata['hash'], str) or not re.fullmatch('[a-f0-9]{64}', metadata['hash'])
+                or type(metadata['characters']) is not int or not 32768 < metadata['characters'] <= 64 * 1024 * 1024
+                or not isinstance(hashes, list) or len(hashes) != (metadata['characters'] + 16383) // 16384
+                or any(not isinstance(value, str) or not re.fullmatch('[a-f0-9]{64}', value) for value in hashes)):
+            raise ValueError('Invalid snapshot manifest')
+        if part >= len(hashes):
+            raise IndexError('bb.error.inspectionPart')
+        chunk = (snapshot / f'{part}.txt').read_bytes()
+        if len(chunk) > 65536 or hashlib.sha256(chunk).hexdigest() != hashes[part]:
+            raise ValueError('Damaged snapshot part')
+        text = chunk.decode('utf-8')
+        if len(text) != min(16384, metadata['characters'] - part * 16384):
+            raise ValueError('Incomplete snapshot part')
+    except IndexError:
+        raise ValueError('bb.error.inspectionPart')
+    except Exception:
+        raise ValueError('bb.error.inspectionCache')
+    info = {key: metadata[key] for key in ('path', 'kind', 'mime', 'size', 'hash')}
+    return {**info, 'source_id': source_id, 'format': 'json', 'characters': metadata['characters'],
+            'part': part, 'total': len(hashes), 'text': text,
+            'next': part + 1 if part + 1 < len(hashes) else None}
 
 
 def office(path, output):
@@ -284,6 +383,8 @@ def main():
         return validate(args['path'])
     if action == 'inspect':
         return inspect(args['path'])
+    if action == 'inspect_source':
+        return inspect_source(args['path'], args['folder'], args.get('source_id'), args.get('part', 0))
     if action == 'render':
         return render(args['path'], args['folder'])
     if action == 'grid':

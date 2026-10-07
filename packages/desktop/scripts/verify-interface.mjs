@@ -146,6 +146,16 @@ try {
   await call('runs.delete',{sessionID:recovery.id,id:invalidID});assert.equal((await call('runs.get',{sessionID:recovery.id})).error,'')
   await open(recovery);await editor.fill('Recovered request');await editor.press('Enter');await idle(recovery);assert.ok((await engine('/session/'+recovery.id+'/message')).some(row=>row.info.role==='assistant'))
   check('Missing attachment fails before inference, stops waiting, preserves recovery and allows a clean subsequent request')
+  const sourcePath=join(data,'QA inspection.md'),source='BEGIN SOURCE\n'+('Synthetic source é 😀.\n').repeat(3000)+'END SOURCE'
+  await writeFile(sourcePath,source)
+  const firstPart=await bridge('inspect_artifact',{path:sourcePath},recovery.id)
+  assert.equal(firstPart.format,'json');assert.equal(firstPart.part,0);assert.ok(firstPart.total>1)
+  await writeFile(sourcePath,'Changed after first inspection')
+  const parts=[firstPart.text]
+  for(let part=firstPart.next;part!==null;){const value=await bridge('inspect_artifact',{path:sourcePath,source_id:firstPart.source_id,part},recovery.id);assert.equal(value.part,part);assert.equal(value.source_id,firstPart.source_id);parts.push(value.text);part=value.next}
+  assert.equal(JSON.parse(parts.join('')).text,source)
+  const refreshed=await bridge('inspect_artifact',{path:sourcePath},recovery.id);assert.equal(refreshed.text,'Changed after first inspection')
+  check('Host inspection returns bounded source parts, preserves the original snapshot and refreshes changed files explicitly')
   await page.screenshot({path:root+'/.tools/qa/results/'+tag+'.png'})
   assert.equal(report.errors.length,0,report.errors.join('\n'))
 } catch(error) { report.failure=String(error);console.error('FAIL',String(error));if(page){console.log((await page.locator('body').innerText()).slice(0,1800));await page.screenshot({path:root+'/.tools/qa/results/'+tag+'-failure.png'})}process.exitCode=1 }

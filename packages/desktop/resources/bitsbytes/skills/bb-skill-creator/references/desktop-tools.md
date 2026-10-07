@@ -1,5 +1,5 @@
 # Local artifact tools
-- inspect_artifact(path): inspect the existing source/template.
+- inspect_artifact(path, source_id?, part=0): inspect the existing source/template. Small sources return structured data. Large sources return JSON text parts; reuse the returned path/source_id and read next until null, then concatenate text in part order for the complete inspection. The snapshot stays stable if the original changes. Start a fresh inspection without source_id to read a changed file. Read every part before claiming to review the whole source.
 - create_artifact(spec, job_id?, revision?): new file; returns artifact IDs and verified paths.
 - run_artifact_script(code, files, job_id?, revision?): managed Python; cwd is a durable job folder. Every output filename belongs in files. This is not an OS security sandbox.
 - publish_artifact(path or paths): validate and publish files created by other tools. Use the same path for corrections to retain the tab identity.
