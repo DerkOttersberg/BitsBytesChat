@@ -60,6 +60,29 @@ integration("oversized output fails instead of reporting a truncated successful 
   expect((await f.runtime.script("print('ready again')", f.root)).output.trim()).toBe("ready again")
 })
 
+integration("Stop releases inherited output pipes after the helper starts a child", async () => {
+  const f = await fixture(), controller = new AbortController(), marker = join(f.root, "child-started")
+  const child = "import time; time.sleep(3)"
+  const pending = f.runtime.script(`import pathlib, subprocess, sys\nsubprocess.Popen([sys.executable, '-c', ${JSON.stringify(child)}], stdout=sys.stdout, stderr=sys.stderr)\npathlib.Path(${JSON.stringify(marker)}).write_text('started')`, f.root, controller.signal)
+  const started = Date.now()
+  while (!(await readdir(f.root)).includes("child-started")) {
+    if (Date.now() - started > 5000) throw new Error("Helper did not start")
+    await Bun.sleep(20)
+  }
+  try {
+    const stopped = Date.now()
+    controller.abort()
+    await expect(pending).rejects.toThrow("bb.error.interrupted")
+    expect(Date.now() - stopped).toBeLessThan(1000)
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(0)
+    expect((await f.runtime.script("print('recovered')", f.root)).output.trim()).toBe("recovered")
+  } finally {
+    // The short-lived fixture child exits independently; cancellation only owns
+    // the helper and its pipes, never an unrelated Office/user process.
+    await Bun.sleep(Math.max(0, 3500 - (Date.now() - started)))
+  }
+})
+
 integration("a failing helper retains the end of long diagnostics", async () => {
   const f = await fixture()
   await expect(f.runtime.script("import sys, time\nfor i in range(2000):\n sys.stderr.write('x' * 100)\n sys.stderr.flush()\n time.sleep(0.0002)\nsys.stderr.write('\\nFINAL DIAGNOSTIC')\nsys.exit(1)", f.root)).rejects.toThrow("FINAL DIAGNOSTIC")

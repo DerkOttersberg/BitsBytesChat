@@ -1,4 +1,4 @@
-# Interface research and implementation — 0.3.0
+# Interface research and implementation
 
 ## Reliability follow-up — 7 October 2026
 
@@ -9,6 +9,10 @@ The phone remains a control surface for the same Windows engine. Its recovery ch
 Long histories also matter during background queue control. The host previously reread the entire transcript on every busy poll. It now uses status-only reads while a never-sent normal request waits, retaining full history for steering, uncertain admission/retry reconciliation and Goal evidence. A local 128-message comparison removes 20 history downloads per 20 busy polls in both engine protocols; idle completion still retrieves the complete history. The performance figures and their scope are recorded in `VERIFICATION.md`.
 
 The same principle now applies to document tools: a long source should remain available without requiring one oversized tool response. Large inspections produce numbered parts from a saved snapshot, while ordinary templates keep their structured inspection. Tests verify exact reconstruction and stable source identity across later tool calls. The actual engine/MCP fixture exercises this under Ask access. This improves source handling; it does not imply that a model has read parts it never requested or gained a larger context window.
+
+Intervention also needs a clear failure contract. Actual storage-fault checks reproduced Stop leaving a provider connected and rejected saves later admitting work automatically. Stop now attempts interruption despite its save error, while failed durable writes pause automatic work and retain their error. Explicit Resume remains required. Earlier uncertain delivery timestamps survive a stopped retry so engine reconciliation can find the original admission.
+
+Review should keep the source the user selected. Historical Plan review now survives unrelated run updates; Revert restores that revision and Save creates a new one. Plan/Goal reads preserve current content after a failed or delayed response. Their compact read model omits unrelated frozen prompts while full queue editing and recovery stay available. Saved layouts, draft images and Plan/Goal metadata are validated before reaching the interface; damaged originals remain recoverable. These are locally verified usability and recovery choices, not claims of private reference implementation parity.
 
 ## Morning review — 7 October 2026
 

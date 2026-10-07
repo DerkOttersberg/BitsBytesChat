@@ -41,7 +41,14 @@ export class BBArtifactRuntime {
       const child = spawn(this.python, args, { windowsHide: true, cwd, env: { ...process.env, PYTHONUTF8: "1", MPLBACKEND: "Agg", BITSBYTES_DATA: this.root }, stdio: "pipe" })
       const output: Buffer[] = []
       let bytes = 0, diagnostic = Buffer.alloc(0), failure: Error | undefined
-      const fail = (error: Error) => { failure ??= error; if (child.pid && !child.killed) child.kill() }
+      const fail = (error: Error) => {
+        if (failure) return
+        failure = error
+        if (child.pid && !child.killed) child.kill()
+        // A descendant can inherit output handles after the helper exits. Stop
+        // and deadlines release our pipes instead of waiting for that descendant.
+        child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy()
+      }
       const timer = setTimeout(() => fail(new Error("bb.error.previewTimeout")), 180000)
       const abort = () => fail(new Error("bb.error.interrupted"))
       signal?.addEventListener("abort", abort, { once: true })
