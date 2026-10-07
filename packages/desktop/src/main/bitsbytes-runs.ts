@@ -282,9 +282,28 @@ function recoverChatRun(id: string, value: unknown): ChatRun | undefined {
       && ["pending", "sending", "uncertain", "failed"].includes(item.status)
       && item.prompt?.sessionID === id && item.prompt.id === item.id
       && typeof item.prompt.text === "string" && typeof item.prompt.directory === "string")
-  const plan = chat.plan && typeof chat.plan.text === "string" && Array.isArray(chat.plan.versions)
-    && chat.plan.versions.every(version => version && Number.isInteger(version.revision) && typeof version.text === "string") ? chat.plan : undefined
-  const goal = chat.goal && typeof chat.goal.objective === "string"
-    && ["active", "paused", "blocked", "usageLimited", "budgetLimited", "complete"].includes(chat.goal.status) ? chat.goal : undefined
+  const plan = validPlan(chat.plan) ? chat.plan : undefined
+  const goal = validGoal(chat.goal) ? chat.goal : undefined
   return { ...chat, queue, plan, goal }
+}
+
+function validPlan(value: unknown): value is Plan {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const plan = value as Plan
+  return typeof plan.id === "string" && Boolean(plan.id) && typeof plan.text === "string"
+    && Number.isInteger(plan.revision) && plan.revision > 0 && Array.isArray(plan.versions) && plan.versions.length > 0
+    && plan.versions.every(version => version && Number.isInteger(version.revision) && version.revision > 0 && version.revision <= plan.revision && typeof version.text === "string")
+    && new Set(plan.versions.map(version => version.revision)).size === plan.versions.length
+    && plan.versions.some(version => version.revision === plan.revision && version.text === plan.text)
+}
+
+function validGoal(value: unknown): value is Goal {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const goal = value as Goal
+  return typeof goal.id === "string" && Boolean(goal.id)
+    && (["objective", "reason", "evidence"] as const).every(field => typeof goal[field] === "string")
+    && ["active", "paused", "blocked", "usageLimited", "budgetLimited", "complete"].includes(goal.status)
+    && (["started", "elapsed", "tokens", "continuations"] as const).every(field => Number.isFinite(goal[field]) && goal[field] >= 0)
+    && (["budget", "baseline"] as const).every(field => goal[field] === undefined || (Number.isFinite(goal[field]) && goal[field]! >= 0))
+    && (["lastTurn", "firstID", "progress"] as const).every(field => goal[field] === undefined || typeof goal[field] === "string")
 }

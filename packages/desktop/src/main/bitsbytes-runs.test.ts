@@ -433,6 +433,42 @@ test.each(["queue", "plan", "goal", "identity"])("one damaged %s record preserve
   expect(await readFile(join(f.folder, backup), "utf8")).toBe(source)
 })
 
+test.each([
+  { kind: "goal", field: "evidence", value: { damaged: true } },
+  { kind: "goal", field: "reason", value: { damaged: true } },
+  { kind: "goal", field: "tokens", value: "0" },
+  { kind: "goal", field: "budget", value: { damaged: true } },
+  { kind: "goal", field: "started", value: null },
+  { kind: "plan", field: "revision", value: "1" },
+  { kind: "plan", field: "text", value: "Conflicts with immutable history" },
+  { kind: "plan", field: "id", value: null },
+  { kind: "plan", field: "versions", value: [] },
+  { kind: "plan", field: "versions", value: [{ revision: 1, text: "Keep the verified plan" }, { revision: 1, text: "Duplicate revision" }] },
+])("damaged $kind.$field cannot reach panels or future saves", async damaged => {
+  const f = await fixture()
+  f.runs.close()
+  await f.runs.call("stop", { sessionID: "ses_test" })
+  await f.runs.call("plan", { sessionID: "ses_test", text: "Keep the verified plan" })
+  await f.runs.call("goal-draft", { sessionID: "ses_test", enabled: true })
+  await f.runs.call("admit", { prompt: f.prompt("msg_metadata", "Keep this exact frozen source 🌿") })
+  const stored = JSON.parse(await readFile(join(f.folder, "chat-runs.json"), "utf8"))
+  const original = structuredClone(stored.ses_test)
+  stored.ses_test[damaged.kind][damaged.field] = damaged.value
+  const source = JSON.stringify(stored)
+  await writeFile(join(f.folder, "chat-runs.json"), source)
+  const restored = new BBRuns(f.folder, async () => ({ busy: false, messages: [] }), async () => { throw new Error("Recovery must stay paused") }, () => undefined)
+  fixtures.push({ runs: restored, folder: f.folder }); await restored.start()
+  const chat = restored.get("ses_test")
+  expect(chat.queue).toEqual(original.queue)
+  expect(chat.paused).toBe(true)
+  expect(chat[damaged.kind as "goal" | "plan"]).toBeUndefined()
+  if (damaged.kind === "goal") expect(chat.plan).toEqual(original.plan)
+  if (damaged.kind === "plan") expect(chat.goal).toMatchObject({ objective: original.goal.objective, status: "paused" })
+  const backup = (await readdir(f.folder)).find(name => name.startsWith("chat-runs-recovery-"))
+  expect(backup).toBeDefined()
+  expect(await readFile(join(f.folder, backup!), "utf8")).toBe(source)
+})
+
 test("a valid journal is retained without creating a repair backup", async () => {
   const f = await fixture()
   await f.runs.call("admit", { prompt: f.prompt("msg_valid", "Keep this valid request") })
