@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto"
-import type { Inspection, InspectionOptions, RunPrompt } from "./bitsbytes-runs"
+import { mkdir, writeFile } from "node:fs/promises"
+import { join } from "node:path"
+import { bbt } from "../bitsbytes/copy"
+import type { DispatchResult, Inspection, InspectionOptions, RunPrompt } from "./bitsbytes-runs"
 import type { ServerReadyData } from "../preload/types"
 
 // Metadata is safe to poll again after a stalled read. Mutations can already
@@ -157,5 +160,117 @@ export async function inspectEngine(
         : undefined,
       error: row.error ? JSON.stringify(row.error) : undefined,
     })),
+  }
+}
+
+export async function dispatchEngine(
+  server: ServerReadyData,
+  prompt: RunPrompt,
+  options: {
+    protocol?: "v1" | "v2"
+    contextRoot: string
+    resolveAttachment: (uri: string) => Promise<unknown>
+    signal?: AbortSignal
+  },
+): Promise<DispatchResult> {
+  let attempted = false
+  try {
+    if (options.signal?.aborted) return "not-sent"
+    // Source preparation can outlast Stop. Check the same cancellation signal
+    // before admission, then preserve uncertainty if its POST has begun.
+    const attachments = (prompt.legacyParts ?? []) as { type: string; url?: string }[]
+    const sources = [
+      ...attachments.filter((part) => part.type === "file").map((part) => part.url),
+      ...(prompt.files ?? []).map((file) => file.uri),
+    ]
+    for (const uri of new Set(sources)) {
+      if (options.signal?.aborted) return "not-sent"
+      if (uri?.startsWith("bitsbytes://")) await options.resolveAttachment(uri)
+    }
+    if (options.signal?.aborted) return "not-sent"
+    if (options.protocol !== "v2") {
+      attempted = true
+      await engineRequest(
+        server,
+        `/session/${encodeURIComponent(prompt.sessionID)}/prompt_async`,
+        {
+          method: "POST",
+          signal: options.signal,
+          body: JSON.stringify({
+            messageID: prompt.id,
+            agent: prompt.agent,
+            model: prompt.model,
+            variant: prompt.variant,
+            parts: prompt.legacyParts ?? [{ type: "text", text: prompt.text }],
+          }),
+        },
+        prompt.directory,
+      )
+      return
+    }
+    const path = `/api/session/${encodeURIComponent(prompt.sessionID)}`
+    if (prompt.agent)
+      await engineRequest(
+        server,
+        path + "/agent",
+        { method: "POST", signal: options.signal, body: JSON.stringify({ agent: prompt.agent }) },
+        prompt.directory,
+      )
+    if (options.signal?.aborted) return "not-sent"
+    if (prompt.model)
+      await engineRequest(
+        server,
+        path + "/model",
+        {
+          method: "POST",
+          signal: options.signal,
+          body: JSON.stringify({
+            model: { id: prompt.model.modelID, providerID: prompt.model.providerID, variant: prompt.variant },
+          }),
+        },
+        prompt.directory,
+      )
+    if (options.signal?.aborted) return "not-sent"
+    const parts = (prompt.legacyParts ?? []) as { type: string; text?: string; synthetic?: boolean }[]
+    const context = parts
+      .filter((part) => part.type === "text" && part.synthetic)
+      .map((part) => part.text ?? "")
+      .join("\n")
+    const files = [...(prompt.files ?? [])]
+    if (context) {
+      if (!/^[a-zA-Z0-9_-]+$/.test(prompt.id)) throw new Error("bb.error.invalidRequest")
+      await mkdir(options.contextRoot, { recursive: true })
+      if (options.signal?.aborted) return "not-sent"
+      await writeFile(join(options.contextRoot, prompt.id + ".txt"), context)
+      files.push({
+        uri: "bitsbytes://run/" + encodeURIComponent(prompt.id),
+        name: bbt(prompt.mode === "plan" ? "plan" : "runContext"),
+      })
+    }
+    if (options.signal?.aborted) return "not-sent"
+    const visible = context
+      ? parts
+          .filter((part) => part.type === "text" && !part.synthetic)
+          .map((part) => part.text ?? "")
+          .join("\n")
+      : prompt.text
+    attempted = true
+    await engineRequest(
+      server,
+      path + "/prompt",
+      {
+        method: "POST",
+        signal: options.signal,
+        body: JSON.stringify({
+          id: prompt.id,
+          prompt: { text: visible, files, agents: prompt.agents },
+          delivery: prompt.delivery ?? "queue",
+        }),
+      },
+      prompt.directory,
+    )
+  } catch (error) {
+    if (options.signal?.aborted && !attempted) return "not-sent"
+    throw error
   }
 }

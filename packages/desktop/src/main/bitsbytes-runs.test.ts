@@ -103,6 +103,31 @@ test("Stop while admission is being journalled prevents dispatch and clears awai
   expect(saved.queue[0].status).toBe("pending")
 })
 
+test("Stop cancels only its chat's in-progress prompt preparation", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "bb-runs-test-"))
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
+  const signals = new Map<string, AbortSignal | undefined>()
+  const runs = new BBRuns(folder, async () => ({ busy: false, messages: [] }), async (prompt, signal?: AbortSignal) => {
+    signals.set(prompt.sessionID, signal)
+    if (signals.size === 2) entered.resolve()
+    await release.promise
+  }, () => undefined)
+  fixtures.push({ runs, folder }); await runs.start(); runs.close()
+  for (const id of ["ses_a", "ses_b"]) runs.get(id).paused = true
+  await Promise.all(["ses_a", "ses_b"].map(sessionID => runs.call("admit", { prompt: { sessionID, directory: folder, id: "msg_" + sessionID, text: "Wait during preparation" } })))
+  for (const id of ["ses_a", "ses_b"]) runs.get(id).paused = false
+  const pumping = Promise.all([runs.pump("ses_a"), runs.pump("ses_b")])
+  try {
+    await entered.promise
+    await runs.call("stop", { sessionID: "ses_a" })
+    expect(signals.get("ses_a")?.aborted).toBe(true)
+    expect(signals.get("ses_b")?.aborted).toBe(false)
+  } finally {
+    release.resolve()
+    await pumping
+  }
+})
+
 test.each(["replace", "reorder"])("queue %s during engine inspection invalidates the stale candidate", async action => {
   const folder = await mkdtemp(join(tmpdir(), "bb-runs-test-"))
   const entered = Promise.withResolvers<void>()

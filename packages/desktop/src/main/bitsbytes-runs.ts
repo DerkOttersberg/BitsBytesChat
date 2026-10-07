@@ -16,14 +16,16 @@ export type Plan = { id: string; revision: number; text: string; versions: { rev
 export type ChatRun = { sessionID: string; mode: "normal" | "plan"; goalDraft: boolean; replaceGoal?: boolean; paused: boolean; queue: QueuedInput[]; goal?: Goal; plan?: Plan; last?: RunPrompt; awaiting?: boolean; error: string }
 export type Inspection = { busy: boolean; messages: { id: string; text: string; tokens: number; tools: number; progress?: string; assistant?: boolean; error?: string }[] }
 export type InspectionOptions = { readBusyMessages?: boolean }
+export type DispatchResult = void | "not-sent"
 
 // The Electron engine host owns this journal, independently of renderer lifetime.
 export class BBRuns {
   chats: Record<string, ChatRun> = Object.create(null)
   private saving = Promise.resolve()
   private active = new Set<string>()
+  private admissions = new Map<string, AbortController>()
   private timer?: ReturnType<typeof setInterval>
-  constructor(private root: string, private inspect: (prompt: RunPrompt, options?: InspectionOptions) => Promise<Inspection>, private dispatch: (prompt: RunPrompt) => Promise<void>, private changed: (sessionID: string) => void) {}
+  constructor(private root: string, private inspect: (prompt: RunPrompt, options?: InspectionOptions) => Promise<Inspection>, private dispatch: (prompt: RunPrompt, signal?: AbortSignal) => Promise<DispatchResult>, private changed: (sessionID: string) => void) {}
   async start() {
     await mkdir(this.root, { recursive: true })
     const source = await readFile(join(this.root, "chat-runs.json"), "utf8").catch(() => "{}")
@@ -118,7 +120,7 @@ export class BBRuns {
       if (!Array.isArray(ids) || new Set(ids).size !== chat.queue.length || chat.queue.some(item => !ids.includes(item.id) || item.status === "sending")) throw new Error("bb.error.deliveryConflict")
       chat.queue.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id))
     }
-    if (action === "stop") { chat.paused = true; if (chat.goal?.status === "active") { chat.goal.elapsed = Date.now() - chat.goal.started; chat.goal.status = "paused"; chat.goal.reason = "stopped" } }
+    if (action === "stop") { chat.paused = true; this.admissions.get(chat.sessionID)?.abort(); if (chat.goal?.status === "active") { chat.goal.elapsed = Date.now() - chat.goal.started; chat.goal.status = "paused"; chat.goal.reason = "stopped" } }
     if (action === "resume") { chat.paused = false; for (const entry of chat.queue) if (entry.status === "failed") entry.status = "pending" }
     if (action === "goal-pause" && chat.goal) { chat.goal.elapsed = Date.now() - chat.goal.started; chat.goal.status = "paused" }
     if (action === "goal-resume" && chat.goal) { if (chat.goal.budget && chat.goal.tokens >= chat.goal.budget) throw new Error("bb.error.goalBudget"); chat.goal.status = "active"; chat.goal.reason = ""; chat.goal.continuations = 0; chat.paused = false }
@@ -207,16 +209,22 @@ export class BBRuns {
         candidate.status = "pending"; candidate.sentAt = undefined; chat.awaiting = false
         await this.save(chat); return
       }
-      await this.dispatch(candidate.prompt)
+      const admission = new AbortController()
+      this.admissions.set(id, admission)
+      if (await this.dispatch(candidate.prompt, admission.signal) === "not-sent") {
+        candidate.status = "pending"; candidate.sentAt = undefined; chat.awaiting = false
+        await this.save(chat); return
+      }
       // Keep the durable row until the engine exposes its stable message ID.
       await this.save(chat)
     } catch (error) {
+      const failure = this.admissions.get(id)?.signal.aborted ? "bb.error.deliveryUnknown" : String(error)
       const item = chat.queue.find(row => row.status === "sending")
-      if (item) { item.status = "uncertain"; item.error = String(error); chat.awaiting = false }
-      chat.error = String(error)
+      if (item) { item.status = "uncertain"; item.error = failure; chat.awaiting = false }
+      chat.error = failure
       if (chat.goal?.status === "active" && /429|quota|rate.?limit/i.test(chat.error)) { chat.goal.status = "usageLimited"; chat.goal.reason = chat.error }
       await this.save(chat)
-    } finally { this.active.delete(id) }
+    } finally { this.admissions.delete(id); this.active.delete(id) }
   }
 }
 

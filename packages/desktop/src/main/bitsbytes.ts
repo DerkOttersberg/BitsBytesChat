@@ -15,7 +15,7 @@ import type { BBEvent, Job, Settings, Skill, State, Model } from "../bitsbytes/t
 import { BBProvider } from "./bitsbytes-provider"
 import { modelConfiguration } from "./bitsbytes-models"
 import { repairPythonHome } from "./bitsbytes-runtime"
-import { engineRequest, inspectEngine } from "./bitsbytes-engine"
+import { dispatchEngine, engineRequest, inspectEngine } from "./bitsbytes-engine"
 import { readState, stateRecord } from "./bitsbytes-state"
 import { bbt } from "../bitsbytes/copy"
 import type { ServerReadyData } from "../preload/types"
@@ -54,7 +54,7 @@ export class BitsBytes {
   private pending = new Map<string, Promise<unknown>>()
   artifacts = new BBArtifacts(this.root, this.python, this.assets, (artifact, published) => this.emit({ type: "artifact", artifact, published }))
   browser = new BBBrowser(event => this.emit(event))
-  runs = new BBRuns(this.root, (prompt, options) => this.inspectRun(prompt, options), prompt => this.dispatchRun(prompt), sessionID => this.emit({ type: "run", sessionID }))
+  runs = new BBRuns(this.root, (prompt, options) => this.inspectRun(prompt, options), (prompt, signal) => this.dispatchRun(prompt, signal), sessionID => this.emit({ type: "run", sessionID }))
   mobile = new BBMobile(this, () => this.emit({ type: "refresh" }), value => safeStorage.encryptString(value).toString("base64"), value => safeStorage.decryptString(Buffer.from(value, "base64")))
   private protocols = new Map<string, "v1" | "v2">()
   private transcriptReads = new Map<string, Set<number>>()
@@ -423,31 +423,8 @@ export class BitsBytes {
   private async inspectRun(prompt: RunPrompt, options?: InspectionOptions): Promise<Inspection> {
     return inspectEngine(await this.engine(), prompt, this.protocols, options)
   }
-  private async dispatchRun(prompt: RunPrompt) {
-    // Resolve app-owned sources before the asynchronous engine acknowledgement.
-    // Otherwise a missing revision can fail before any assistant message exists,
-    // leaving the host waiting for a response that will never arrive.
-    const attachments = (prompt.legacyParts ?? []) as { type: string; url?: string }[]
-    const sources = [...attachments.filter(part => part.type === "file").map(part => part.url), ...(prompt.files ?? []).map(file => file.uri)]
-    for (const uri of new Set(sources)) if (uri?.startsWith("bitsbytes://")) await this.resolveAttachment(uri, prompt.sessionID)
-    if (this.protocols.get(prompt.sessionID) !== "v2") {
-      await this.engineFetch(`/session/${encodeURIComponent(prompt.sessionID)}/prompt_async`, { method: "POST", body: JSON.stringify({ messageID: prompt.id, agent: prompt.agent, model: prompt.model, variant: prompt.variant, parts: prompt.legacyParts ?? [{ type: "text", text: prompt.text }] }) }, prompt.directory)
-      return
-    }
-    const path = `/api/session/${encodeURIComponent(prompt.sessionID)}`
-    // The V2 engine records selection changes and the durable prompt in the native protocol.
-    if (prompt.agent) await this.engineFetch(path + "/agent", { method: "POST", body: JSON.stringify({ agent: prompt.agent }) }, prompt.directory)
-    if (prompt.model) await this.engineFetch(path + "/model", { method: "POST", body: JSON.stringify({ model: { id: prompt.model.modelID, providerID: prompt.model.providerID, variant: prompt.variant } }) }, prompt.directory)
-    const parts = (prompt.legacyParts ?? []) as { type: string; text?: string; synthetic?: boolean }[]
-    const context = parts.filter(part => part.type === "text" && part.synthetic).map(part => part.text ?? "").join("\n")
-    const files = [...(prompt.files ?? [])]
-    if (context) {
-      await mkdir(join(this.root, "run-context"), { recursive: true })
-      await writeFile(join(this.root, "run-context", prompt.id + ".txt"), context)
-      files.push({ uri: "bitsbytes://run/" + encodeURIComponent(prompt.id), name: bbt(prompt.mode === "plan" ? "plan" : "runContext") })
-    }
-    const visible = context ? parts.filter(part => part.type === "text" && !part.synthetic).map(part => part.text ?? "").join("\n") : prompt.text
-    await this.engineFetch(path + "/prompt", { method: "POST", body: JSON.stringify({ id: prompt.id, prompt: { text: visible, files, agents: prompt.agents }, delivery: prompt.delivery ?? "queue" }) }, prompt.directory)
+  private async dispatchRun(prompt: RunPrompt, signal?: AbortSignal) {
+    return dispatchEngine(await this.engine(), prompt, { protocol: this.protocols.get(prompt.sessionID), contextRoot: join(this.root, "run-context"), resolveAttachment: uri => this.resolveAttachment(uri, prompt.sessionID), signal })
   }
   private async runCall(action: string, args: Record<string, unknown>) {
     if (action === "permission") {
