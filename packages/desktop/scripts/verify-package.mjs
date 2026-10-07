@@ -33,5 +33,5 @@ for (const path of await files(resources)) {
 }
 const installer = await readFile(`dist/${version}/BitsBytesChat-win-x64.exe`)
 const report = { version, matchedFiles: matched.length, installerBytes: installer.length, installerSHA256: hash(installer) }
-await writeFile(join(root, ".tools/qa/results/package-033.json"), JSON.stringify(report, null, 2))
+await writeFile(join(root, ".tools/qa/results/package-" + version.replaceAll(".", "") + ".json"), JSON.stringify(report, null, 2))
 console.log(JSON.stringify(report))

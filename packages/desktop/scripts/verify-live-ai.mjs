@@ -36,7 +36,7 @@ if (longSource) {
   await writeFile(join(folder, "job.json"), JSON.stringify({ id: transcriptID, title: "Long synthetic source QA", created: Date.now() / 1000,
     updated: Date.now() / 1000, status: "transcribed", duration: 3900, chunks: [], segments: [], transcript: sourceText, engine: "parakeet", skill: "", error: "", recording: false }))
 }
-const tag = liveQueue ? "live-queue-033" : longSource ? "live-long-source-033" : process.env.BB_LIVE_CONTROLS === "1" ? "live-controls-033" : "live-ai-033"
+const tag = process.env.BB_LIVE_REPORT || (liveQueue ? "live-queue-033" : longSource ? "live-long-source-033" : process.env.BB_LIVE_CONTROLS === "1" ? "live-controls-033" : "live-ai-033")
 await writeFile(join(data, "config/opencode/opencode.json"), JSON.stringify({
   model: "bitsbytes-chatgpt/" + model, small_model: "bitsbytes-chatgpt/" + model,
   agent: { build: { steps: longSource ? 16 : 8 }, plan: { steps: 6 } },

@@ -1,4 +1,18 @@
-# Bits & Bytes Chat 0.3.3 — verification
+# Bits & Bytes Chat 0.3.4 — verification
+
+## 0.3.4 final recovery patch
+
+The final release adds visible recovery for an idle engine acknowledgement that never appears in history. After 30 seconds, the durable request becomes uncertain, the indefinite wait clears, and no request is automatically replayed. A late acknowledgement reconciles by the original message ID. The regression verifies the retained request, error, absence of duplicate dispatch and late reconciliation. Final scoped desktop tests total **32 passes / 169 assertions**, with no failures or skips. Desktop/app type checking passes. An older test's reconciliation check was changed to wait for the pending journal write instead of racing cleanup.
+
+Simultaneous testing exposed two retained terminal panels both creating an initial PTY before either response arrived. Automatic creation now shares one pending guard per workspace; intentional New terminal actions retain separate numbered terminals, including concurrent requests. The interface regression delays PTY creation to reproduce the original race. Historical preview Retry also clears the stale cached reference before rendering its immutable source. Real Word tests remove and corrupt the old PDF cache, regenerate it, verify original PDF text and keep the latest preview unchanged.
+
+The 0.3.3 checks below remain evidence for unchanged recording, transcription, skills and preview behavior. An additional 21.46-second synthetic spoken recording passed real CPU Parakeet, manual compact attachment, full transcript viewing and unsent draft preservation. It uses the installed English Windows voice and makes no Dutch accuracy claim. Six final 0.3.3 launcher checks passed against explicitly isolated profiles; copied encrypted QA credential/key files were preserved outside OneDrive. The final patch uses a new version directory so an already-running older app is not overwritten or restarted during packaging.
+
+The final packaged 0.3.4 passes **12 desktop checks**, including the delayed single-terminal regression, and **14 paired phone checks**, including actual CPU speech, full recognized-source delivery on explicit Send, compact history, preview and revocation. All six final CMD checks pass for 0.3.4. Live GPT-5.6 Luna queue/steer/stop/resume checks also pass on 0.3.4. Reports: `release-034-recovery-complete.json`, `mobile-034-recovery-final.json`, `launcher-034.json`, `live-queue-034-final.json`.
+
+Two interleaved production composer comparisons against 0.3.3 retained every sample. The first measured medians 13.9 ms / 17.6 ms; confirmation measured 14 ms / 14 ms. Across both series (six launches and 30 samples per build), medians are **13.9 ms / 14.45 ms** for the same 55,000-character input. This does not establish a composer speedup; the variation and initial slower run are retained in `composer-controlled-034.json`, `composer-controlled-034-confirmation.json` and the combined report.
+
+Final installer: `packages/desktop/dist/0.3.4/BitsBytesChat-win-x64.exe`, **177,780,887 bytes**, SHA-256 `1b3673a92ca37bad983c354e1b6f34de228c5822635bb53382418ae1aa455b51`. All **1,833 compiled/resource files** match the packaged build. Both launcher aliases select this version. No running older user app was restarted or overwritten. The build remains unsigned; physical iPhone recording and deferred Dutch accuracy checks remain as described below.
 
 ## 0.3.3 morning verification — 7 October 2026
 

@@ -168,6 +168,8 @@ function createWorkspaceTerminalSession(
     focus: undefined as { request: number; id?: string; pending: boolean } | undefined,
   })
   const focus = { request: 0 }
+  let automaticPending = false
+  const pendingNumbers = new Set<number>()
 
   const requestFocus = (id?: string, pending = false) => {
     focus.request += 1
@@ -212,6 +214,7 @@ function createWorkspaceTerminalSession(
         return [parsed]
       }),
     )
+    for (const number of pendingNumbers) existingTitleNumbers.add(number)
 
     return (
       Array.from({ length: existingTitleNumbers.size + 1 }, (_, index) => index + 1).find(
@@ -321,8 +324,13 @@ function createWorkspaceTerminalSession(
         setStore("all", [])
       })
     },
-    new(options?: { focus?: boolean }) {
+    new(options?: { focus?: boolean; auto?: boolean }) {
+      // Multiple visible/retained panels share this workspace. Their initial
+      // asynchronous creation must resolve to one terminal, even on a slow host.
+      if (options?.auto && (store.all.length || automaticPending)) return
+      if (options?.auto) automaticPending = true
       const nextNumber = pickNextTerminalNumber()
+      pendingNumbers.add(nextNumber)
       const focusRequest = options?.focus ? requestFocus(undefined, true) : undefined
 
       const doCreate = async () => {
@@ -354,6 +362,10 @@ function createWorkspaceTerminalSession(
         .catch((error: unknown) => {
           if (focusRequest !== undefined) cancelFocus(focusRequest)
           console.error("Failed to create terminal", error)
+        })
+        .finally(() => {
+          pendingNumbers.delete(nextNumber)
+          if (options?.auto) automaticPending = false
         })
     },
     update(pty: Partial<LocalPTY> & { id: string }) {
@@ -526,7 +538,7 @@ export const { use: useTerminal, provider: TerminalProvider } = createSimpleCont
       ready: () => workspace().ready(),
       all: () => workspace().all(),
       active: () => workspace().active(),
-      new: (options?: { focus?: boolean }) => workspace().new(options),
+      new: (options?: { focus?: boolean; auto?: boolean }) => workspace().new(options),
       update: (pty: Partial<LocalPTY> & { id: string }) => workspace().update(pty),
       trim: (id: string) => workspace().trim(id),
       trimAll: () => workspace().trimAll(),

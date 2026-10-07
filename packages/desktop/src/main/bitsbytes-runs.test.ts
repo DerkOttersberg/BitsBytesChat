@@ -34,7 +34,11 @@ test("Steer reaches an active engine and exact uncertain admission reconciles wi
   const f = await fixture(); f.fail.enabled = true
   await f.runs.call("admit", { delivery: "steer", prompt: f.prompt() }); await f.settle()
   expect(f.sent).toHaveLength(1); expect(f.sent[0].delivery).toBe("steer")
-  await f.runs.pump("ses_test")
+  // The dispatch catch persists its uncertainty before releasing the active
+  // pump. Wait for that reconciliation, rather than racing its journal write.
+  for (let i = 0; i < 100 && f.runs.get("ses_test").queue.length; i++) {
+    await f.runs.pump("ses_test"); await new Promise(resolve => setTimeout(resolve, 5))
+  }
   expect(f.runs.get("ses_test").queue).toHaveLength(0); expect(f.sent).toHaveLength(1)
   expect(f.runs.get("ses_test").error).toBe("")
 })
@@ -50,6 +54,27 @@ test("a rejected dispatch stops waiting and retains the request for recovery", a
   expect(runs.get("ses_test").error).toContain("Missing transcript revision")
   await runs.call("delete", { sessionID: "ses_test", id: "msg_rejected" })
   expect(runs.get("ses_test").error).toBe("")
+})
+test("an unprojected idle admission times out visibly without replaying the request", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "bb-runs-test-"))
+  const state: Inspection = { busy: false, messages: [] }
+  const sent: string[] = []
+  const runs = new BBRuns(folder, async () => structuredClone(state), async prompt => { sent.push(prompt.id) }, () => undefined)
+  fixtures.push({ runs, folder }); await runs.start()
+  await runs.call("admit", { prompt: { sessionID: "ses_test", directory: folder, id: "msg_unprojected", text: "Retain this request" } })
+  for (let i = 0; i < 20; i++) { await new Promise(resolve => setTimeout(resolve, 5)); if (runs.get("ses_test").queue[0]?.status === "sending") break }
+  runs.get("ses_test").queue[0].sentAt = Date.now() - 31000
+  await runs.pump("ses_test")
+  expect(runs.get("ses_test").awaiting).toBe(false)
+  expect(runs.get("ses_test").queue[0].status).toBe("uncertain")
+  expect(runs.get("ses_test").error).toBe("bb.error.deliveryUnknown")
+  await runs.pump("ses_test")
+  expect(sent).toEqual(["msg_unprojected"])
+  state.messages.push({ id: "msg_unprojected", text: "Retain this request", tokens: 0, tools: 0 })
+  await runs.pump("ses_test")
+  expect(runs.get("ses_test").queue).toHaveLength(0)
+  expect(runs.get("ses_test").error).toBe("")
+  expect(sent).toEqual(["msg_unprojected"])
 })
 test("edit retains original until save and ordering/delete persist", async () => {
   const f = await fixture()

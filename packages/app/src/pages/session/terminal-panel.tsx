@@ -68,7 +68,7 @@ export function TerminalPanel() {
     }
 
     if (!terminal.ready() || terminal.all().length !== 0 || store.autoCreated) return
-    terminal.new()
+    terminal.new({ auto: true })
     setStore("autoCreated", true)
   })
 

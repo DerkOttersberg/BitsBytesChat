@@ -74,7 +74,11 @@ export class BBArtifacts {
   async retry(id: string, revision?: number) {
     const item = this.items.find(row => row.id === id)
     if (!item) throw new Error("bb.error.invalidDocument")
-    if (revision !== undefined && revision !== item.revision) { await this.read(id, revision); this.changed(item); return item }
+    if (revision !== undefined && revision !== item.revision) {
+      this.version(id, revision)
+      item.history!.find(version => version.revision === revision)!.pdf = ""
+      await this.read(id, revision); this.changed(item); return item
+    }
     item.status = "queued"; item.error = ""; this.changed(item); await this.enqueue(item)
     return item
   }

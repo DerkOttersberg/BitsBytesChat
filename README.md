@@ -4,7 +4,7 @@ This repository contains the custom Windows desktop and phone companion app, bas
 
 See [Bits & Bytes setup](README.BitsBytes.md), [mobile access](MOBILE_ACCESS.md), and [verification notes](VERIFICATION.md).
 
-The current Windows release is **0.3.3**, including direct phone recording. Start either project CMD launcher; both open the same desktop and phone-enabled application. The complete source and upstream history are backed up in the private [DerkOttersberg/BitsBytesChat repository](https://github.com/DerkOttersberg/BitsBytesChat). Credentials, private sessions, recordings, downloaded models and generated build files are excluded from Git. See [release notes](RELEASE_NOTES_0.3.3.md) and [verification results](VERIFICATION.md) for the tested behavior and remaining physical-device checks.
+The current Windows release is **0.3.4**, including direct phone recording. Start either project CMD launcher; both open the same desktop and phone-enabled application. The complete source and upstream history are backed up in the private [DerkOttersberg/BitsBytesChat repository](https://github.com/DerkOttersberg/BitsBytesChat). Credentials, private sessions, recordings, downloaded models and generated build files are excluded from Git. See [release notes](RELEASE_NOTES_0.3.4.md) and [verification results](VERIFICATION.md) for the tested behavior and remaining physical-device checks.
 
 The original OpenCode documentation follows. Its license and attribution are preserved.
 

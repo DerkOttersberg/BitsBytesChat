@@ -2,7 +2,7 @@
   "name": "@opencode-ai/desktop",
   "private": true,
   "description": "Bits & Bytes Chat: local recordings, skills and Word intakes on Windows",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "type": "module",
   "license": "MIT",
   "homepage": "https://opencode.ai",

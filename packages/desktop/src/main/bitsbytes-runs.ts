@@ -161,7 +161,11 @@ export class BBRuns {
       const state = await this.inspect(reference)
       // Admission acknowledgements can precede projected history. Hold the next input until reconciled.
       if (candidate && state.messages.some(row => row.id === candidate.id)) { chat.queue = chat.queue.filter(row => row !== candidate); chat.error = ""; await this.save(chat); return }
-      if (candidate?.status === "sending" && !state.busy && Date.now() - (candidate.sentAt ?? Date.now()) > 30000) { candidate.status = "uncertain"; candidate.error = "bb.error.deliveryUnknown"; await this.save(chat); return }
+      if (candidate?.status === "sending" && !state.busy && Date.now() - (candidate.sentAt ?? Date.now()) > 30000) {
+        candidate.status = "uncertain"; candidate.error = "bb.error.deliveryUnknown"
+        chat.awaiting = false; chat.error = candidate.error
+        await this.save(chat); return
+      }
       if (state.busy && candidate?.delivery !== "steer") return
       const last = state.messages.findLast(row => row.assistant)
       if (!state.busy && chat.awaiting && last && last.id > reference.id) { chat.awaiting = false; await this.save(chat) }

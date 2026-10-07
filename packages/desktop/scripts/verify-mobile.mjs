@@ -7,6 +7,7 @@ import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import assert from "node:assert/strict"
 import { copy } from "../src/bitsbytes/copy.ts"
+import { mobileCopy } from "../src/bitsbytes/mobile-copy.ts"
 
 const root = resolve("../.."),
   qa = join(root, ".tools/mobile")
@@ -314,7 +315,8 @@ try {
     await phone.getByRole("button", { name: "Audio uploads", exact: true }).click()
     if (speech) {
       assert.ok(audioJob.transcript.trim())
-      await phone.locator("#drawer-body").getByRole("button", { name: copy.attach, exact: true }).click()
+      await phone.locator("#drawer-body").getByRole("button", { name: mobileCopy.attach, exact: true }).click()
+      await phone.locator("#attachments .source-chip").waitFor()
       assert.equal(await phone.locator("#attachments .source-chip").count(), 1)
       assert.equal(await phone.locator("#prompt").inputValue(), "Keep this unsent audio draft")
       await phone.locator("#attachments .source-chip").first().click()
@@ -327,6 +329,21 @@ try {
     assert.equal((await engine(`/session/${session.id}/message`)).length, beforeMessages)
     if (await phone.locator("#drawer").isVisible()) await phone.locator("#menu-button").click()
     check(speech ? "Real CPU transcription of synthetic spoken audio attaches one compact chip, opens full text on click, and preserves the draft without sending" : process.env.BB_MOBILE_AUDIO_FILE ? "Complete hour-plus browser recording uploads above 25 MB over paired HTTPS and passes every CPU Parakeet chunk without attaching or sending empty speech" : "Paired HTTPS microphone uploads into real CPU Parakeet; no-speech failure is readable and does not attach or send")
+    if (speech) {
+      await phone.locator("#send").click()
+      await phone.waitForFunction(() => document.querySelector("#attachments").children.length === 0)
+      for (let i = 0; i < 180; i++) {
+        const run = await call("runs.get", { sessionID: session.id })
+        if (!run.queue.length && !run.awaiting) break
+        await wait(300)
+      }
+      const messages = await engine(`/session/${session.id}/message`)
+      assert.ok(messages.some(row => row.parts.some(part => part.type === "file" && part.url?.startsWith("bitsbytes://transcript/"))))
+      const source = JSON.stringify(audioJob.transcript).slice(1, -1)
+      assert.ok(requests.some(request => JSON.stringify(request.messages).includes(source)), "The engine must receive the entire CPU transcript")
+      assert.equal(await phone.locator("#messages").getByText(audioJob.transcript, { exact: true }).count(), 0)
+      check("Explicit Send delivers the complete recognized source to the engine while chat history keeps its transcript compact")
+    }
   }
   const source = join(data, "Mobile preview.docx")
   await promisify(execFile)(
