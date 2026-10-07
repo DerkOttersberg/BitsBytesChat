@@ -15,6 +15,7 @@ export type QueuedInput = { id: string; prompt: RunPrompt; status: "pending" | "
 export type Goal = { id: string; objective: string; status: "active" | "paused" | "blocked" | "usageLimited" | "budgetLimited" | "complete"; reason: string; evidence: string; started: number; elapsed: number; tokens: number; budget?: number; lastTurn?: string; firstID?: string; continuations: number; baseline?: number; progress?: string }
 export type Plan = { id: string; revision: number; text: string; versions: { revision: number; text: string }[] }
 export type ChatRun = { sessionID: string; mode: "normal" | "plan"; goalDraft: boolean; replaceGoal?: boolean; paused: boolean; queue: QueuedInput[]; goal?: Goal; plan?: Plan; last?: RunPrompt; awaiting?: boolean; error: string }
+export type ChatRunPanel = Pick<ChatRun, "goal" | "plan">
 export type Inspection = { busy: boolean; messages: { id: string; text: string; tokens: number; tools: number; progress?: string; assistant?: boolean; error?: string }[] }
 export type InspectionOptions = { readBusyMessages?: boolean }
 export type DispatchResult = void | "not-sent"
@@ -78,6 +79,7 @@ export class BBRuns {
   async call(action: string, args: Record<string, unknown>) {
     const chat = this.get(String(args.sessionID ?? (args.prompt as RunPrompt | undefined)?.sessionID ?? ""))
     if (action === "get") return chat
+    if (action === "panel") return { goal: chat.goal, plan: chat.plan } satisfies ChatRunPanel
     if (action === "promote") {
       const source = this.get(String(args.from))
       chat.mode = source.mode; chat.goalDraft = source.goalDraft; source.goalDraft = false; source.mode = "normal"

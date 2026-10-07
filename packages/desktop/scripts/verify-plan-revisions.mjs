@@ -10,6 +10,7 @@ const { _electron } = createRequire(join(root, ".tools/qa/package.json"))("playw
 const profile = join(root, ".tools/qa/plan-revisions-" + randomUUID()),
   data = join(profile, "BitsBytesChat")
 const observe = process.env.BB_PLAN_OBSERVE === "1"
+const readMethod = process.env.BB_PLAN_READ_METHOD || "runs.panel"
 const report = { checks: [], errors: [], observations: [] }
 const fault = join(profile, "read-fault.json"),
   captured = join(profile, "captured.json"),
@@ -42,7 +43,7 @@ app.getAppPath = () => ${JSON.stringify(desktop)};
 const handle = ipcMain.handle.bind(ipcMain);
 ipcMain.handle = (channel, listener) => handle(channel, async (...args) => {
   const value = await listener(...args);
-  if (channel !== "bitsbytes:call" || args[1] !== "runs.get") return value;
+  if (channel !== "bitsbytes:call" || args[1] !== ${JSON.stringify(readMethod)}) return value;
   const mode = JSON.parse(readFileSync(${JSON.stringify(fault)}, "utf8"));
   if (mode.sessionID !== args[2]?.sessionID) return value;
   if (mode.error) throw new Error("QA temporary run read failure");
@@ -158,6 +159,53 @@ try {
     assert.equal(await versions.inputValue(), "4")
     await panel.getByText("Latest plan after the held read", { exact: true }).waitFor()
     report.checks.push("A released older IPC snapshot cannot replace a newer Plan read")
+    await call("stop")
+    const source = "Frozen projection source 🌿 ".repeat(6000)
+    const prompt = {
+      sessionID: session.id,
+      directory,
+      id: "msg_panel_projection",
+      text: source,
+      legacyParts: [{ type: "text", text: source }],
+      draft: { attachments: [{ source }] },
+      model: { providerID: "plan-qa", modelID: "fixture" },
+    }
+    await call("admit", { prompt })
+    await call("prepare", { prompt })
+    const journal = await readFile(join(data, "chat-runs.json"), "utf8")
+    report.projection = await page.evaluate(
+      async ({ sessionID, source }) => {
+        const samples = { get: [], panel: [] },
+          bytes = {},
+          encoder = new TextEncoder()
+        for (let index = -1; index < 20; index++) {
+          for (const action of index % 2 === 0 ? ["get", "panel"] : ["panel", "get"]) {
+            const started = performance.now()
+            const value = await window.api.bitsbytes.call("runs." + action, { sessionID })
+            const elapsed = performance.now() - started
+            if (index >= 0) samples[action].push(elapsed)
+            bytes[action] = encoder.encode(JSON.stringify(value)).length
+            if (action === "get" && (value.queue[0]?.prompt.text !== source || value.last?.text !== source))
+              throw new Error("Full recovery read lost its frozen source")
+            if (
+              action === "panel" &&
+              (Object.keys(value).some((key) => key !== "goal" && key !== "plan") ||
+                value.plan?.revision !== 4 ||
+                value.plan?.versions.length !== 4)
+            )
+              throw new Error("Panel projection lost revisions or included queue data")
+          }
+        }
+        return { samples, bytes }
+      },
+      { sessionID: session.id, source },
+    )
+    assert.ok(report.projection.bytes.get > 1000000)
+    assert.ok(report.projection.bytes.panel < 1000)
+    assert.equal(await readFile(join(data, "chat-runs.json"), "utf8"), journal)
+    report.checks.push(
+      "Compact native panel reads retain all revisions and full recovery sources without journal writes",
+    )
     assert.deepEqual(report.errors, [])
     for (const check of report.checks) console.log("PASS", check)
   }

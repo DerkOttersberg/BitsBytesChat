@@ -32,6 +32,33 @@ test("queue survives renderer absence, retains full context and waits for idle",
   expect(f.runs.get("ses_test").queue).toHaveLength(0)
 })
 
+test("Plan and Goal panel reads retain complete revisions without sending frozen prompts or changing the journal", async () => {
+  const f = await fixture()
+  f.runs.close()
+  await f.runs.call("stop", { sessionID: "ses_test" })
+  const source = "Complete frozen source 🌿 ".repeat(6000)
+  const prompt = { ...f.prompt("msg_panel", source), draft: { attachments: [{ source }] } }
+  await f.runs.call("admit", { prompt })
+  await f.runs.call("prepare", { prompt })
+  await f.runs.call("plan", { sessionID: "ses_test", text: "First Plan" })
+  await f.runs.call("plan", { sessionID: "ses_test", text: "Latest Plan" })
+  const run = f.runs.get("ses_test")
+  run.goal = { id: "goal_panel", objective: "Keep exact source", status: "paused", reason: "stopped", evidence: "Recorded evidence", started: 1, elapsed: 2, tokens: 3, budget: 100, continuations: 0 }
+  await f.runs.call("stop", { sessionID: "ses_test" })
+  const journal = await readFile(join(f.folder, "chat-runs.json"), "utf8")
+  const inspected = f.inspections.length
+  const panel = await f.runs.call("panel", { sessionID: "ses_test" })
+  expect(panel).toEqual({ goal: run.goal, plan: run.plan })
+  expect(Object.keys(panel)).toEqual(["goal", "plan"])
+  expect(JSON.stringify(panel)).not.toContain(source)
+  expect(JSON.stringify(panel).length).toBeLessThan(1000)
+  expect(await readFile(join(f.folder, "chat-runs.json"), "utf8")).toBe(journal)
+  expect(f.inspections).toHaveLength(inspected)
+  expect(f.sent).toHaveLength(0)
+  expect(await f.runs.call("get", { sessionID: "ses_test" })).toMatchObject({ queue: [{ prompt }], last: prompt })
+  expect(run.plan?.versions).toEqual([{ revision: 1, text: "First Plan" }, { revision: 2, text: "Latest Plan" }])
+})
+
 test("a repeated admission cannot acknowledge an unsaved request after a journal failure", async () => {
   const f = await fixture()
   f.runs.close(); f.runs.get("ses_test").paused = true

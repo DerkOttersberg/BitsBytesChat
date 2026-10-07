@@ -2,18 +2,18 @@ import { createEffect, For, onCleanup, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Markdown } from "@opencode-ai/session-ui/markdown"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
-import type { ChatRun } from "../../main/bitsbytes-runs"
+import type { ChatRunPanel } from "../../main/bitsbytes-runs"
 import { bbt, bbError } from "../../bitsbytes/copy"
 
 export function RunPanel(props: { sessionID: string; kind: "plan" | "goal" }) {
   const api = window.api.bitsbytes
-  const [store, setStore] = createStore({ run: undefined as ChatRun | undefined, text: "", saved: "", editing: false, budget: "", error: "", revision: 0, followLatest: true })
+  const [store, setStore] = createStore({ run: undefined as ChatRunPanel | undefined, text: "", saved: "", editing: false, budget: "", error: "", revision: 0, followLatest: true })
   const reads = { sequence: 0, active: true }
   const load = async () => {
     const sessionID = props.sessionID, kind = props.kind, sequence = ++reads.sequence
     const current = () => reads.active && sequence === reads.sequence && sessionID === props.sessionID && kind === props.kind
     try {
-      const run = await api.call<ChatRun>("runs.get", { sessionID })
+      const run = await api.call<ChatRunPanel>("runs.panel", { sessionID })
       if (!current()) return
       setStore({ run, error: "" })
       if (store.editing) return
