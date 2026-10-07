@@ -288,3 +288,45 @@ test("one malformed chat does not discard another chat's saved queue", async () 
   expect(restored.get("ses_test").queue[0].prompt.text).toBe("Keep this queued request")
   expect((await readdir(f.folder)).some(name => name.startsWith("chat-runs-recovery-"))).toBe(true)
 })
+
+test.each(["queue", "plan", "goal", "identity"])("one damaged %s record preserves the chat's remaining saved work", async damaged => {
+  const f = await fixture()
+  await f.runs.call("admit", { prompt: f.prompt("msg_first", "Keep the first request") })
+  await f.runs.call("admit", { prompt: f.prompt("msg_second", "Keep the second request") })
+  await f.runs.call("plan", { sessionID: "ses_test", text: "Keep the verified plan" })
+  await f.runs.call("goal-draft", { sessionID: "ses_test", enabled: true })
+  await f.runs.call("admit", { prompt: f.prompt("msg_goal", "Keep the saved goal") })
+  f.runs.close()
+  const saved = JSON.parse(await readFile(join(f.folder, "chat-runs.json"), "utf8"))
+  if (damaged === "queue") saved.ses_test.queue[1] = null
+  if (damaged === "identity") saved.ses_test.queue[1].prompt.id = "msg_wrong"
+  if (damaged === "plan") saved.ses_test.plan.versions = null
+  if (damaged === "goal") saved.ses_test.goal.status = "damaged"
+  const source = JSON.stringify(saved)
+  await writeFile(join(f.folder, "chat-runs.json"), source)
+  const sent: string[] = []
+  const restored = new BBRuns(f.folder, async () => ({ busy: false, messages: [] }), async prompt => { sent.push(prompt.id) }, () => undefined)
+  fixtures.push({ runs: restored, folder: f.folder }); await restored.start()
+  const chat = restored.get("ses_test")
+  expect(chat.queue.map(item => item.id)).toEqual(damaged === "queue" || damaged === "identity" ? ["msg_first", "msg_goal"] : ["msg_first", "msg_second", "msg_goal"])
+  expect(chat.paused).toBe(true)
+  expect(chat.plan?.text).toBe(damaged === "plan" ? undefined : "Keep the verified plan")
+  expect(chat.goal?.objective).toBe(damaged === "goal" ? undefined : "Keep the saved goal")
+  expect(chat.goal?.status).toBe(damaged === "goal" ? undefined : "paused")
+  await restored.pump("ses_test")
+  expect(sent).toEqual([])
+  const backup = (await readdir(f.folder)).find(name => name.startsWith("chat-runs-recovery-"))!
+  expect(await readFile(join(f.folder, backup), "utf8")).toBe(source)
+})
+
+test("a valid journal is retained without creating a repair backup", async () => {
+  const f = await fixture()
+  await f.runs.call("admit", { prompt: f.prompt("msg_valid", "Keep this valid request") })
+  await f.runs.call("plan", { sessionID: "ses_test", text: "Keep this plan" })
+  f.runs.close()
+  const restored = new BBRuns(f.folder, async () => f.state, async () => undefined, () => undefined)
+  fixtures.push({ runs: restored, folder: f.folder }); await restored.start()
+  expect(restored.get("ses_test").queue[0].prompt.text).toBe("Keep this valid request")
+  expect(restored.get("ses_test").plan?.text).toBe("Keep this plan")
+  expect((await readdir(f.folder)).some(name => name.startsWith("chat-runs-recovery-"))).toBe(false)
+})

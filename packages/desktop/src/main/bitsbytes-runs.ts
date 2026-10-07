@@ -29,11 +29,11 @@ export class BBRuns {
     try {
       const stored: unknown = JSON.parse(source)
       if (!stored || typeof stored !== "object" || Array.isArray(stored)) throw new Error("Invalid chat run journal")
-      const entries = Object.entries(stored).filter(([id, chat]) => validChatRun(id, chat))
+      const entries = Object.entries(stored).flatMap(([id, chat]) => { const recovered = recoverChatRun(id, chat); return recovered ? [[id, recovered] as const] : [] })
       this.chats = Object.assign(Object.create(null), Object.fromEntries(entries))
-      if (entries.length !== Object.keys(stored).length) await writeFile(join(this.root, `chat-runs-recovery-${Date.now()}.json`), source)
+      if (JSON.stringify(this.chats) !== JSON.stringify(stored)) await writeFile(join(this.root, `chat-runs-recovery-${Date.now()}-${randomBytes(6).toString("hex")}.json`), source)
     } catch {
-      await writeFile(join(this.root, `chat-runs-recovery-${Date.now()}.json`), source)
+      await writeFile(join(this.root, `chat-runs-recovery-${Date.now()}-${randomBytes(6).toString("hex")}.json`), source)
       this.chats = Object.create(null)
     }
     for (const chat of Object.values(this.chats)) {
@@ -217,16 +217,19 @@ export class BBRuns {
   }
 }
 
-function validChatRun(id: string, value: unknown): value is ChatRun {
-  if (!value || typeof value !== "object") return false
+function recoverChatRun(id: string, value: unknown): ChatRun | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return
   const chat = value as ChatRun
-  return chat.sessionID === id && ["normal", "plan"].includes(chat.mode)
-    && Array.isArray(chat.queue) && chat.queue.every(item => item && typeof item.id === "string"
+  if (chat.sessionID !== id || !["normal", "plan"].includes(chat.mode) || !Array.isArray(chat.queue)) return
+  // Preserve valid neighbours independently. A broken optional plan or goal
+  // must not erase a durable queued request, and recovery never dispatches it.
+  const queue = chat.queue.filter(item => item && typeof item.id === "string" && item.id.length > 0
       && ["pending", "sending", "uncertain", "failed"].includes(item.status)
-      && item.prompt?.sessionID === id && typeof item.prompt.id === "string"
+      && item.prompt?.sessionID === id && item.prompt.id === item.id
       && typeof item.prompt.text === "string" && typeof item.prompt.directory === "string")
-    && (chat.plan === undefined || (chat.plan && typeof chat.plan.text === "string" && Array.isArray(chat.plan.versions)
-      && chat.plan.versions.every(version => version && Number.isInteger(version.revision) && typeof version.text === "string")))
-    && (chat.goal === undefined || (chat.goal && typeof chat.goal.objective === "string"
-      && ["active", "paused", "blocked", "usageLimited", "budgetLimited", "complete"].includes(chat.goal.status)))
+  const plan = chat.plan && typeof chat.plan.text === "string" && Array.isArray(chat.plan.versions)
+    && chat.plan.versions.every(version => version && Number.isInteger(version.revision) && typeof version.text === "string") ? chat.plan : undefined
+  const goal = chat.goal && typeof chat.goal.objective === "string"
+    && ["active", "paused", "blocked", "usageLimited", "budgetLimited", "complete"].includes(chat.goal.status) ? chat.goal : undefined
+  return { ...chat, queue, plan, goal }
 }
