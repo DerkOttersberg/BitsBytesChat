@@ -25,9 +25,9 @@ import { usePrompt } from "../../context/prompt"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { sampledChecksum } from "@opencode-ai/core/util/encode"
 import type { FollowupDraft } from "../../components/prompt-input/submit"
+import { readPanelState, savePanelState, type PanelTab } from "./chat-workspace-state"
 import "./chat-workspace.css"
 
-type PanelTab = { id: string; kind: "chat" | "browser" | "terminal" | "review" | "file" | "code" | "document" | "source" | "plan" | "goal"; title: string; owner: string; path?: string; uri?: string; unread?: boolean; revision?: number; previewRevision?: number }
 type SideChatSource = { source: string; directory: string; model?: { providerID: string; modelID: string }; agent?: string; variant: string | null; draft?: FollowupDraft }
 export function ChatWorkspace(props: { sessionID?: string; chat: (headerActions: JSX.Element) => JSX.Element; review: () => JSX.Element; sideChat: (id: string) => JSX.Element }) {
   const platform = usePlatform(), language = useLanguage(), sdk = useSDK(), file = useFile(), local = useLocal(), sync = useSync()
@@ -55,18 +55,18 @@ export function ChatWorkspace(props: { sessionID?: string; chat: (headerActions:
     if (tab.kind === "terminal") session.view().terminal.close()
   }
   let savedKey = ""
+  let savedWritable = true
   createEffect(() => {
     const key = `bitsbytes.panels.v2:${sdk().directory}:${owner()}`
     if (key === savedKey) return
     savedKey = key
-    const previous = (() => { try { return JSON.parse(localStorage.getItem(key) ?? "null") } catch { return null } })()
-    const tabs: PanelTab[] = (previous?.tabs ?? []).filter((tab: PanelTab) => tab.kind !== "browser")
-    const collapsed = previous?.open === undefined ? !tabs.length || (previous?.collapsed ?? false) : !previous.open
-    setStore(reconcile({ tabs, active: tabs.some(tab => tab.id === previous?.active) ? previous.active : tabs.at(-1)?.id ?? "", collapsed, menu: false, width: previous?.width ?? 520, busy: false }))
+    const stored = readPanelState(localStorage, key, Math.max(400, window.innerWidth * .7))
+    savedWritable = stored.writable
+    setStore(reconcile({ ...stored.value, menu: false, busy: false }))
   })
   createEffect(() => {
     const value = { tabs: store.tabs.filter(tab => tab.kind !== "browser"), active: store.active, collapsed: store.collapsed, open: !store.collapsed, width: store.width }
-    if (savedKey) localStorage.setItem(savedKey, JSON.stringify(value))
+    if (savedKey && savedWritable) savePanelState(localStorage, savedKey, value)
   })
   const artifact = (item: { id: string; sessionID: string; filename: string; revision?: number; kind?: string; path?: string; turnID?: string; history?: { revision: number; source: string }[] }, published = false) => {
     catalog.set(item.id, item)

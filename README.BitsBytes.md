@@ -22,6 +22,8 @@ Stop attempts to interrupt an active model request even when saving the queue pa
 
 A background queue write failure pauses automatic work and shows its error without an unhandled rejection. Recovery retains the saved source and earlier admission history.
 
+Damaged saved panel layouts retain usable neighboring tabs instead of preventing a chat from opening. The original layout remains available in a local recovery copy.
+
 ## New in 0.3.4
 
 - Unconfirmed engine admission now becomes a visible recoverable request after its timeout, without an endless busy state or automatic duplicate. A late acknowledgement reconciles the original message.

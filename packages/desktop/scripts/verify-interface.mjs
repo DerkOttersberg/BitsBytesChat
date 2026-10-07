@@ -10,7 +10,7 @@ import { promisify } from 'node:util'
 const root = resolve('../..')
 const { _electron } = createRequire(join(root, '.tools/qa/package.json'))('playwright')
 const version = JSON.parse(await readFile(join(root, 'packages/desktop/package.json'), 'utf8')).version
-const tag = process.env.BB_QA_REPORT || 'release-03'
+const tag = process.env.BB_QA_REPORT || process.argv[2] || 'release-03'
 const profile = root + '/.tools/qa/release-03-' + Date.now()
 const data = profile + '/BitsBytesChat'
 const report = { checks: [], errors: [], requests: [] }
