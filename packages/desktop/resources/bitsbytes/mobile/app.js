@@ -743,37 +743,71 @@ async function preview(item, revision) {
         select.append(option)
       }
       select.value = content.sheet
-      const table = node("table")
+      const table = node("table"),
+        range = node("p"),
+        limits = node("div"),
+        status = node("div")
+      let current = content,
+        pages = [],
+        loading = false,
+        generation = 0
+      const previous = button(C.previous, () => void load(pages.at(-1) ?? Math.max(0, current.offset - 200))),
+        next = button(C.next, () => void load(current.offset + current.rows.length))
+      const controls = () => {
+        select.disabled = loading
+        previous.disabled = loading || !current.offset
+        next.disabled = loading || !current.rows.length || current.offset + current.rows.length >= current.total
+      }
       const render = (value) => {
+        current = value
+        select.value = value.sheet
         table.replaceChildren()
-        for (const row of value.rows) {
+        for (const [index, row] of value.rows.entries()) {
           const tr = node("tr")
-          for (const cell of row) tr.append(node("td", cell))
+          tr.append(node("th", String(value.offset + index + 1)))
+          for (const [column, cell] of row.entries()) {
+            const td = node("td", cell)
+            td.title = value.formulas?.[index]?.[column] || ""
+            tr.append(td)
+          }
           table.append(tr)
         }
+        range.textContent = `${value.rows.length ? value.offset + 1 : 0}–${value.offset + value.rows.length} / ${value.total}`
+        limits.replaceChildren()
+        if (value.columns > 100) limits.append(node("p", C.sheetColumnLimit, "muted"))
+        if (value.shortened) limits.append(node("p", C.sheetCellLimit, "muted"))
+      }
+      const load = async (offset, sheet = current.sheet) => {
+        const read = ++generation
+        loading = true
+        controls()
+        status.replaceChildren(node("p", C.preparing, "muted"))
+        try {
+          const value = await api("content", { id: item.id, revision: selected, sheet, offset })
+          if (token !== state.generation || read !== generation) return
+          pages = current.sheet !== value.sheet ? [] : value.offset > current.offset
+            ? [...pages, current.offset] : pages.filter(offset => offset < value.offset)
+          render(value)
+          status.replaceChildren()
+        } catch (error) {
+          if (token !== state.generation || read !== generation) return
+          select.value = current.sheet
+          status.replaceChildren(node("p", error.message), button(C.retry, () => void load(offset, sheet)))
+        } finally {
+          if (token === state.generation && read === generation) {
+            loading = false
+            controls()
+          }
+        }
+      }
+      select.onchange = () => {
+        const sheet = select.value
+        select.value = current.sheet
+        void load(0, sheet)
       }
       render(content)
-      let offset = 0
-      const load = async () =>
-        render(await api("content", { id: item.id, revision: selected, sheet: select.value, offset }))
-      select.onchange = () => {
-        offset = 0
-        void load()
-      }
-      root.append(
-        select,
-        table,
-        button(C.previous, () => {
-          offset = Math.max(0, offset - 200)
-          void load()
-        }),
-        button(C.next, () => {
-          if (offset + 200 < content.total) {
-            offset += 200
-            void load()
-          }
-        }),
-      )
+      controls()
+      root.append(select, range, table, limits, previous, next, status)
       return
     }
     if (item.kind === "html") {

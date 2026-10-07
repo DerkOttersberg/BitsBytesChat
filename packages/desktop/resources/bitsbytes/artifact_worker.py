@@ -1,5 +1,6 @@
 """Independent artifact subprocess; never shares the recording worker or Office instances."""
 import csv
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -260,29 +261,62 @@ def render(path, folder):
     return {'pdf': ''}
 
 
+GRID_CELL_CHARS = 1024
+GRID_BYTES = 1400000  # Leave room for metadata below the helper's 2 MB boundary.
+
+
+class GridPage:
+    """Bound preview bytes while keeping source files and inspection intact."""
+    def __init__(self, formulas=False):
+        self.rows = []
+        self.formulas = [] if formulas else None
+        self.bytes = 0
+        self.shortened = False
+
+    def append(self, values, formulas=None):
+        strings = [[str(value) if value is not None else '' for value in row] for row in
+                   ([values, formulas] if formulas is not None else [values])]
+        preview = [[value[:GRID_CELL_CHARS] + '…' if len(value) > GRID_CELL_CHARS else value for value in row] for row in strings]
+        size = len(json.dumps(preview, ensure_ascii=False).encode('utf-8'))
+        if self.rows and self.bytes + size > GRID_BYTES:
+            return False
+        self.rows.append(preview[0])
+        if self.formulas is not None:
+            self.formulas.append(preview[1])
+        self.bytes += size
+        self.shortened |= any(len(value) > GRID_CELL_CHARS for row in strings for value in row)
+        return True
+
+
 def grid(path, sheet=None, offset=0, limit=200):
     path = Path(path)
     if path.suffix.lower() == '.csv':
-        rows = []
+        csv.field_size_limit(8 * 1024 ** 2)
+        page = GridPage()
+        full = False
         total = columns = 0
         with path.open(encoding='utf-8-sig', newline='') as stream:
             for index, row in enumerate(csv.reader(stream)):
                 total = index + 1
                 columns = max(columns, len(row))
-                if offset <= index < offset + limit:
-                    rows.append(row[:100])
-        return {'sheets': ['CSV'], 'sheet': 'CSV', 'rows': rows, 'total': total, 'columns': columns, 'offset': offset}
+                if not full and offset <= index < offset + limit:
+                    full = not page.append(row[:100])
+        return {'sheets': ['CSV'], 'sheet': 'CSV', 'rows': page.rows, 'total': total, 'columns': columns,
+                'offset': offset, 'shortened': page.shortened}
     from openpyxl import load_workbook
-    book = load_workbook(path, read_only=True, data_only=True)
-    formulas = load_workbook(path, read_only=True, data_only=False)
-    selected = sheet if sheet in book.sheetnames else book.sheetnames[0]
-    source = book[selected]
-    values = [[str(value) if value is not None else '' for value in row] for row in source.iter_rows(min_row=offset + 1, max_row=min(source.max_row, offset + limit), max_col=min(source.max_column, 100), values_only=True)]
-    formula_values = [[str(value) if value is not None else '' for value in row] for row in formulas[selected].iter_rows(min_row=offset + 1, max_row=min(source.max_row, offset + limit), max_col=min(source.max_column, 100), values_only=True)]
-    result = {'sheets': book.sheetnames, 'sheet': selected, 'rows': values, 'formulas': formula_values, 'total': source.max_row, 'columns': source.max_column, 'offset': offset}
-    book.close()
-    formulas.close()
-    return result
+    with closing(load_workbook(path, read_only=True, data_only=True)) as book, \
+            closing(load_workbook(path, read_only=True, data_only=False)) as formulas:
+        selected = sheet if sheet in book.sheetnames else book.sheetnames[0]
+        source = book[selected]
+        page = GridPage(formulas=True)
+        if offset < source.max_row:
+            bounds = {'min_row': offset + 1, 'max_row': min(source.max_row, offset + limit),
+                      'max_col': min(source.max_column, 100), 'values_only': True}
+            for row, formula in zip(source.iter_rows(**bounds), formulas[selected].iter_rows(**bounds)):
+                if not page.append(row, formula):
+                    break
+        return {'sheets': book.sheetnames, 'sheet': selected, 'rows': page.rows, 'formulas': page.formulas,
+                'total': source.max_row, 'columns': source.max_column, 'offset': offset, 'shortened': page.shortened}
 
 
 def create(spec, folder):

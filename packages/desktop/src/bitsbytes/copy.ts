@@ -1,5 +1,6 @@
 // English is the initial product locale. All added product copy lives in this typed dictionary.
 export const copy = {
+  sheetCellLimit: "Long values and formulas are shortened in this preview. Open or download the file to view the complete contents.",
   "bb.error.workerUnavailable": "Audio is unavailable. Repair local components in Settings → Audio. Chat and mobile access remain available.",
   startupFailed: "Bits & Bytes Chat could not finish starting. Your saved data has been kept. Startup details are in: {{path}}",
   "bb.error.deliveryUnknown": "The engine has not confirmed this message. Check the chat, then retry delivery if it is missing.",

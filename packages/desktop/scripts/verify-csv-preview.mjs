@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { copyFile, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import assert from 'node:assert/strict'
 
@@ -66,6 +66,43 @@ try {
     await panel.locator('.bb-sheet-scroll tr').first().getByText('Row 400',{exact:true}).waitFor()
     await panel.getByRole('alert').waitFor({state:'detached'})
     report.checks.push('A failed page read releases controls, retains consistent data and recovers after its source returns')
+  }
+  if(process.env.BB_CSV_BOUNDED_CHECK==='1'){
+    const dense=join(data,'Dense.csv'),rows=Array.from({length:80},(_,row)=>Array.from({length:100},(_,column)=>`ROW ${row} COL ${column} `+'é🌿'.repeat(120)+' END'))
+    const source=rows.map(row=>row.join(',')).join('\r\n')
+    await writeFile(dense,source)
+    const artifact=await call('artifact.publish',{path:dense,sessionID:session.id})
+    await page.getByRole('tab',{name:'Dense.csv',exact:true}).click()
+    await panel.locator('.bb-sheet-scroll tr').first().getByText(rows[0][0],{exact:true}).waitFor()
+    const offsets=[]
+    let offset=0
+    while(offset<rows.length){
+      assert.equal(await panel.locator('.bb-sheet-scroll th').first().innerText(),String(offset+1))
+      const count=await panel.locator('.bb-sheet-scroll tr').count()
+      assert.ok(count>0&&count<rows.length)
+      assert.equal(await panel.locator('.bb-sheet-scroll tr').first().locator('td').first().innerText(),rows[offset][0])
+      assert.equal(await panel.locator('.bb-sheet-scroll tr').last().locator('td').first().innerText(),rows[offset+count-1][0])
+      offsets.push(offset);offset+=count
+      if(offset<rows.length){await panel.getByRole('button',{name:'Next rows',exact:true}).click();await panel.locator('.bb-sheet-scroll tr').first().getByText(rows[offset][0],{exact:true}).waitFor()}
+    }
+    assert.ok(await panel.getByRole('button',{name:'Next rows',exact:true}).isDisabled())
+    for(const offset of offsets.reverse().slice(1)){await panel.getByRole('button',{name:'Previous rows',exact:true}).click();await panel.locator('.bb-sheet-scroll tr').first().getByText(rows[offset][0],{exact:true}).waitFor()}
+    report.boundedPages=offsets.reverse()
+    report.checks.push('Dense Unicode CSV uses bounded pages without skipped rows; Previous retraces actual visited pages')
+    await panel.getByRole('button',{name:'Next rows',exact:true}).click()
+    await panel.locator('.bb-sheet-scroll tr').first().getByText(rows[report.boundedPages[1]][0],{exact:true}).waitFor()
+    await writeFile(dense,'"'+'Saved source 🌿 '.repeat(10000)+'\nFINAL SOURCE",Short\r\nLast,End')
+    await call('artifact.publish',{path:dense,sessionID:session.id})
+    await panel.getByText('Long values and formulas are shortened in this preview. Open or download the file to view the complete contents.',{exact:true}).waitFor()
+    assert.equal(await panel.locator('.bb-sheet-scroll th').first().innerText(),'1')
+    assert.equal(await panel.locator('.bb-sheet-scroll tr').first().locator('td').first().evaluate(td=>[...td.textContent].length),1025)
+    assert.equal(await panel.locator('.bb-sheet-scroll tr').first().locator('td').last().innerText(),'Short')
+    await panel.getByRole('combobox',{name:'Version history',exact:true}).selectOption('1')
+    await panel.locator('.bb-sheet-scroll tr').first().getByText(rows[0][0],{exact:true}).waitFor()
+    assert.equal(await panel.locator('.bb-sheet-scroll th').first().innerText(),'1')
+    assert.equal(await panel.getByText('Long values and formulas are shortened in this preview. Open or download the file to view the complete contents.',{exact:true}).count(),0)
+    assert.equal(await readFile(artifact.source,'utf8'),source)
+    report.checks.push('Long-cell disclosure is explicit; changing saved revisions resets paging and preserves exact original bytes')
   }
   assert.equal(report.errors.length,0)
   await page.screenshot({path:join(root,'.tools/qa/results',tag+'.png')})

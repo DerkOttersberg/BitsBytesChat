@@ -215,6 +215,51 @@ try {
   assert.equal(await phone.getByText("Resume probe", { exact: true }).count(), 1)
   assert.equal(await phone.getByText(source, { exact: true }).count(), 0)
   check("Phone Resume submits the preserved source once, clears waiting and keeps its durable host snapshot")
+  if (process.env.BB_PHONE_GRID === "1") {
+    const path = join(data, "Dense.csv"),
+      rows = Array.from({ length: 80 }, (_, row) =>
+        Array.from({ length: 100 }, (_, column) => `ROW ${row} COL ${column} ` + "é🌿".repeat(120) + " END"),
+      ),
+      text = rows.map((row) => row.join(",")).join("\r\n")
+    await writeFile(path, text)
+    const artifact = await call("artifact.publish", { path, sessionID: session.id })
+    await phone.locator("#files-button").click()
+    await phone.locator("#preview-content .artifact-card").filter({ hasText: "Dense.csv" }).click()
+    const preview = phone.locator("#preview-content"),
+      table = preview.locator("table"),
+      next = preview.getByRole("button", { name: "Next", exact: true }),
+      previous = preview.getByRole("button", { name: "Previous", exact: true })
+    await table.getByText(rows[0][0], { exact: true }).waitFor()
+    const offsets = []
+    let offset = 0
+    while (offset < rows.length) {
+      const count = await table.locator("tr").count()
+      assert.ok(count > 0 && count < rows.length)
+      assert.equal(await table.locator("th").first().innerText(), String(offset + 1))
+      assert.equal(await table.locator("tr").first().locator("td").first().innerText(), rows[offset][0])
+      assert.equal(await table.locator("tr").last().locator("td").first().innerText(), rows[offset + count - 1][0])
+      offsets.push(offset)
+      offset += count
+      if (offset < rows.length) {
+        await next.click()
+        await table.getByText(rows[offset][0], { exact: true }).waitFor()
+      }
+    }
+    assert.equal(await next.isDisabled(), true)
+    for (const offset of offsets.slice(0, -1).reverse()) {
+      await previous.click()
+      await table.getByText(rows[offset][0], { exact: true }).waitFor()
+    }
+    const downloaded = await phone
+      .context()
+      .request.get(new URL("/file/" + artifact.id + "?revision=1", phone.url()).href)
+    assert.equal(downloaded.status(), 200)
+    assert.equal((await downloaded.body()).toString("utf8"), text)
+    assert.equal(await readFile(artifact.source, "utf8"), text)
+    await phone.locator("#preview-close").click()
+    report.gridOffsets = offsets
+    check("Paired phone pages through a dense saved CSV without skipped rows and downloads its exact complete revision")
+  }
   if (process.env.BB_PHONE_STATUS_CHECK !== "stop") {
     await call("runs.admit", {
       prompt: {

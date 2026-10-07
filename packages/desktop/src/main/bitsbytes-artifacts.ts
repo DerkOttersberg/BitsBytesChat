@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import { basename, extname, join } from "node:path"
 import { copyFile, mkdir, open, readFile, realpath, rename, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
-import type { DocumentArtifact, ArtifactVersion } from "../bitsbytes/types"
+import type { DocumentArtifact, ArtifactVersion, SpreadsheetGrid } from "../bitsbytes/types"
 import { BBArtifactRuntime } from "./bitsbytes-artifact-runtime"
 import { fileHash } from "./bitsbytes-file-hash"
 
@@ -117,7 +117,7 @@ export class BBArtifacts {
   }
   async content(id: string, args: Record<string, unknown> = {}) {
     const selected = this.version(id, args.revision === undefined ? undefined : Number(args.revision))
-    if (selected.item.kind === "spreadsheet") { const cached = join(this.root, "previews/pdf", basename(selected.source)); return this.runtime.call("grid", { path: existsSync(cached) ? cached : selected.source, sheet: args.sheet, offset: args.offset, limit: args.limit }) }
+    if (selected.item.kind === "spreadsheet") { const cached = join(this.root, "previews/pdf", basename(selected.source)); return this.runtime.call<SpreadsheetGrid>("grid", { path: existsSync(cached) ? cached : selected.source, sheet: args.sheet, offset: args.offset, limit: args.limit }) }
     if (selected.item.kind === "image") return { data: new Uint8Array(await readFile(selected.source)), mime: selected.item.mime }
     if (selected.item.kind === "html" || selected.item.kind === "code") {
       const text = await readFile(selected.source, "utf8")

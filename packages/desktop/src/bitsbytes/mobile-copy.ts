@@ -1,5 +1,7 @@
 // Initial English copy for the mobile companion and its desktop settings page.
 export const mobileCopy = {
+  sheetCellLimit: "Long values and formulas are shortened in this preview. Open or download the file to view the complete contents.",
+  sheetColumnLimit: "Showing the first 100 columns. Open in app to view all columns.",
   title: "Mobile access",
   brand: "Bits & Bytes Chat",
   enable: "Enable mobile access",
