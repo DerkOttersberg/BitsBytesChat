@@ -1,0 +1,117 @@
+import { afterEach, expect, test } from "bun:test"
+import { createServer } from "node:http"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join, resolve } from "node:path"
+import { engineRequest } from "./bitsbytes-engine"
+import { BBRuns } from "./bitsbytes-runs"
+
+const servers: ReturnType<typeof createServer>[] = []
+async function fixture(handler: Parameters<typeof createServer>[0]) {
+  const server = createServer(handler)
+  servers.push(server)
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve))
+  const address = server.address()
+  if (!address || typeof address === "string") throw new Error("Missing fixture address")
+  return { url: `http://127.0.0.1:${address.port}`, username: "qa", password: "fixture-only" }
+}
+afterEach(async () => {
+  for (const server of servers.splice(0)) {
+    server.closeAllConnections()
+    await new Promise<void>(resolve => server.close(() => resolve()))
+  }
+})
+
+test("engine metadata retains authentication, encoded workspace and response semantics", async () => {
+  const seen: { url?: string; auth?: string; directory?: string; custom?: string }[] = []
+  const server = await fixture((request, response) => {
+    seen.push({ url: request.url, auth: request.headers.authorization, directory: String(request.headers["x-opencode-directory"]), custom: String(request.headers["x-qa"]) })
+    if (request.url === "/empty") { response.writeHead(204); response.end(); return }
+    if (request.url === "/bad") { response.writeHead(503); response.end("unavailable"); return }
+    response.setHeader("content-type", "application/json"); response.end('{"ready":true}')
+  })
+  expect(await engineRequest(server, "/metadata", { headers: { "x-qa": "kept" } }, "D:\\QA space\\é")).toEqual({ ready: true })
+  expect(seen[0]).toEqual({ url: "/metadata", auth: "Basic " + Buffer.from("qa:fixture-only").toString("base64"), directory: encodeURIComponent("D:\\QA space\\é"), custom: "kept" })
+  expect(await engineRequest(server, "/empty", {}, "D:\\QA")).toBeUndefined()
+  await expect(engineRequest(server, "/bad", {}, "D:\\QA")).rejects.toThrow("OpenCode 503: unavailable")
+})
+
+test.each(["headers", "body"])("a stalled metadata %s read expires and a later read works", async phase => {
+  const server = await fixture((request, response) => {
+    if (request.url === "/ready") { response.end('{"ready":true}'); return }
+    if (phase === "body") { response.setHeader("content-type", "application/json"); response.write('{"unfinished":'); response.flushHeaders() }
+  })
+  const started = Date.now()
+  await expect(engineRequest(server, "/stalled", {}, "D:\\QA")).rejects.toThrow("bb.error.engineTimeout")
+  expect(Date.now() - started).toBeGreaterThanOrEqual(14000)
+  expect(Date.now() - started).toBeLessThan(19000)
+  expect(await engineRequest(server, "/ready", {}, "D:\\QA")).toEqual({ ready: true })
+}, 20000)
+
+test("caller cancellation works for both metadata and mutations", async () => {
+  const server = await fixture(() => undefined)
+  for (const method of ["GET", "POST"]) {
+    const controller = new AbortController()
+    const pending = engineRequest(server, "/stalled", { method, signal: controller.signal }, "D:\\QA")
+    controller.abort(new Error("QA cancelled"))
+    await expect(pending).rejects.toThrow("QA cancelled")
+  }
+})
+
+test("a slow mutation is sent once and is not cut off by the metadata deadline", async () => {
+  let requests = 0
+  const server = await fixture((request, response) => {
+    requests++
+    setTimeout(() => response.end('{"admitted":true}'), 15200)
+  })
+  expect(await engineRequest(server, "/prompt", { method: "POST", body: '{"id":"stable-id"}' }, "D:\\QA")).toEqual({ admitted: true })
+  expect(requests).toBe(1)
+}, 20000)
+
+test("Stop during a stalled engine read preserves the queue for explicit Resume", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bb-engine-runs-test-"))
+  const entered = Promise.withResolvers<void>()
+  const sent: string[] = []
+  let healthy = false
+  const server = await fixture(async (request, response) => {
+    if (request.url === "/metadata") {
+      entered.resolve()
+      if (!healthy) return
+      response.end(JSON.stringify({ busy: false, messages: sent.map(id => ({ id, text: "", tokens: 0, tools: 0 })) })); return
+    }
+    let body = ""; for await (const chunk of request) body += chunk
+    sent.push(JSON.parse(body).id)
+    response.end("{}")
+  })
+  const runs = new BBRuns(root, prompt => engineRequest(server, "/metadata", {}, prompt.directory), async prompt => {
+    await engineRequest(server, "/prompt", { method: "POST", body: JSON.stringify(prompt) }, prompt.directory)
+  }, () => undefined)
+  try {
+    await runs.start(); runs.close()
+    runs.get("ses_timeout").paused = true
+    await runs.call("admit", { prompt: { id: "msg_preserved", sessionID: "ses_timeout", text: "Preserve this request", directory: root } })
+    runs.get("ses_timeout").paused = false
+    const pending = runs.pump("ses_timeout")
+    await entered.promise
+    await runs.call("stop", { sessionID: "ses_timeout" })
+    await pending
+    expect(sent).toEqual([])
+    expect(runs.get("ses_timeout").queue[0].status).toBe("pending")
+    expect(runs.get("ses_timeout").paused).toBe(true)
+    healthy = true
+    await runs.pump("ses_timeout")
+    expect(sent).toEqual([])
+    await runs.call("resume", { sessionID: "ses_timeout" })
+    const started = Date.now()
+    while (!sent.length || runs.get("ses_timeout").queue[0]?.status !== "sending") {
+      if (Date.now() - started > 5000) throw new Error("Preserved request did not resume")
+      await Bun.sleep(20)
+    }
+    await runs.pump("ses_timeout")
+    expect(sent).toEqual(["msg_preserved"])
+  } finally {
+    runs.close()
+    if (!resolve(root).startsWith(join(resolve(tmpdir()), "bb-engine-runs-test-"))) throw new Error("Unexpected cleanup path")
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
+  }
+}, 20000)

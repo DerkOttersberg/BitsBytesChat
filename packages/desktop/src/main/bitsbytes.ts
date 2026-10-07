@@ -15,6 +15,7 @@ import type { BBEvent, Job, Settings, Skill, State, Model } from "../bitsbytes/t
 import { BBProvider } from "./bitsbytes-provider"
 import { modelConfiguration } from "./bitsbytes-models"
 import { repairPythonHome } from "./bitsbytes-runtime"
+import { engineRequest } from "./bitsbytes-engine"
 import { readState, stateRecord } from "./bitsbytes-state"
 import { bbt } from "../bitsbytes/copy"
 import type { ServerReadyData } from "../preload/types"
@@ -299,14 +300,7 @@ export class BitsBytes {
     if (invalidate) await this.engineFetch("/global/dispose", { method: "POST" }).catch(() => undefined)
   }
   async engineFetch<T = unknown>(path: string, options: RequestInit = {}, directory = join(this.root, "workspace")): Promise<T> {
-    const server = await this.engine()
-    const headers = new Headers(options.headers)
-    headers.set("content-type", "application/json")
-    headers.set("x-opencode-directory", encodeURIComponent(directory))
-    if (server.password) headers.set("authorization", "Basic " + Buffer.from(`${server.username ?? "opencode"}:${server.password}`).toString("base64"))
-    const response = await fetch(server.url + path, { ...options, headers })
-    if (!response.ok) throw new Error(`OpenCode ${response.status}: ${(await response.text()).slice(0,500)}`)
-    return response.status === 204 ? undefined as T : await response.json() as T
+    return engineRequest<T>(await this.engine(), path, options, directory)
   }
   async session(prompt: string, title: string, test = false, sessionID?: string, testDir?: string) {
     const model = this.selection ?? (this.settings.model ? { providerID: this.settings.provider === "openrouter" ? "openrouter" : "bitsbytes-chatgpt", modelID: this.settings.model } : undefined)

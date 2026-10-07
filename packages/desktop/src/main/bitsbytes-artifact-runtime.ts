@@ -14,16 +14,18 @@ export class BBArtifactRuntime {
     this.installing = new Promise<void>((resolve, reject) => {
       const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(this.assets, "setup.ps1"), "-ArtifactTools"], { windowsHide: true, stdio: "pipe" })
       child.stdout.resume(); child.stderr.resume()
-      child.once("error", reject); child.once("exit", code => code === 0 ? resolve() : reject(new Error("bb.error.artifactSetup")))
+      child.once("error", reject); child.once("close", code => code === 0 ? resolve() : reject(new Error("bb.error.artifactSetup")))
     }).finally(() => { this.installing = undefined })
     return this.installing
   }
   async call<T = Record<string, unknown>>(action: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
+    if (signal?.aborted) throw new Error("bb.error.interrupted")
     if (!existsSync(this.python)) await this.setup()
     await repairPythonHome(this.root, "artifacts")
     return JSON.parse(await this.execute(["-u", join(this.assets, "artifact_worker.py"), action], JSON.stringify(args), signal)) as T
   }
   async script(code: string, directory: string, signal?: AbortSignal) {
+    if (signal?.aborted) throw new Error("bb.error.interrupted")
     if (!existsSync(this.python)) await this.setup()
     await repairPythonHome(this.root, "artifacts")
     await mkdir(directory, { recursive: true })
@@ -34,17 +36,32 @@ export class BBArtifactRuntime {
     return { output, script: path }
   }
   private execute(args: string[], input: string, signal?: AbortSignal, cwd = this.root) {
+    if (signal?.aborted) return Promise.reject(new Error("bb.error.interrupted"))
     return new Promise<string>((resolve, reject) => {
       const child = spawn(this.python, args, { windowsHide: true, cwd, env: { ...process.env, PYTHONUTF8: "1", MPLBACKEND: "Agg", BITSBYTES_DATA: this.root }, stdio: "pipe" })
-      const output: Buffer[] = [], error: Buffer[] = []
-      const timer = setTimeout(() => { child.kill(); reject(new Error("bb.error.previewTimeout")) }, 180000)
-      const abort = () => { child.kill(); reject(new Error("bb.error.interrupted")) }
+      const output: Buffer[] = []
+      let bytes = 0, diagnostic = Buffer.alloc(0), failure: Error | undefined
+      const fail = (error: Error) => { failure ??= error; if (child.pid && !child.killed) child.kill() }
+      const timer = setTimeout(() => fail(new Error("bb.error.previewTimeout")), 180000)
+      const abort = () => fail(new Error("bb.error.interrupted"))
       signal?.addEventListener("abort", abort, { once: true })
-      if (signal?.aborted) abort()
-      child.stdout.on("data", chunk => { if (output.reduce((sum, row) => sum + row.length, 0) < 2e6) output.push(chunk) })
-      child.stderr.on("data", chunk => { if (error.reduce((sum, row) => sum + row.length, 0) < 1e5) error.push(chunk) })
-      child.once("error", reject)
-      child.once("exit", code => { clearTimeout(timer); signal?.removeEventListener("abort", abort); if (code === 0) resolve(Buffer.concat(output).toString()); else reject(new Error(Buffer.concat(error).toString().slice(-1500) || "bb.error.previewFailed")) })
+      child.stdout.on("data", (chunk: Buffer) => {
+        if (failure) return
+        bytes += chunk.length
+        if (bytes > 2e6) return fail(new Error("bb.error.artifactOutputLimit"))
+        output.push(chunk)
+      })
+      child.stderr.on("data", chunk => { diagnostic = Buffer.concat([diagnostic, chunk]).subarray(-1e5) })
+      child.once("error", fail)
+      child.stdin.once("error", fail)
+      // Process exit can precede the final output bytes. Close also runs after a
+      // failed spawn, and after a cancelled child releases its working directory.
+      child.once("close", code => {
+        clearTimeout(timer); signal?.removeEventListener("abort", abort)
+        if (failure) return reject(failure)
+        if (code !== 0) return reject(new Error(diagnostic.toString().slice(-1500) || "bb.error.previewFailed"))
+        resolve(Buffer.concat(output).toString())
+      })
       child.stdin.end(input)
     })
   }
