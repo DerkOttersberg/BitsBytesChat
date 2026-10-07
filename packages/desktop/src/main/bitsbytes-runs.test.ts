@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, readdir, rm, rmdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { tmpdir } from "node:os"
 import { BBRuns, type Inspection, type InspectionOptions, type RunPrompt } from "./bitsbytes-runs"
@@ -30,6 +30,36 @@ test("queue survives renderer absence, retains full context and waits for idle",
   expect(f.sent).toHaveLength(1)
   await f.runs.pump("ses_test")
   expect(f.runs.get("ses_test").queue).toHaveLength(0)
+})
+
+test("a repeated admission cannot acknowledge an unsaved request after a journal failure", async () => {
+  const f = await fixture()
+  f.runs.close(); f.runs.get("ses_test").paused = true
+  const path = join(f.folder, "chat-runs.json")
+  await rm(path); await mkdir(path)
+  const input = { prompt: f.prompt("msg_unsaved", "Retain this exact frozen source") }
+  await expect(f.runs.call("admit", input)).rejects.toThrow()
+  await expect(f.runs.call("admit", input)).rejects.toThrow()
+  expect(f.sent).toHaveLength(0)
+  await rmdir(path)
+  await f.runs.call("admit", input)
+  const saved = JSON.parse(await readFile(path, "utf8")).ses_test
+  expect(saved.queue).toHaveLength(1)
+  expect(saved.queue[0].prompt).toMatchObject(input.prompt)
+  expect(saved.queue[0].status).toBe("pending")
+})
+
+test("a concurrent repeated admission waits for its request to reach the journal", async () => {
+  const f = await fixture()
+  f.runs.close(); f.runs.get("ses_test").paused = true
+  const input = { prompt: f.prompt("msg_repeated", "Frozen request") }
+  const first = f.runs.call("admit", input)
+  try {
+    await f.runs.call("admit", input)
+    const saved = JSON.parse(await readFile(join(f.folder, "chat-runs.json"), "utf8")).ses_test
+    expect(saved?.queue[0]?.prompt).toMatchObject(input.prompt)
+    expect(f.sent).toHaveLength(0)
+  } finally { await first }
 })
 
 test("Stop during engine inspection keeps the queued request paused until Resume", async () => {

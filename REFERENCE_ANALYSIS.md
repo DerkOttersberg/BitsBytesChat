@@ -37,6 +37,8 @@ Bits & Bytes defaults to Enter = Queue, Ctrl+Enter = Steer, Shift+Enter = newlin
 
 The Electron host, rather than the mounted composer, owns a persisted per-chat journal. Main and side chats can drain independently while minimized or while another chat is visible. Stable message IDs reconcile an ambiguous acknowledgment against engine history before another message is dispatched. Restart pauses unfinished work for review. An uncertain delivery stays visible for retry; it is not silently duplicated. Stop cancels that chat's preparation/admission signal. Cancellation before its prompt POST retains an unsent request; cancellation after the POST begins retains uncertainty until the original ID is reconciled. Local source I/O already in progress may finish, but cannot then admit the stopped prompt.
 
+Journal acknowledgement waits for the snapshot containing a request, including repeated admission IDs after a write failure. Overlapping queue changes can share one write; changes arriving while it is in flight wait for the next snapshot. This keeps earlier acknowledgements independent of later traffic while retaining the restart pause.
+
 OpenCode V2 admits Steer at its next safe provider-turn boundary. It cannot rewrite a tool action already executing. Legacy sessions use the retained legacy admission path. OpenAI's documented Responses steering has transport-specific behavior; this app's subscription adapter uses streaming HTTP, so these controls do not claim to expose every native OpenAI WebSocket steering behavior.
 
 Sources: [Prompting](https://learn.chatgpt.com/docs/prompting), [Responses steering](https://developers.openai.com/api/docs/guides/steering), and the installed desktop interface, inspected read-only.

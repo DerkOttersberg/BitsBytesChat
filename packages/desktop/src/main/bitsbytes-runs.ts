@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { proposedPlan } from "@opencode-ai/core/util/proposed-plan"
 import { ascending } from "@opencode-ai/core/id/id"
+import { BBJournalWriter } from "./bitsbytes-journal"
 
 export type RunPrompt = {
   sessionID: string; directory: string; id: string; text: string; agent?: string
@@ -21,7 +22,10 @@ export type DispatchResult = void | "not-sent"
 // The Electron engine host owns this journal, independently of renderer lifetime.
 export class BBRuns {
   chats: Record<string, ChatRun> = Object.create(null)
-  private saving = Promise.resolve()
+  private journal = new BBJournalWriter(() => JSON.stringify(this.chats), async source => {
+    await writeFile(join(this.root, "chat-runs.json.tmp"), source)
+    await rename(join(this.root, "chat-runs.json.tmp"), join(this.root, "chat-runs.json"))
+  })
   private active = new Set<string>()
   private admissions = new Map<string, AbortController>()
   private timer?: ReturnType<typeof setInterval>
@@ -54,11 +58,7 @@ export class BBRuns {
     return this.chats[id] ??= { sessionID: id, mode: "normal", goalDraft: false, paused: false, queue: [], error: "" }
   }
   private persist() {
-    this.saving = this.saving.catch(() => undefined).then(async () => {
-      await writeFile(join(this.root, "chat-runs.json.tmp"), JSON.stringify(this.chats))
-      await rename(join(this.root, "chat-runs.json.tmp"), join(this.root, "chat-runs.json"))
-    })
-    return this.saving
+    return this.journal.save()
   }
   private async save(chat: ChatRun) { await this.persist(); this.changed(chat.sessionID) }
   async call(action: string, args: Record<string, unknown>) {
@@ -100,6 +100,7 @@ export class BBRuns {
       const existing = chat.queue.find(item => item.id === prompt.id)
       if (existing && !existing.editing) {
         if (JSON.stringify(existing.prompt) !== JSON.stringify(prompt)) throw new Error("bb.error.deliveryConflict")
+        await this.save(chat); void this.pump(chat.sessionID)
         return existing
       }
       const item: QueuedInput = { id: prompt.id, prompt, status: "pending", delivery: args.delivery === "steer" ? "steer" : "queue" }
