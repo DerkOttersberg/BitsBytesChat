@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import { BrowserWindow, WebContentsView, session } from "electron"
 import type { BBEvent } from "../bitsbytes/types"
 
-type Tab = { id: string; sessionID: string; view: WebContentsView; window: BrowserWindow }
+type Tab = { id: string; sessionID: string; view: WebContentsView; window: BrowserWindow; closed: () => void }
 export class BBBrowser {
   private tabs = new Map<string, Tab>()
   constructor(private emit: (event: BBEvent) => void) {}
@@ -12,7 +12,9 @@ export class BBBrowser {
     return tab
   }
   private url(value: string) {
-    const url = new URL(value.includes("://") ? value : `https://${value}`)
+    const address = value.includes("://") ? value : `https://${value}`
+    if (!URL.canParse(address)) throw new Error("bb.error.browserURL")
+    const url = new URL(address)
     if (!["http:", "https:"].includes(url.protocol)) throw new Error("bb.error.browserURL")
     return url.href
   }
@@ -21,29 +23,34 @@ export class BBBrowser {
     return { type: "browser" as const, id: tab.id, sessionID: tab.sessionID, url: web.getURL(), title: web.getTitle(), loading: web.isLoading(), canBack: web.navigationHistory.canGoBack(), canForward: web.navigationHistory.canGoForward() }
   }
   async open(sessionID: string, url: string, windowID?: number, signal?: AbortSignal) {
+    signal?.throwIfAborted()
     if (!sessionID) throw new Error("bb.error.browserMissing")
+    const address = this.url(url || "https://www.google.com")
     const window = (windowID ? BrowserWindow.fromId(windowID) : BrowserWindow.getAllWindows()[0])
     if (!window) throw new Error("bb.error.browserMissing")
     const profile = session.fromPartition("persist:bitsbytes-browser")
     profile.setPermissionRequestHandler((_web, _permission, callback) => callback(false))
     profile.setPermissionCheckHandler(() => false)
     const view = new WebContentsView({ webPreferences: { session: profile, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } })
-    const tab: Tab = { id: randomUUID(), sessionID, view, window }
+    const id = randomUUID()
+    const tab: Tab = { id, sessionID, view, window, closed: () => this.close(id) }
     this.tabs.set(tab.id, tab)
     window.contentView.addChildView(view)
     view.setVisible(false)
-    view.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//.test(url)) void view.webContents.loadURL(url); return { action: "deny" } })
+    view.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//.test(url)) void view.webContents.loadURL(url).catch(() => undefined); return { action: "deny" } })
     view.webContents.on("will-navigate", (event, url) => { if (!/^https?:\/\//.test(url)) event.preventDefault() })
     view.webContents.on("will-redirect", (event, url) => { if (!/^https?:\/\//.test(url)) event.preventDefault() })
-    view.webContents.on("did-navigate", () => this.emit(this.state(tab)))
-    view.webContents.on("did-navigate-in-page", () => this.emit(this.state(tab)))
-    view.webContents.on("page-title-updated", () => this.emit(this.state(tab)))
-    view.webContents.on("did-start-loading", () => this.emit(this.state(tab)))
-    view.webContents.on("did-stop-loading", () => this.emit(this.state(tab)))
-    window.once("closed", () => this.close(tab.id))
+    const changed = () => { if (this.tabs.get(tab.id) === tab && !view.webContents.isDestroyed()) this.emit(this.state(tab)) }
+    view.webContents.on("did-navigate", changed)
+    view.webContents.on("did-navigate-in-page", changed)
+    view.webContents.on("page-title-updated", changed)
+    view.webContents.on("did-start-loading", changed)
+    view.webContents.on("did-stop-loading", changed)
+    window.once("closed", tab.closed)
     const abort = () => view.webContents.stop()
     signal?.addEventListener("abort", abort, { once: true })
-    try { signal?.throwIfAborted(); await view.webContents.loadURL(this.url(url || "https://www.google.com")) }
+    try { signal?.throwIfAborted(); await view.webContents.loadURL(address) }
+    catch (error) { this.close(tab.id); throw error }
     finally { signal?.removeEventListener("abort", abort) }
     this.emit(this.state(tab))
     return this.state(tab)
@@ -51,14 +58,15 @@ export class BBBrowser {
   close(id: string) {
     const tab = this.tabs.get(id)
     if (!tab) return
-    this.emit({ ...this.state(tab), closed: true })
+    this.tabs.delete(id)
+    tab.window.removeListener("closed", tab.closed)
+    if (!tab.view.webContents.isDestroyed()) this.emit({ ...this.state(tab), closed: true })
     if (!tab.window.isDestroyed()) tab.window.contentView.removeChildView(tab.view)
     if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close()
-    this.tabs.delete(id)
   }
   async call(action: string, args: Record<string, unknown>, sessionID?: string, signal?: AbortSignal) {
     signal?.throwIfAborted()
-    if (action === "open") return this.open(sessionID ?? String(args.sessionID), String(args.url ?? ""), Number(args.windowID) || undefined, signal)
+    if (action === "open") return this.open(sessionID ?? String(args.sessionID ?? ""), String(args.url ?? ""), Number(args.windowID) || undefined, signal)
     if (action === "list") return [...this.tabs.values()].filter(tab => !sessionID || tab.sessionID === sessionID).map(tab => this.state(tab))
     if (action === "promote" && !sessionID) { for (const tab of this.tabs.values()) if (tab.sessionID === args.from) { tab.sessionID = String(args.to); this.emit(this.state(tab)) }; return { saved: true } }
     const tab = this.target(String(args.id), sessionID)
