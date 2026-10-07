@@ -15,6 +15,7 @@ export type Goal = { id: string; objective: string; status: "active" | "paused" 
 export type Plan = { id: string; revision: number; text: string; versions: { revision: number; text: string }[] }
 export type ChatRun = { sessionID: string; mode: "normal" | "plan"; goalDraft: boolean; replaceGoal?: boolean; paused: boolean; queue: QueuedInput[]; goal?: Goal; plan?: Plan; last?: RunPrompt; awaiting?: boolean; error: string }
 export type Inspection = { busy: boolean; messages: { id: string; text: string; tokens: number; tools: number; progress?: string; assistant?: boolean; error?: string }[] }
+export type InspectionOptions = { readBusyMessages?: boolean }
 
 // The Electron engine host owns this journal, independently of renderer lifetime.
 export class BBRuns {
@@ -22,7 +23,7 @@ export class BBRuns {
   private saving = Promise.resolve()
   private active = new Set<string>()
   private timer?: ReturnType<typeof setInterval>
-  constructor(private root: string, private inspect: (prompt: RunPrompt) => Promise<Inspection>, private dispatch: (prompt: RunPrompt) => Promise<void>, private changed: (sessionID: string) => void) {}
+  constructor(private root: string, private inspect: (prompt: RunPrompt, options?: InspectionOptions) => Promise<Inspection>, private dispatch: (prompt: RunPrompt) => Promise<void>, private changed: (sessionID: string) => void) {}
   async start() {
     await mkdir(this.root, { recursive: true })
     const source = await readFile(join(this.root, "chat-runs.json"), "utf8").catch(() => "{}")
@@ -158,7 +159,9 @@ export class BBRuns {
       const candidate = chat.queue.find(item => item.delivery === "steer" && !item.editing) ?? chat.queue[0]
       const reference = candidate?.prompt ?? chat.last
       if (!reference) return
-      const state = await this.inspect(reference)
+      // Acknowledgement reconciliation and steering need current history. Idle
+      // waiting needs only busy status until the engine can accept another input.
+      const state = await this.inspect(reference, { readBusyMessages: Boolean(candidate && (candidate.delivery === "steer" || candidate.status !== "pending" || candidate.sentAt !== undefined)) })
       // User controls remain available while inspection waits on the engine.
       // Discard the snapshot if Stop, an edit or reordering changed its candidate.
       if (chat.paused || candidate !== (chat.queue.find(item => item.delivery === "steer" && !item.editing) ?? chat.queue[0])) return

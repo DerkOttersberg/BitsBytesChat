@@ -1,5 +1,5 @@
 import { BBArtifacts } from "./bitsbytes-artifacts"
-import { BBRuns, type RunPrompt, type Inspection } from "./bitsbytes-runs"
+import { BBRuns, type RunPrompt, type Inspection, type InspectionOptions } from "./bitsbytes-runs"
 import { BBBrowser } from "./bitsbytes-browser"
 import { BBMobile } from "./bitsbytes-mobile"
 import { spawn } from "node:child_process"
@@ -15,7 +15,7 @@ import type { BBEvent, Job, Settings, Skill, State, Model } from "../bitsbytes/t
 import { BBProvider } from "./bitsbytes-provider"
 import { modelConfiguration } from "./bitsbytes-models"
 import { repairPythonHome } from "./bitsbytes-runtime"
-import { engineRequest } from "./bitsbytes-engine"
+import { engineRequest, inspectEngine } from "./bitsbytes-engine"
 import { readState, stateRecord } from "./bitsbytes-state"
 import { bbt } from "../bitsbytes/copy"
 import type { ServerReadyData } from "../preload/types"
@@ -54,7 +54,7 @@ export class BitsBytes {
   private pending = new Map<string, Promise<unknown>>()
   artifacts = new BBArtifacts(this.root, this.python, this.assets, (artifact, published) => this.emit({ type: "artifact", artifact, published }))
   browser = new BBBrowser(event => this.emit(event))
-  runs = new BBRuns(this.root, prompt => this.inspectRun(prompt), prompt => this.dispatchRun(prompt), sessionID => this.emit({ type: "run", sessionID }))
+  runs = new BBRuns(this.root, (prompt, options) => this.inspectRun(prompt, options), prompt => this.dispatchRun(prompt), sessionID => this.emit({ type: "run", sessionID }))
   mobile = new BBMobile(this, () => this.emit({ type: "refresh" }), value => safeStorage.encryptString(value).toString("base64"), value => safeStorage.decryptString(Buffer.from(value, "base64")))
   private protocols = new Map<string, "v1" | "v2">()
   private transcriptReads = new Map<string, Set<number>>()
@@ -420,28 +420,8 @@ export class BitsBytes {
     this.pending.set(key, pending)
     return pending
   }
-  private async inspectRun(prompt: RunPrompt): Promise<Inspection> {
-    // Both route generations can expose the same session metadata. Use the caller's
-    // negotiated protocol, or the server health identity for older journal entries.
-    const legacy = prompt.protocol || this.protocols.has(prompt.sessionID) ? undefined : await this.engineFetch<{ healthy?: boolean }>("/global/health", {}, prompt.directory).catch(() => undefined)
-    const protocol = prompt.protocol ?? this.protocols.get(prompt.sessionID) ?? (legacy?.healthy === true ? "v1" : "v2")
-    this.protocols.set(prompt.sessionID, protocol)
-    if (protocol !== "v2") {
-      const state = await Promise.all([
-        this.engineFetch<Record<string, { type: string }>>("/session/status", {}, prompt.directory),
-          this.engineFetch<{ info: { id: string; role: string; tokens?: { input?: number; output?: number; reasoning?: number }; error?: unknown }; parts: { type: string; text?: string; tool?: string; state?: { input?: unknown; output?: unknown; content?: unknown } }[] }[]>(`/session/${encodeURIComponent(prompt.sessionID)}/message`, {}, prompt.directory),
-      ]).catch(error => { if (protocol === "v1" || !/404/.test(String(error))) throw error; return undefined })
-      if (state) {
-        this.protocols.set(prompt.sessionID, "v1")
-        return { busy: Boolean(state[0][prompt.sessionID] && state[0][prompt.sessionID].type !== "idle"), messages: state[1].map(row => ({ id: row.info.id, assistant: row.info.role === "assistant", text: row.parts.filter(part => part.type === "text").map(part => part.text ?? "").join("\n"), tokens: (row.info.tokens?.input ?? 0) + (row.info.tokens?.output ?? 0), tools: row.parts.filter(part => part.type === "tool").length, progress: row.parts.some(part => part.type === "tool") ? createHash("sha256").update(JSON.stringify(row.parts.filter(part => part.type === "tool").map(part => ({ tool: part.tool, input: part.state?.input, output: part.state?.output, content: part.state?.content })))).digest("hex") : undefined, error: row.info.error ? JSON.stringify(row.info.error) : undefined })) }
-      }
-    }
-    const [active, context] = await Promise.all([
-      this.engineFetch<{ data: Record<string, unknown> }>("/api/session/active", {}, prompt.directory),
-      this.engineFetch<{ data: { id: string; type: string; text?: string; tokens?: { input?: number; output?: number }; content?: { type: string; text?: string; name?: string; state?: { input?: unknown; output?: unknown; content?: unknown } }[]; error?: unknown }[] }>(`/api/session/${encodeURIComponent(prompt.sessionID)}/context`, {}, prompt.directory),
-    ])
-    this.protocols.set(prompt.sessionID, "v2")
-    return { busy: Boolean(active.data[prompt.sessionID]), messages: context.data.map(row => ({ id: row.id, assistant: row.type === "assistant", text: row.text ?? row.content?.filter(part => part.type === "text").map(part => part.text ?? "").join("\n") ?? "", tokens: (row.tokens?.input ?? 0) + (row.tokens?.output ?? 0), tools: row.content?.filter(part => part.type === "tool").length ?? 0, progress: row.content?.some(part => part.type === "tool") ? createHash("sha256").update(JSON.stringify(row.content.filter(part => part.type === "tool").map(part => ({ tool: part.name, input: part.state?.input, output: part.state?.output, content: part.state?.content })))).digest("hex") : undefined, error: row.error ? JSON.stringify(row.error) : undefined })) }
+  private async inspectRun(prompt: RunPrompt, options?: InspectionOptions): Promise<Inspection> {
+    return inspectEngine(await this.engine(), prompt, this.protocols, options)
   }
   private async dispatchRun(prompt: RunPrompt) {
     // Resolve app-owned sources before the asynchronous engine acknowledgement.

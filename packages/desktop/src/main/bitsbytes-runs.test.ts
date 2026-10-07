@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test"
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { tmpdir } from "node:os"
-import { BBRuns, type Inspection, type RunPrompt } from "./bitsbytes-runs"
+import { BBRuns, type Inspection, type InspectionOptions, type RunPrompt } from "./bitsbytes-runs"
 import { proposedPlan } from "@opencode-ai/core/util/proposed-plan"
 
 const fixtures: { runs: BBRuns; folder: string }[] = []
@@ -10,12 +10,13 @@ async function fixture() {
   const folder = await mkdtemp(join(tmpdir(), "bb-runs-test-"))
   const state: Inspection = { busy: true, messages: [] }
   const sent: RunPrompt[] = []
+  const inspections: (InspectionOptions | undefined)[] = []
   const fail = { enabled: false }
-  const runs = new BBRuns(folder, async () => structuredClone(state), async prompt => { sent.push(structuredClone(prompt)); state.messages.push({ id: prompt.id, text: prompt.text, tools: 0, tokens: 0 }); state.busy = true; if (fail.enabled) throw new Error("connection lost after admission") }, () => undefined)
+  const runs = new BBRuns(folder, async (_prompt, options) => { inspections.push(options); return structuredClone(state) }, async prompt => { sent.push(structuredClone(prompt)); state.messages.push({ id: prompt.id, text: prompt.text, tools: 0, tokens: 0 }); state.busy = true; if (fail.enabled) throw new Error("connection lost after admission") }, () => undefined)
   fixtures.push({ runs, folder }); await runs.start()
   const prompt = (id = "msg_000000000001a", text = "Complete source") => ({ sessionID: "ses_test", directory: folder, id, text, model: { providerID: "test", modelID: "test" }, legacyParts: [{ type: "text", text }] })
   const settle = async () => { for (let i = 0; i < 20; i++) { await new Promise(resolve => setTimeout(resolve, 5)); if (!runs.get("ses_test").queue.some(item => item.status === "sending")) break } }
-  return { runs, folder, state, sent, fail, prompt, settle }
+  return { runs, folder, state, sent, fail, prompt, settle, inspections }
 }
 afterEach(async () => { for (const fixture of fixtures.splice(0)) { fixture.runs.close(); const path = resolve(fixture.folder); if (!path.startsWith(resolve(tmpdir()) + "\\bb-runs-test-") && !path.startsWith(resolve(tmpdir()) + "/bb-runs-test-")) throw new Error("Unexpected cleanup path"); await rm(path, { recursive: true, force: true }) } })
 
@@ -329,4 +330,26 @@ test("a valid journal is retained without creating a repair backup", async () =>
   expect(restored.get("ses_test").queue[0].prompt.text).toBe("Keep this valid request")
   expect(restored.get("ses_test").plan?.text).toBe("Keep this plan")
   expect((await readdir(f.folder)).some(name => name.startsWith("chat-runs-recovery-"))).toBe(false)
+})
+
+test("only an idle-waiting queue uses busy summaries; steer, acknowledgement and Goal baseline retain history", async () => {
+  const f = await fixture()
+  f.runs.get("ses_test").paused = true
+  await f.runs.call("admit", { prompt: f.prompt("msg_summary") })
+  f.runs.get("ses_test").paused = false
+  await f.runs.pump("ses_test")
+  expect(f.inspections.at(-1)).toEqual({ readBusyMessages: false })
+  expect(f.sent).toHaveLength(0)
+  await f.runs.call("steer", { sessionID: "ses_test", id: "msg_summary" })
+  await f.settle()
+  expect(f.inspections.at(-1)).toEqual({ readBusyMessages: true })
+  expect(f.sent).toHaveLength(1)
+  await f.runs.pump("ses_test")
+  expect(f.inspections.at(-1)).toEqual({ readBusyMessages: true })
+  expect(f.runs.get("ses_test").queue).toHaveLength(0)
+  await f.runs.call("goal-draft", { sessionID: "ses_test", enabled: true })
+  const baseline = f.inspections.length
+  await f.runs.call("admit", { prompt: f.prompt("msg_goal_baseline", "Account for all prior tokens") })
+  expect(f.inspections[baseline]).toBeUndefined()
+  expect(f.runs.get("ses_test").goal?.objective).toBe("Account for all prior tokens")
 })

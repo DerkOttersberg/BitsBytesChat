@@ -59,6 +59,7 @@ try {
   page = await app.firstWindow(); page.setDefaultTimeout(30000); page.on('pageerror', error => report.errors.push(error.message))
   await page.evaluate(()=>{ window.__qaArtifacts=[]; window.api.bitsbytes.subscribe(event=>{if(event.type==='artifact')window.__qaArtifacts.push({published:event.published,name:event.artifact.filename,turn:event.artifact.turnID})}) })
   await page.locator('.bb-nav').waitFor({ timeout: 90000 })
+  await page.locator('[contenteditable=true]').first().waitFor({ timeout: 90000 })
   call = (method, args = {}) => page.evaluate(({ method, args }) => window.api.bitsbytes.call(method, args), { method, args })
   const server = await page.evaluate(() => window.api.awaitInitialization())
   const headers = { 'content-type': 'application/json', 'x-opencode-directory': encodeURIComponent(join(data, 'workspace')) }
