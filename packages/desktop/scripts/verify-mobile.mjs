@@ -347,7 +347,7 @@ try {
   }
   const source = join(data, "Mobile preview.docx")
   await promisify(execFile)(
-    join(data, "runtime/worker/Scripts/python.exe"),
+    process.env.BB_ARTIFACT_PYTHON || join(data, "runtime/artifacts/Scripts/python.exe"),
     [
       "-c",
       'from docx import Document;import sys;d=Document();d.add_heading("Shared mobile document",0);d.add_paragraph("Created on the computer; previewed on the phone.");d.save(sys.argv[1])',
