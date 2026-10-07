@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto"
 import { basename, extname, join } from "node:path"
-import { copyFile, mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises"
+import { copyFile, mkdir, open, readFile, realpath, rename, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import type { DocumentArtifact, ArtifactVersion } from "../bitsbytes/types"
 import { BBArtifactRuntime } from "./bitsbytes-artifact-runtime"
+import { fileHash } from "./bitsbytes-file-hash"
 
 export class BBArtifacts {
   items: DocumentArtifact[] = []
@@ -65,7 +66,7 @@ export class BBArtifacts {
     const item: DocumentArtifact = { id, sessionID, turnID, turnIDs: [...new Set([...(old?.turnIDs ?? (old?.turnID ? [old.turnID] : [])), ...(turnID ? [turnID] : [])])], path: actual, filename: basename(actual), revision: (old?.revision ?? 0) + 1, hash, kind: checked.kind, mime: checked.mime, source, history: [...(old?.history ?? [])], status: "queued", updated: Date.now(), pdf: "", error: "" }
     await mkdir(join(this.root, "previews/sources"), { recursive: true })
     await copyFile(actual, source)
-    if (createHash("sha256").update(await readFile(source)).digest("hex") !== hash) throw new Error("bb.error.invalidDocument")
+    if (await fileHash(source) !== hash) throw new Error("bb.error.invalidDocument")
     item.history!.push({ revision: item.revision, hash, source, pdf: "", updated: item.updated, turnID })
     this.items = [...this.items.filter(row => row.id !== id), item]
     await this.persist(); this.focused.add(focusKey); this.changed(item, focus); await this.enqueue(item)
@@ -100,7 +101,7 @@ export class BBArtifacts {
           const current = this.version(id, revision)
           if (current.pdf) return current.pdf
           const output = await this.runtime.call<{ pdf: string }>("render", { path: current.source, folder: join(this.root, "previews/pdf") })
-          if (!(await readFile(output.pdf)).subarray(0, 5).equals(Buffer.from("%PDF-"))) throw new Error("bb.error.invalidDocument")
+          await checkPDF(output.pdf)
           const version = current.item.history!.find(row => row.revision === revision)!
           version.pdf = output.pdf
           await this.persist()
@@ -135,7 +136,7 @@ export class BBArtifacts {
     const selected = this.version(id, revision)
     await copyFile(selected.source, target)
     const verified = await this.runtime.call<{ hash: string }>("validate", { path: target })
-    if (verified.hash !== createHash("sha256").update(await readFile(selected.source)).digest("hex")) throw new Error("bb.error.invalidDocument")
+    if (verified.hash !== await fileHash(selected.source)) throw new Error("bb.error.invalidDocument")
     return { path: target, verified: true }
   }
   private enqueue(item: DocumentArtifact) {
@@ -152,7 +153,7 @@ export class BBArtifacts {
       item.status = "exporting"; this.changed(item); await this.persist()
       try {
         const output = await this.runtime.call<{ pdf: string; formulaErrors?: unknown[] }>("render", { path: item.source, folder: join(this.root, "previews/pdf") })
-        if (output.pdf && !(await readFile(output.pdf)).subarray(0, 5).equals(Buffer.from("%PDF-"))) throw new Error("bb.error.invalidDocument")
+        if (output.pdf) await checkPDF(output.pdf)
         item.pdf = output.pdf; item.status = "ready"
         const version = item.history?.find(row => row.revision === item.revision)
         if (version) version.pdf = output.pdf
@@ -160,6 +161,17 @@ export class BBArtifacts {
       } catch (error) { item.status = "error"; item.error = String((error as Error).message ?? error) }
       finally { this.pending.delete(key); await this.persist(); if (this.items.find(row => row.id === item.id) === item) this.changed(item) }
     })
+  }
+}
+
+async function checkPDF(path: string) {
+  const file = await open(path, "r")
+  try {
+    const header = Buffer.alloc(5)
+    await file.read(header, 0, header.length, 0)
+    if (!header.equals(Buffer.from("%PDF-"))) throw new Error("bb.error.invalidDocument")
+  } finally {
+    await file.close()
   }
 }
 

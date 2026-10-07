@@ -12,7 +12,7 @@ If a Python environment points at an absent installation, startup repairs its ho
 
 ## Unreleased follow-up
 
-Reliability changes on `chat-reliability` preserve queue controls during slow engine reads, recover temporary phone polling failures and damaged chat journals, and release closed browser resources. Busy queue polling avoids repeatedly downloading the full history.
+Reliability changes on `chat-reliability` preserve queue controls during slow engine reads, recover temporary phone polling failures and damaged chat journals, and release closed browser resources. Busy queue polling avoids repeatedly downloading the full history. CSV preview paging and file checks retain less temporary data; wide CSV previews now show the existing 100-column notice.
 
 Large document inspections use saved numbered source parts, so the agent can read a complete source in bounded responses. Subsequent parts keep the inspected version even if its original file changes; a fresh inspection reads the latest file. Small Office/PDF/text inspections keep their structured results. These changes are verified source work; the published installer remains `v0.3.4`. See `VERIFICATION.md` for evidence and limits.
 

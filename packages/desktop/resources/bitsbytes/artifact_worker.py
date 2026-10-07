@@ -15,6 +15,11 @@ MIME = {'.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml
 TEXT = {'.txt', '.md', '.json', '.js', '.ts', '.tsx', '.jsx', '.css', '.py', '.ps1', '.sql', '.xml', '.yaml', '.yml', '.toml', '.ini', '.sh', '.c', '.h', '.cpp', '.cs', '.java', '.rs', '.go', '.html', '.htm', '.csv', '.svg'}
 
 
+def file_hash(path):
+    with Path(path).open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
 def validate(path):
     path = Path(path).resolve(strict=True)
     if not path.is_file() or not path.stat().st_size or path.stat().st_size > 256 * 1024 * 1024:
@@ -27,10 +32,17 @@ def validate(path):
                 raise ValueError('bb.error.invalidDocument')
     elif ext == '.pdf':
         from pypdf import PdfReader
-        if path.read_bytes()[:5] != b'%PDF-' or not len(PdfReader(path).pages):
+        with path.open('rb') as stream:
+            signature = stream.read(5)
+        if signature != b'%PDF-' or not len(PdfReader(path).pages):
             raise ValueError('bb.error.invalidDocument')
     elif ext in TEXT:
-        path.read_text(encoding='utf-8-sig')
+        try:
+            with path.open(encoding='utf-8-sig') as stream:
+                while stream.read(1024 * 1024):
+                    pass
+        except UnicodeError:
+            raise ValueError('bb.error.invalidDocument')
     elif ext in {'.png', '.jpg', '.jpeg'}:
         from PIL import Image
         with Image.open(path) as image:
@@ -38,7 +50,7 @@ def validate(path):
     else:
         raise ValueError('bb.error.unsupportedArtifact')
     kind = {'.docx': 'document', '.pptx': 'presentation', '.xlsx': 'spreadsheet', '.pdf': 'pdf', '.csv': 'spreadsheet', '.html': 'html', '.htm': 'html', '.png': 'image', '.jpg': 'image', '.jpeg': 'image', '.svg': 'image'}.get(ext, 'code')
-    return {'path': str(path), 'kind': kind, 'mime': MIME.get(ext, 'text/plain'), 'size': path.stat().st_size, 'hash': hashlib.sha256(path.read_bytes()).hexdigest()}
+    return {'path': str(path), 'kind': kind, 'mime': MIME.get(ext, 'text/plain'), 'size': path.stat().st_size, 'hash': file_hash(path)}
 
 
 def inspect(path):
@@ -74,7 +86,7 @@ def inspect_source(path, folder, source_id=None, part=0):
         return read_inspection_part(path, folder, source_id, part)
     info = inspect(path)
     try:
-        unchanged = hashlib.sha256(Path(info['path']).read_bytes()).hexdigest() == info['hash']
+        unchanged = file_hash(info['path']) == info['hash']
     except OSError:
         unchanged = False
     if not unchanged:
@@ -219,7 +231,7 @@ def render(path, folder):
     path = Path(path).resolve(strict=True)
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
-    output = folder / (hashlib.sha256(path.read_bytes()).hexdigest() + '.pdf')
+    output = folder / (file_hash(path) + '.pdf')
     if path.suffix.lower() == '.pdf':
         return {'pdf': str(path)}
     if path.suffix.lower() in {'.docx', '.pptx', '.xlsx'}:
@@ -251,9 +263,15 @@ def render(path, folder):
 def grid(path, sheet=None, offset=0, limit=200):
     path = Path(path)
     if path.suffix.lower() == '.csv':
+        rows = []
+        total = columns = 0
         with path.open(encoding='utf-8-sig', newline='') as stream:
-            rows = list(csv.reader(stream))
-        return {'sheets': ['CSV'], 'sheet': 'CSV', 'rows': rows[offset:offset + limit], 'total': len(rows), 'offset': offset}
+            for index, row in enumerate(csv.reader(stream)):
+                total = index + 1
+                columns = max(columns, len(row))
+                if offset <= index < offset + limit:
+                    rows.append(row[:100])
+        return {'sheets': ['CSV'], 'sheet': 'CSV', 'rows': rows, 'total': total, 'columns': columns, 'offset': offset}
     from openpyxl import load_workbook
     book = load_workbook(path, read_only=True, data_only=True)
     formulas = load_workbook(path, read_only=True, data_only=False)

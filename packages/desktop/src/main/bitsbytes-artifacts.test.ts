@@ -44,6 +44,17 @@ test("one malformed artifact does not discard the remaining document registry", 
 })
 
 const integration = process.env.BB_ARTIFACT_PYTHON ? test : test.skip
+integration("saved copies retain the published revision and exact bytes", async () => {
+  const f = await fixture(), path = join(f.folder, "source.html")
+  const original = "<!doctype html>" + "Source é 😀. ".repeat(100000)
+  await writeFile(path, original)
+  const artifact = await f.artifacts.publish(path, "ses_test")
+  await writeFile(path, "<!doctype html>Changed source")
+  const target = join(f.folder, "copied.html")
+  expect(await f.artifacts.saveCopy(artifact.id, target)).toEqual({ path: target, verified: true })
+  expect(await readFile(target, "utf8")).toBe(original)
+})
+
 integration("simultaneous publications retain every immutable revision and focus only the first result", async () => {
   const f = await fixture()
   const paths = [join(f.folder, "first.html"), join(f.folder, "second.html")]
