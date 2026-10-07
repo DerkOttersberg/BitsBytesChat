@@ -349,12 +349,27 @@ function source(part) {
   )
   return chip
 }
+const timelineRows = new Map()
+let timelineOwner
 function timeline(messages) {
   const root = $("#messages"),
-    bottom = root.scrollHeight - root.scrollTop - root.clientHeight < 100
-  root.replaceChildren()
-  if (!messages.length) root.append(node("p", C.empty, "muted"))
-  for (const message of messages) {
+    changedChat = timelineOwner !== state.chat,
+    bottom = changedChat || root.scrollHeight - root.scrollTop - root.clientHeight < 100
+  if (changedChat) {
+    timelineRows.clear()
+    root.replaceChildren()
+    timelineOwner = state.chat
+  }
+  if (!messages.length) {
+    timelineRows.clear()
+    root.replaceChildren(node("p", C.empty, "muted"))
+    return
+  }
+  if (!timelineRows.size) root.replaceChildren()
+  const ordered = [],
+    kept = new Set(),
+    occurrences = new Map()
+  for (const [index, message] of messages.entries()) {
     const parts = message.parts || [],
       text = parts
         .filter((part) => part.type === "text" && !part.synthetic && !part.ignored)
@@ -365,13 +380,36 @@ function timeline(messages) {
     const error =
       message.info.error?.data?.message || message.info.error?.message || (message.info.error ? C.error : "")
     if (!text && !files.length && !artifacts.length && !error) continue
-    const row = node("article", undefined, "message " + message.info.role)
-    if (text) row.append(node("div", text, "message-text"))
-    if (error) row.append(node("div", error, "muted"))
-    for (const part of files) row.append(source(part))
-    for (const item of artifacts)
-      row.append(fileCard(item, item.versions?.findLast((version) => version.turnID === message.info.id)?.revision))
-    root.append(row)
+    const id = typeof message.info.id === "string" && message.info.id ? message.info.id : index,
+      occurrence = occurrences.get(id) || 0,
+      key = JSON.stringify([id, occurrence]),
+      details = JSON.stringify([message.info.role, error, files, artifacts]),
+      previous = timelineRows.get(key)
+    occurrences.set(id, occurrence + 1)
+    // Keep selection, keyboard focus and handlers for unchanged content. Updated
+    // artifact metadata still rebuilds its row so revision controls stay current.
+    if (!previous || previous.text !== text || previous.details !== details) {
+      previous?.row.remove()
+      const row = node("article", undefined, "message " + message.info.role)
+      if (text) row.append(node("div", text, "message-text"))
+      if (error) row.append(node("div", error, "muted"))
+      for (const part of files) row.append(source(part))
+      for (const item of artifacts)
+        row.append(fileCard(item, item.versions?.findLast((version) => version.turnID === message.info.id)?.revision))
+      timelineRows.set(key, { text, details, row })
+    }
+    kept.add(key)
+    ordered.push(timelineRows.get(key).row)
+  }
+  for (const [key, value] of timelineRows) {
+    if (kept.has(key)) continue
+    value.row.remove()
+    timelineRows.delete(key)
+  }
+  let cursor = root.firstChild
+  for (const row of ordered) {
+    if (row === cursor) cursor = cursor.nextSibling
+    else root.insertBefore(row, cursor)
   }
   if (bottom) root.scrollTop = root.scrollHeight
 }

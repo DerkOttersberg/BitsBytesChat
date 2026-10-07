@@ -31,8 +31,9 @@ async function bounded(promise, label) {
 }
 const source = "FROZEN-SOURCE-SENTINEL\n" + "Nederlandse bron 🌿 ".repeat(6000)
 const fixture = createServer(async (request, response) => {
-  let body = ""
-  for await (const chunk of request) body += chunk
+  const bytes = []
+  for await (const chunk of request) bytes.push(chunk)
+  const body = Buffer.concat(bytes).toString("utf8")
   report.providerRequests++
   const input = JSON.parse(body)
   report.frozenSourceReachedProvider ||= (input.messages ?? []).some((message) =>
