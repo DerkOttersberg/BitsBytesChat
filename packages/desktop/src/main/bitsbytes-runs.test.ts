@@ -472,7 +472,7 @@ test.each(["before", "after", "goal"])("journal failure %s dispatch pauses backg
   expect(chat.queue[0].status).toBe(phase === "after" ? "uncertain" : "failed")
   expect(typeof chat.queue[0].sentAt).toBe(phase === "after" ? "number" : "undefined")
   expect(chat.queue[0].prompt).toMatchObject(JSON.parse(durable).ses_storage.queue[0].prompt)
-  expect(changed).toHaveLength(phase === "after" ? 3 : 2)
+  expect(changed).toHaveLength(phase === "after" ? 4 : 3)
   expect(await readFile(join(folder, "chat-runs.json"), "utf8")).toBe(durable)
   if (phase === "goal") {
     expect(chat.goal?.status).toBe("paused")
@@ -569,4 +569,36 @@ test("an unreadable journal is not treated as an empty saved state", async () =>
   fixtures.push({ runs, folder })
   await expect(runs.start()).rejects.toThrow()
   expect(await readdir(folder)).toEqual(["chat-runs.json"])
+})
+
+test.each(["admit", "goal", "resume"])("a rejected %s save cannot dispatch automatically after storage recovers", async phase => {
+  const f = await fixture()
+  f.runs.close(); f.state.busy = false
+  const prompt = f.prompt("msg_rejected_save", "Keep this unacknowledged source 🌿")
+  if (phase === "goal") await f.runs.call("goal-draft", { sessionID: prompt.sessionID, enabled: true })
+  if (phase === "resume") {
+    await f.runs.call("stop", { sessionID: prompt.sessionID })
+    await f.runs.call("admit", { prompt })
+  }
+  const durable = await readFile(join(f.folder, "chat-runs.json"), "utf8")
+  const temporary = join(f.folder, "chat-runs.json.tmp")
+  await mkdir(temporary)
+  await expect(phase === "resume"
+    ? f.runs.call("resume", { sessionID: prompt.sessionID })
+    : f.runs.call("admit", { prompt })).rejects.toThrow()
+  const chat = f.runs.get(prompt.sessionID)
+  expect(chat.paused).toBe(true)
+  expect(chat.awaiting).toBe(false)
+  expect(chat.error).toContain("chat-runs.json.tmp")
+  expect(chat.queue[0].prompt.text).toContain(prompt.text)
+  expect(await readFile(join(f.folder, "chat-runs.json"), "utf8")).toBe(durable)
+  if (phase === "goal") expect(chat.goal?.status).toBe("paused")
+  await rmdir(temporary)
+  await f.runs.pump(prompt.sessionID)
+  expect(f.sent).toHaveLength(0)
+  await f.runs.call("resume", { sessionID: prompt.sessionID })
+  await f.settle(); await f.runs.pump(prompt.sessionID)
+  expect(f.sent).toHaveLength(1)
+  expect(f.sent[0].id).toBe(prompt.id)
+  expect(f.sent[0].text).toContain(prompt.text)
 })

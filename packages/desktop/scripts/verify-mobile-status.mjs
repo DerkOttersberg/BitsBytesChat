@@ -14,7 +14,8 @@ const storageDevice = process.env.BB_STOP_STORAGE_FAILURE,
   observing = process.env.BB_STOP_STORAGE_OBSERVE === "1"
 const backgroundStorage = process.env.BB_RUN_STORAGE_FAILURE === "1",
   observeBackground = process.env.BB_RUN_STORAGE_OBSERVE === "1"
-assert.ok(!(storageDevice && backgroundStorage), "Run one owned storage fault at a time")
+const admissionStorage = process.env.BB_ADMISSION_STORAGE_FAILURE === "1"
+assert.ok([storageDevice, backgroundStorage, admissionStorage].filter(Boolean).length <= 1, "Run one owned storage fault at a time")
 const report = { checks: [], errors: [], responseBytes: [], providerRequests: 0, frozenSourceReachedProvider: false }
 const slow = {
   entered: Promise.withResolvers(),
@@ -136,7 +137,7 @@ try {
   })
   assert.ok(response.ok)
   const session = await response.json()
-  await call("runs.stop", { sessionID: session.id })
+  if (!admissionStorage) await call("runs.stop", { sessionID: session.id })
   const prompt = {
     sessionID: session.id,
     directory: join(data, "workspace"),
@@ -154,7 +155,23 @@ try {
       { type: "text", text: source, synthetic: true },
     ],
   }
-  await call("runs.admit", { prompt })
+  if (admissionStorage) {
+    const temporary = join(data, "chat-runs.json.tmp")
+    await mkdir(temporary)
+    await assert.rejects(call("runs.admit", { prompt }))
+    await rmdir(temporary)
+    // Cross multiple real host polling intervals after restoring storage.
+    await new Promise(resolve => setTimeout(resolve, 3500))
+    const run = await call("runs.get", { sessionID: session.id })
+    report.rejectedAdmission = { providerRequests: report.providerRequests, paused: run.paused, awaiting: run.awaiting, queued: run.queue.length, error: run.error }
+    console.log("OBSERVATION", JSON.stringify(report.rejectedAdmission))
+    assert.equal(report.providerRequests, 0)
+    assert.equal(run.paused, true)
+    assert.equal(run.awaiting, false)
+    assert.ok(run.error.includes("chat-runs.json.tmp"))
+    for (const key of Object.keys(prompt)) assert.deepEqual(run.queue[0].prompt[key], prompt[key])
+    check("A rejected admission stays paused across host polling after storage recovers and cannot silently reach the provider")
+  } else await call("runs.admit", { prompt })
   const { createServer } = await import("node:net")
   const available = createServer()
   await new Promise((resolve) => available.listen(0, "127.0.0.1", resolve))

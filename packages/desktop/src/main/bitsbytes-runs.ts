@@ -71,7 +71,10 @@ export class BBRuns {
   private persist() {
     return this.journal.save()
   }
-  private async save(chat: ChatRun) { await this.persist(); this.changed(chat.sessionID) }
+  private async save(chat: ChatRun) {
+    await this.persist().catch(error => { this.storageFailure(chat, error); throw error })
+    this.changed(chat.sessionID)
+  }
   async call(action: string, args: Record<string, unknown>) {
     const chat = this.get(String(args.sessionID ?? (args.prompt as RunPrompt | undefined)?.sessionID ?? ""))
     if (action === "get") return chat
@@ -247,12 +250,12 @@ export class BBRuns {
       }
       chat.error = failure
       if (chat.goal?.status === "active" && /429|quota|rate.?limit/i.test(chat.error)) { chat.goal.status = "usageLimited"; chat.goal.reason = chat.error }
-      await this.save(chat).catch(error => this.storageFailure(chat, error))
+      await this.save(chat).catch(() => undefined)
     } finally { this.admissions.delete(id); this.active.delete(id) }
   }
   private storageFailure(chat: ChatRun, error: unknown) {
-    // Unsaved background/startup state is usable only while paused. Preserve
-    // the previous journal and keep explicit mutations dependent on a saved write.
+    // Unsaved state cannot dispatch automatically after storage recovers.
+    // Preserve the previous journal; explicit mutations still reject their write.
     chat.paused = true; chat.awaiting = false; chat.error = String(error)
     if (chat.goal?.status === "active") {
       chat.goal.status = "paused"; chat.goal.reason = chat.error; chat.goal.elapsed = Date.now() - chat.goal.started

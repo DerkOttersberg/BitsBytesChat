@@ -26,6 +26,8 @@ Damaged saved panel layouts retain usable neighboring tabs instead of preventing
 
 A temporary startup journal-write failure preserves saved work and opens chats paused. Unreadable journals remain protected. Development and isolated QA launches leave the installed Windows URL handler alone.
 
+A rejected admission or Resume stays paused after storage returns; explicit Resume is required before automatic work can continue.
+
 ## New in 0.3.4
 
 - Unconfirmed engine admission now becomes a visible recoverable request after its timeout, without an endless busy state or automatic duplicate. A late acknowledgement reconciles the original message.
