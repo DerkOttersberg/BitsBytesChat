@@ -21,6 +21,7 @@ const state = {
   page: 1,
   pdf: null,
   generation: 0,
+  pageGeneration: 0,
   sending: false,
   polling: false,
   refreshGeneration: 0,
@@ -686,7 +687,7 @@ function textPreview(title, text) {
 async function preview(item, revision) {
   const token = ++state.generation
   state.preview = item
-  state.pdf?.destroy()
+  void state.pdf?.destroy().catch(() => undefined)
   state.pdf = null
   state.page = 1
   $("#preview-title").textContent = item.filename
@@ -717,7 +718,7 @@ async function preview(item, revision) {
       })
       const pdf = await task.promise
       if (token !== state.generation) {
-        pdf.destroy()
+        void pdf.destroy().catch(() => undefined)
         return
       }
       state.pdf = pdf
@@ -836,19 +837,27 @@ async function renderPage() {
   if (!state.pdf) return
   const token = state.generation,
     pdf = state.pdf,
-    page = await pdf.getPage(state.page)
-  if (token !== state.generation) return
-  const width = Math.max(240, $("#preview-content").clientWidth - 24),
-    scale = width / page.getViewport({ scale: 1 }).width,
-    ratio = Math.min(2, devicePixelRatio || 1),
-    viewport = page.getViewport({ scale: scale * ratio }),
-    canvas = node("canvas")
-  canvas.width = viewport.width
-  canvas.height = viewport.height
-  canvas.style.width = width + "px"
-  $("#preview-content").replaceChildren(canvas)
-  await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise
-  $("#pages").textContent = `${state.page} / ${pdf.numPages}`
+    index = state.page,
+    generation = ++state.pageGeneration
+  const current = () => token === state.generation && generation === state.pageGeneration && pdf === state.pdf
+  try {
+    const page = await pdf.getPage(index)
+    if (!current()) return
+    const width = Math.max(240, $("#preview-content").clientWidth - 24),
+      scale = width / page.getViewport({ scale: 1 }).width,
+      ratio = Math.min(2, devicePixelRatio || 1),
+      viewport = page.getViewport({ scale: scale * ratio }),
+      canvas = node("canvas")
+    canvas.width = viewport.width
+    canvas.height = viewport.height
+    canvas.style.width = width + "px"
+    $("#preview-content").replaceChildren(canvas)
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise
+    if (current()) $("#pages").textContent = `${index} / ${pdf.numPages}`
+  } catch (error) {
+    if (current() && error.name !== "RenderingCancelledException")
+      $("#preview-content").replaceChildren(node("p", error.message), button(C.retry, () => void renderPage()))
+  }
 }
 $("#versions").onchange = () => preview(state.preview, Number($("#versions").value))
 $("#previous-page").onclick = () => {
@@ -866,7 +875,7 @@ $("#next-page").onclick = () => {
 $("#preview-close").onclick = () => {
   $("#preview").close()
   state.generation++
-  state.pdf?.destroy()
+  void state.pdf?.destroy().catch(() => undefined)
   state.pdf = null
 }
 let pairing = null,
