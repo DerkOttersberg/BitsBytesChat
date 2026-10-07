@@ -8,6 +8,7 @@ import type { Model } from "../bitsbytes/types"
 import { bbt } from "../bitsbytes/copy"
 import { planRequest, openrouterRequest } from "./bitsbytes-request"
 import { catalogModels } from "./bitsbytes-models"
+import { readState, stateRecord } from "./bitsbytes-state"
 
 type Credentials = {
   host: string; client?: string; access?: string; refresh?: string; idToken?: string
@@ -35,7 +36,9 @@ export class BBProvider {
   async start() {
     const raw = await readFile(join(this.root, "credentials.bin")).catch(() => null)
     if (raw) this.credentials = JSON.parse(safeStorage.decryptString(raw))
-    this.catalog = JSON.parse(await readFile(join(this.root, "model-catalog.json"), "utf8").catch(() => "{}"))
+    this.catalog = await readState(this.root, "model-catalog.json", {}, value => stateRecord(value)
+      && Object.values(value).every(models => Array.isArray(models) && models.every(model => stateRecord(model)
+        && typeof model.id === "string" && typeof model.name === "string" && Number.isFinite(model.context))))
     this.modelsUpdated = Number(await readFile(join(this.root, "model-catalog-time"), "utf8").catch(() => "0"))
     if (this.credentials.openrouter) this.credentials.providers = { openrouter: { type: "api", key: this.credentials.openrouter }, ...this.credentials.providers }
     await this.persist()

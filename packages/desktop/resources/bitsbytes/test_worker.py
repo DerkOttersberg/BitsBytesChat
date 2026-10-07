@@ -147,6 +147,21 @@ class DurableWorkflow(unittest.TestCase):
         self.assertTrue(result["writable"])
         self.assertFalse(list(worker.ROOT.glob(".bitsbytes-check-*")))
 
+    def test_empty_or_invalid_container_is_an_error_not_a_completed_recording(self):
+        source = worker.ROOT / "empty.wav"
+        with wave.open(str(source), "wb") as file:
+            file.setnchannels(1); file.setsampwidth(2); file.setframerate(worker.RATE)
+            file.writeframes(b"")
+        with self.assertRaisesRegex(ValueError, "audioEmpty"):
+            worker.import_audio({"path": str(source)})
+        source = worker.ROOT / "invalid.m4a"
+        source.write_bytes(b"invalid-container")
+        with self.assertRaises(Exception):
+            worker.import_audio({"path": str(source)})
+        jobs = [json.loads(path.read_text()) for path in (worker.ROOT / "recordings").glob("*/job.json")]
+        self.assertEqual(len(jobs), 2)
+        self.assertTrue(all(job["status"] == "error" and job["importComplete"] is False for job in jobs))
+
     def test_crash_after_chunk_commit_does_not_duplicate_audio(self):
         job = worker.create_job({})
         payload = bytes(worker.RATE * 2 * 30)

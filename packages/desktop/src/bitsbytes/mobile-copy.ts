@@ -83,6 +83,7 @@ export const mobileCopy = {
   audioPermission: "Microphone access was blocked. Allow microphone access for this page in your browser settings, then retry, or upload an audio file.",
   audioUnavailable: "This browser cannot record audio on this page. Open the HTTPS phone link in Safari, or upload an audio file.",
   audioStorage: "Audio could not be saved on this phone. Check available storage or upload an existing recording.",
+  audioOtherTab: "Another tab is recording. Finish or cancel that recording before starting here.",
   audioEmpty: "No recoverable audio was captured. Start a new recording.",
   audioForeground: "Keep this page open and your phone unlocked while recording. Switching apps or locking the screen can interrupt the microphone.",
   audioLocal: "Recordings on this phone",

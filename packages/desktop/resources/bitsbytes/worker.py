@@ -216,7 +216,7 @@ def import_audio(args):
     update_job(job["id"], status="importing")
     buffer = bytearray()
     skip = round(job["duration"] * RATE) * 2
-    container = av.open(str(source))
+    container = None
     resampler = av.AudioResampler(format="s16", layout="mono", rate=RATE)
     def append(audio):
         nonlocal skip
@@ -225,6 +225,7 @@ def import_audio(args):
         skip -= count
         buffer.extend(payload[count:])
     try:
+        container = av.open(str(source))
         for frame in container.decode(audio=0):
             for audio in resampler.resample(frame):
                 append(audio)
@@ -236,11 +237,14 @@ def import_audio(args):
             append(audio)
         if buffer:
             add_chunk(job["id"], bytes(buffer))
+        if not read_job(job["id"])["duration"]:
+            raise ValueError("bb.error.audioEmpty")
     except Exception as exc:
         update_job(job["id"], status="error", error=str(exc))
         raise
     finally:
-        container.close()
+        if container:
+            container.close()
     return update_job(job["id"], status="recorded", importComplete=True)
 
 

@@ -9,12 +9,23 @@ export class BBArtifacts {
   items: DocumentArtifact[] = []
   private queue = Promise.resolve()
   private saving = Promise.resolve()
+  private publishing = Promise.resolve()
   private pending = new Set<string>()
   private focused = new Set<string>()
   runtime: BBArtifactRuntime
   constructor(private root: string, _python: string, private assets: string, private changed: (artifact: DocumentArtifact, published?: boolean) => void) { this.runtime = new BBArtifactRuntime(root, assets) }
   async start() {
-    this.items = JSON.parse(await readFile(join(this.root, "artifacts.json"), "utf8").catch(() => "[]"))
+    await mkdir(this.root, { recursive: true })
+    const source = await readFile(join(this.root, "artifacts.json"), "utf8").catch(() => "[]")
+    try {
+      const stored: unknown = JSON.parse(source)
+      if (!Array.isArray(stored)) throw new Error("Invalid artifact journal")
+      this.items = stored.filter(validArtifact)
+      if (this.items.length !== stored.length) await writeFile(join(this.root, `artifacts-recovery-${Date.now()}.json`), source)
+    } catch {
+      await writeFile(join(this.root, `artifacts-recovery-${Date.now()}.json`), source)
+      this.items = []
+    }
     for (const item of this.items) {
       item.kind ??= "document"; item.mime ??= "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       item.source ??= join(this.root, "previews/sources", item.hash + ".docx")
@@ -29,7 +40,13 @@ export class BBArtifacts {
     })
     return this.saving
   }
-  async publish(path: string, sessionID: string, sourceID?: string, turnID?: string) {
+  publish(path: string, sessionID: string, sourceID?: string, turnID?: string) {
+    // Concurrent tool calls must see the preceding snapshot before assigning a revision.
+    const result = this.publishing.then(() => this.publishNext(path, sessionID, sourceID, turnID))
+    this.publishing = result.then(() => undefined, () => undefined)
+    return result
+  }
+  private async publishNext(path: string, sessionID: string, sourceID?: string, turnID?: string) {
     const actual = await realpath(path)
     const checked = await this.runtime.call<{ hash: string; kind: DocumentArtifact["kind"]; mime: string }>("validate", { path: actual })
     const hash = checked.hash
@@ -37,12 +54,11 @@ export class BBArtifacts {
     const old = this.items.find(item => item.id === id)
     const focusKey = `${sessionID}:${turnID ?? "manual:" + id}`
     const focus = !this.focused.has(focusKey)
-    this.focused.add(focusKey)
     if (old?.hash === hash) {
       if (turnID) { old.turnID = turnID; old.turnIDs = [...new Set([...(old.turnIDs ?? []), turnID])] }
       if (old.path !== actual) { old.path = actual; old.filename = basename(actual); await this.persist() }
       else if (turnID) await this.persist()
-      this.changed(old, focus); return old
+      this.focused.add(focusKey); this.changed(old, focus); return old
     }
     const source = join(this.root, "previews/sources", hash + extname(actual).toLowerCase())
     const item: DocumentArtifact = { id, sessionID, turnID, turnIDs: [...new Set([...(old?.turnIDs ?? (old?.turnID ? [old.turnID] : [])), ...(turnID ? [turnID] : [])])], path: actual, filename: basename(actual), revision: (old?.revision ?? 0) + 1, hash, kind: checked.kind, mime: checked.mime, source, history: [...(old?.history ?? [])], status: "queued", updated: Date.now(), pdf: "", error: "" }
@@ -51,7 +67,7 @@ export class BBArtifacts {
     if (createHash("sha256").update(await readFile(source)).digest("hex") !== hash) throw new Error("bb.error.invalidDocument")
     item.history!.push({ revision: item.revision, hash, source, pdf: "", updated: item.updated, turnID })
     this.items = [...this.items.filter(row => row.id !== id), item]
-    await this.persist(); this.changed(item, focus); this.enqueue(item)
+    await this.persist(); this.focused.add(focusKey); this.changed(item, focus); this.enqueue(item)
     return item
   }
   retry(id: string) {
@@ -63,7 +79,8 @@ export class BBArtifacts {
   private version(id: string, revision?: number) {
     const item = this.items.find(row => row.id === id)
     if (!item) throw new Error("bb.error.invalidDocument")
-    const version = revision ? item.history?.find(row => row.revision === revision) : undefined
+    const version = revision === undefined ? undefined : item.history?.find(row => row.revision === revision)
+    if (revision !== undefined && !version) throw new Error("bb.error.invalidDocument")
     return { item, source: version?.source ?? item.source!, pdf: version?.pdf ?? item.pdf }
   }
   async read(id: string, revision?: number) {
@@ -71,7 +88,7 @@ export class BBArtifacts {
     return selected.pdf ? new Uint8Array(await readFile(selected.pdf)) : null
   }
   async content(id: string, args: Record<string, unknown> = {}) {
-    const selected = this.version(id, Number(args.revision) || undefined)
+    const selected = this.version(id, args.revision === undefined ? undefined : Number(args.revision))
     if (selected.item.kind === "spreadsheet") { const cached = join(this.root, "previews/pdf", basename(selected.source)); return this.runtime.call("grid", { path: existsSync(cached) ? cached : selected.source, sheet: args.sheet, offset: args.offset, limit: args.limit }) }
     if (selected.item.kind === "image") return { data: new Uint8Array(await readFile(selected.source)), mime: selected.item.mime }
     if (selected.item.kind === "html" || selected.item.kind === "code") {
@@ -118,4 +135,15 @@ export class BBArtifacts {
       finally { this.pending.delete(key); await this.persist(); if (this.items.find(row => row.id === item.id) === item) this.changed(item) }
     })
   }
+}
+
+function validArtifact(value: unknown): value is DocumentArtifact {
+  if (!value || typeof value !== "object") return false
+  const item = value as DocumentArtifact
+  return typeof item.id === "string" && typeof item.sessionID === "string"
+    && typeof item.path === "string" && typeof item.filename === "string" && typeof item.hash === "string"
+    && Number.isInteger(item.revision) && item.revision > 0 && Number.isFinite(item.updated)
+    && ["queued", "exporting", "ready", "error"].includes(item.status)
+    && (item.history === undefined || (Array.isArray(item.history) && item.history.every(version =>
+      version && Number.isInteger(version.revision) && typeof version.source === "string" && typeof version.hash === "string")))
 }

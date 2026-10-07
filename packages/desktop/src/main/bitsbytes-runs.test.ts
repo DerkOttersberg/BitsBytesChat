@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { tmpdir } from "node:os"
 import { BBRuns, type Inspection, type RunPrompt } from "./bitsbytes-runs"
@@ -116,4 +116,40 @@ test("goal budget and provider quota stop continuation without selecting another
   expect(quota.runs.get("ses_test").goal?.status).toBe("usageLimited")
   expect(quota.sent).toHaveLength(1)
   expect(quota.sent[0].model?.providerID).toBe("test")
+})
+
+test("damaged journals retain a recovery copy and cannot block startup", async () => {
+  for (const source of ["{broken", "null", '{"ses_bad":{"sessionID":"ses_bad","mode":"normal","queue":null}}']) {
+    const f = await fixture(); f.runs.close()
+    await writeFile(join(f.folder, "chat-runs.json"), source)
+    const restored = new BBRuns(f.folder, async () => f.state, async () => { throw new Error("Recovery must not dispatch") }, () => undefined)
+    fixtures.push({ runs: restored, folder: f.folder }); await restored.start()
+    expect(restored.get("ses_recovered").queue).toEqual([])
+    const backup = (await readdir(f.folder)).find(name => name.startsWith("chat-runs-recovery-"))!
+    expect(await readFile(join(f.folder, backup), "utf8")).toBe(source)
+  }
+})
+
+test("chat identity keys never inherit object properties", async () => {
+  const f = await fixture()
+  for (const id of ["constructor", "toString", "__proto__"]) expect(f.runs.get(id).sessionID).toBe(id)
+  await f.runs.call("stop", { sessionID: "__proto__" })
+  f.runs.close()
+  const restored = new BBRuns(f.folder, async () => f.state, async () => undefined, () => undefined)
+  fixtures.push({ runs: restored, folder: f.folder }); await restored.start()
+  expect(restored.get("__proto__").paused).toBe(true)
+  expect(restored.get("constructor").sessionID).toBe("constructor")
+})
+
+test("one malformed chat does not discard another chat's saved queue", async () => {
+  const f = await fixture()
+  await f.runs.call("admit", { prompt: f.prompt("msg_saved", "Keep this queued request") })
+  f.runs.close()
+  const saved = JSON.parse(await readFile(join(f.folder, "chat-runs.json"), "utf8"))
+  await writeFile(join(f.folder, "chat-runs.json"), JSON.stringify({ ...saved, ses_bad: null }))
+  const restored = new BBRuns(f.folder, async () => f.state, async () => { throw new Error("Recovery must not dispatch") }, () => undefined)
+  fixtures.push({ runs: restored, folder: f.folder }); await restored.start()
+  expect(restored.get("ses_test").paused).toBe(true)
+  expect(restored.get("ses_test").queue[0].prompt.text).toBe("Keep this queued request")
+  expect((await readdir(f.folder)).some(name => name.startsWith("chat-runs-recovery-"))).toBe(true)
 })

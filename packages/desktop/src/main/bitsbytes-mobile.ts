@@ -11,7 +11,9 @@ import { dirname } from "node:path"
 import type { BitsBytes } from "./bitsbytes"
 import type { Job } from "../bitsbytes/types"
 import { mobileCopy } from "../bitsbytes/mobile-copy"
+import { bbError } from "../bitsbytes/copy"
 import { mobileAddresses, mobileLocalIP, type MobileAdapter } from "./bitsbytes-mobile-network"
+import { readState, stateRecord } from "./bitsbytes-state"
 
 type Device = { id: string; name: string; token: string; expires: number; seen: number }
 type Pair = { id: string; secret: string; name: string; expires: number; status: "pending" | "approved" | "rejected" }
@@ -111,7 +113,13 @@ export class BBMobile {
   }
   async start() {
     await mkdir(join(this.folder(), "uploads"), { recursive: true })
-    const saved = JSON.parse(await readFile(join(this.folder(), "settings.json"), "utf8").catch(() => "{}"))
+    const saved = await readState<{ port?: number; enabled?: boolean; address?: string; devices?: Device[] }>(this.folder(), "settings.json", {}, value => stateRecord(value)
+      && (value.enabled === undefined || typeof value.enabled === "boolean")
+      && (value.port === undefined || (Number.isInteger(value.port) && Number(value.port) > 0 && Number(value.port) <= 65535))
+      && (value.address === undefined || typeof value.address === "string")
+      && (value.devices === undefined || (Array.isArray(value.devices) && value.devices.every(device => stateRecord(device)
+        && typeof device.id === "string" && typeof device.name === "string" && typeof device.token === "string"
+        && Number.isFinite(device.expires) && Number.isFinite(device.seen)))))
     this.port = Number(saved.port) || this.port
     this.devices = saved.devices ?? []
     this.preferredAddress = typeof saved.address === "string" ? saved.address : ""
@@ -788,11 +796,12 @@ export class BBMobile {
       upload.jobID = job.id
       await this.saveUpload(upload)
       await this.host.rpc("job.update", { id: job.id, values: { sessionID: upload.sessionID } })
-      await this.host.call("transcribe", { id: job.id })
+      const transcribed = await this.host.call<Job>("transcribe", { id: job.id })
+      if (!transcribed.transcript?.trim()) throw new Error("bb.error.transcriptEmpty")
       upload.status = "ready"
     } catch (error) {
       upload.status = "error"
-      upload.error = error instanceof Error ? error.message : mobileCopy.error
+      upload.error = error instanceof Error ? bbError(error) : mobileCopy.error
     } finally {
       this.processing.delete(upload.id)
       await this.saveUpload(upload)

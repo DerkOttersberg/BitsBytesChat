@@ -1,11 +1,12 @@
 import { createRequire } from "node:module"
 import { createServer } from "node:http"
-import { mkdir, readFile, writeFile, symlink } from "node:fs/promises"
+import { mkdir, readFile, readdir, writeFile, symlink } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { randomUUID } from "node:crypto"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import assert from "node:assert/strict"
+import { copy } from "../src/bitsbytes/copy.ts"
 
 const root = resolve("../.."),
   qa = join(root, ".tools/mobile")
@@ -50,6 +51,7 @@ const fixture = createServer(async (req, res) => {
 await new Promise((resolve) => fixture.listen(0, "127.0.0.1", resolve))
 await mkdir(join(data, "config/opencode"), { recursive: true })
 await symlink(join(process.env.LOCALAPPDATA, "BitsBytesChat/runtime"), join(data, "runtime"), "junction")
+if (process.env.BB_MOBILE_AUDIO === "1") await symlink(join(process.env.LOCALAPPDATA, "BitsBytesChat/models"), join(data, "models"), "junction")
 await writeFile(
   join(data, "config/opencode/opencode.json"),
   JSON.stringify({
@@ -70,7 +72,12 @@ await writeFile(
     },
   }),
 )
-const browser = await chromium.launch({ headless: true, channel: "msedge" })
+if (process.env.BB_MOBILE_DAMAGED_STATE === "1") {
+  await mkdir(join(data, "mobile"), { recursive: true })
+  for (const name of ["settings.json", "access-modes.json", "transcript-bindings.json", "model-selection.json", "model-catalog.json", "artifacts.json", "chat-runs.json", "mobile/settings.json"])
+    await writeFile(join(data, name), name.includes("bindings") ? "null" : "{broken")
+}
+const browser = await chromium.launch({ headless: true, channel: "msedge", args: ["--use-fake-device-for-media-stream"] })
 const app = await _electron.launch({
   executablePath:
     process.env.BB_MOBILE_EXECUTABLE || join(root, "packages/desktop/node_modules/electron/dist/electron.exe"),
@@ -104,6 +111,13 @@ try {
   await desktop.locator(".bb-nav").waitFor({ timeout: 90000 })
   const call = (method, args = {}) =>
     desktop.evaluate(({ method, args }) => window.api.bitsbytes.call(method, args), { method, args })
+  if (process.env.BB_MOBILE_DAMAGED_STATE === "1") {
+    const files = await readdir(data), mobileFiles = await readdir(join(data, "mobile"))
+    assert.equal(files.filter(name => name.includes("recovery-")).length, 7)
+    assert.ok(mobileFiles.some(name => name.startsWith("settings.json.recovery-")))
+    assert.equal((await call("state")).settings.engine, "parakeet")
+    check("Eight damaged optional journals preserve recovery copies while the real app opens with working chat")
+  }
   const server = await desktop.evaluate(() => window.api.awaitInitialization())
   const headers = {
     "content-type": "application/json",
@@ -269,6 +283,27 @@ try {
   )
   assert.ok(requests.some((request) => JSON.stringify(request.messages).includes("Selected skill")))
   check("Skill-only messages clear draft chips and deliver frozen skill context to the model")
+  if (process.env.BB_MOBILE_AUDIO === "1") {
+    await context.grantPermissions(["microphone"], { origin: new URL(phone.url()).origin })
+    const beforeMessages = (await engine(`/session/${session.id}/message`)).length
+    await phone.locator("#record-button").click()
+    await phone.getByText("Recording", { exact: true }).waitFor()
+    await wait(6400)
+    await phone.getByRole("button", { name: "Finish and attach transcript", exact: true }).click()
+    const uploaded = await phone.waitForFunction(async () => {
+      const response = await fetch("/uploads"), rows = await response.json()
+      return rows.find(row => row.status === "ready" || row.status === "error")
+    }, undefined, { timeout: 90000 }).then(handle => handle.jsonValue())
+    assert.equal(uploaded.status, "error", "Synthetic microphone tone must not become a speech transcript")
+    assert.equal(uploaded.error, copy["bb.error.transcriptEmpty"])
+    await phone.locator("#menu-button").click()
+    await phone.getByRole("button", { name: "Audio uploads", exact: true }).click()
+    await phone.getByText(copy["bb.error.transcriptEmpty"], { exact: true }).first().waitFor()
+    assert.equal(await phone.locator("#attachments .source-chip").count(), 0)
+    assert.equal((await engine(`/session/${session.id}/message`)).length, beforeMessages)
+    await phone.locator("#menu-button").click()
+    check("Paired HTTPS microphone uploads into real CPU Parakeet; no-speech failure is readable and does not attach or send")
+  }
   const source = join(data, "Mobile preview.docx")
   await promisify(execFile)(
     join(data, "runtime/worker/Scripts/python.exe"),
@@ -324,6 +359,10 @@ try {
   throw error
 } finally {
   await writeFile(join(qa, "verification.json"), JSON.stringify(report, null, 2))
+  if (process.env.BB_MOBILE_REPORT) {
+    await mkdir(join(root, ".tools/qa/results"), { recursive: true })
+    await writeFile(join(root, ".tools/qa/results", process.env.BB_MOBILE_REPORT + ".json"), JSON.stringify(report, null, 2))
+  }
   await context.close()
   await browser.close()
   await app.close()

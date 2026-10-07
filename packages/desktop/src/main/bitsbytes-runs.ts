@@ -18,7 +18,7 @@ export type Inspection = { busy: boolean; messages: { id: string; text: string; 
 
 // The Electron engine host owns this journal, independently of renderer lifetime.
 export class BBRuns {
-  chats: Record<string, ChatRun> = {}
+  chats: Record<string, ChatRun> = Object.create(null)
   private saving = Promise.resolve()
   private active = new Set<string>()
   private timer?: ReturnType<typeof setInterval>
@@ -26,7 +26,16 @@ export class BBRuns {
   async start() {
     await mkdir(this.root, { recursive: true })
     const source = await readFile(join(this.root, "chat-runs.json"), "utf8").catch(() => "{}")
-    try { this.chats = JSON.parse(source) } catch { await writeFile(join(this.root, `chat-runs-recovery-${Date.now()}.json`), source); this.chats = {} }
+    try {
+      const stored: unknown = JSON.parse(source)
+      if (!stored || typeof stored !== "object" || Array.isArray(stored)) throw new Error("Invalid chat run journal")
+      const entries = Object.entries(stored).filter(([id, chat]) => validChatRun(id, chat))
+      this.chats = Object.assign(Object.create(null), Object.fromEntries(entries))
+      if (entries.length !== Object.keys(stored).length) await writeFile(join(this.root, `chat-runs-recovery-${Date.now()}.json`), source)
+    } catch {
+      await writeFile(join(this.root, `chat-runs-recovery-${Date.now()}.json`), source)
+      this.chats = Object.create(null)
+    }
     for (const chat of Object.values(this.chats)) {
       if (chat.queue.length) chat.paused = true
       for (const item of chat.queue) if (item.status === "sending") item.status = "uncertain"
@@ -195,4 +204,18 @@ export class BBRuns {
       await this.save(chat)
     } finally { this.active.delete(id) }
   }
+}
+
+function validChatRun(id: string, value: unknown): value is ChatRun {
+  if (!value || typeof value !== "object") return false
+  const chat = value as ChatRun
+  return chat.sessionID === id && ["normal", "plan"].includes(chat.mode)
+    && Array.isArray(chat.queue) && chat.queue.every(item => item && typeof item.id === "string"
+      && ["pending", "sending", "uncertain", "failed"].includes(item.status)
+      && item.prompt?.sessionID === id && typeof item.prompt.id === "string"
+      && typeof item.prompt.text === "string" && typeof item.prompt.directory === "string")
+    && (chat.plan === undefined || (chat.plan && typeof chat.plan.text === "string" && Array.isArray(chat.plan.versions)
+      && chat.plan.versions.every(version => version && Number.isInteger(version.revision) && typeof version.text === "string")))
+    && (chat.goal === undefined || (chat.goal && typeof chat.goal.objective === "string"
+      && ["active", "paused", "blocked", "usageLimited", "budgetLimited", "complete"].includes(chat.goal.status)))
 }

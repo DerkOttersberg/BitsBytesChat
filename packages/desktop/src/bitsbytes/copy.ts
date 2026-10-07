@@ -78,6 +78,7 @@ export const copy = {
   "bb.error.templateMissing": "The intake template could not be opened. Choose Intakegesprek blanco.docx in the skill editor.",
   "bb.error.templateUnsupported": "This template does not match the 13-field intake form. Choose the supported blank intake template.",
   "bb.error.transcriptEmpty": "No speech was found. Check the selected microphone or audio file.",
+  "bb.error.audioEmpty": "No decodable audio was found. Record again or choose another audio file.",
   "bb.error.invalidSettings": "Check the settings: paths must be valid and folders must stay beneath the share root.",
   "bb.error.context": "The selected model cannot hold this conversation. Select a model with a larger context window.",
   "bb.error.wordPreview": "Word could not export the preview. The saved document remains available; open it in Word and try Preview again.",

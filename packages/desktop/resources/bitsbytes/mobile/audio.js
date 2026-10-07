@@ -37,17 +37,29 @@ export class PhoneAudio {
     return this.transaction(["recordings"], "readwrite", (tx) => tx.objectStore("recordings").put({ ...row }))
   }
   remove(row) {
-    if (this.active?.row.id === row.id) return
+    if (this.active?.row.id === row.id || row.status === "recording") return
     return this.transaction(["recordings", "chunks"], "readwrite", (tx) => {
       tx.objectStore("chunks").delete(IDBKeyRange.bound([row.id, 0], [row.id, Number.MAX_SAFE_INTEGER]))
       return tx.objectStore("recordings").delete(row.id)
     })
   }
   async recover() {
-    for (const row of await this.records()) {
-      if (row.status !== "recording") continue
-      await this.save({ ...row, status: "interrupted" })
+    const recover = async () => {
+      for (const row of await this.records()) {
+        if (row.status !== "recording") continue
+        await this.save({ ...row, status: "interrupted" })
+      }
     }
+    // A second phone tab must not recover or replace another tab's live capture.
+    if (!navigator.locks) return recover()
+    await navigator.locks.request("bitsbytes-phone-recording", { ifAvailable: true }, (lock) => {
+      if (lock) return recover()
+      // Closing a tab releases its locks asynchronously. Queue recovery without
+      // blocking this tab's startup, rather than missing that release boundary.
+      this.recovering ??= navigator.locks.request("bitsbytes-phone-recording", recover)
+        .catch(() => this.options.notice?.(this.options.copy.audioStorage))
+        .finally(() => { this.recovering = null })
+    })
   }
   async file(row) {
     const chunks = await this.transaction(["chunks"], "readonly", (tx) =>
@@ -65,6 +77,12 @@ export class PhoneAudio {
     this.options.update()
     let stream
     try {
+      if (navigator.locks) await new Promise((resolve, reject) => {
+        navigator.locks.request("bitsbytes-phone-recording", { ifAvailable: true }, async (lock) => {
+          if (!lock) { reject(Error(C.audioOtherTab)); return }
+          await new Promise((release) => { this.releaseLock = release; resolve() })
+        }).catch(reject)
+      })
       stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const mime = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"]
         .find((type) => MediaRecorder.isTypeSupported(type))
@@ -108,6 +126,11 @@ export class PhoneAudio {
     } catch (error) {
       stream?.getTracks().forEach((track) => track.stop())
       if (this.active?.recorder.state !== "inactive") this.active?.recorder.stop()
+      else if (this.active) {
+        await this.save({ ...this.active.row, status: "interrupted" }).catch(() => {})
+        this.active = null
+      }
+      if (!this.active) { this.releaseLock?.(); this.releaseLock = null }
       if (error.name === "NotAllowedError" || error.name === "SecurityError") throw Error(C.audioPermission)
       throw error
     } finally {
@@ -159,17 +182,22 @@ export class PhoneAudio {
     } catch (error) {
       this.options.notice(error.message)
     } finally {
+      this.releaseLock?.()
+      this.releaseLock = null
       this.working = false
       this.options.update()
     }
   }
   async submit(row) {
-    if (row.status === "attached") return
+    if (row.status === "attached" || row.status === "recording") return
     await this.save({ ...row, status: "finish" })
     const upload = await this.options.upload(await this.file(row), row.chat, row.uploadID, async (upload) => {
       row.uploadID = upload.id
       // Persist the server ID before sending chunks or finalizing: a lost acknowledgement is an exact retry.
-      await this.save({ ...row, status: "finish" })
+      await this.save({ ...row, status: "finish", error: "" })
+    }).catch(async (error) => {
+      await this.save({ ...row, status: "finish", error: error.message })
+      throw error
     })
     await this.save({ ...row, uploadID: upload.id, status: "processing" })
     this.options.notice(this.options.copy.processing)
@@ -184,6 +212,10 @@ export class PhoneAudio {
       const uploads = await this.options.request("/uploads")
       for (const row of pending) {
         const upload = uploads.find((item) => item.id === row.uploadID)
+        if (upload?.status === "error") {
+          await this.save({ ...row, status: "error", error: upload.error || this.options.copy.error })
+          continue
+        }
         if (upload?.status !== "ready") continue
         await this.options.attach(upload, row.chat)
         await this.save({ ...row, status: "attached" })

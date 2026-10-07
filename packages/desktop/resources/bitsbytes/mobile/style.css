@@ -157,6 +157,18 @@ header button {
   padding: 5px 9px;
   margin: 5px 5px 0 0;
   background: var(--surface);
+  max-width: 100%;
+}
+.source-chip button {
+  border: 0;
+  padding: 2px;
+  background: transparent;
+}
+.source-chip button:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .artifact-card {
   display: flex;
@@ -338,7 +350,7 @@ header button {
 }
 #notice {
   position: fixed;
-  bottom: 135px;
+  top: calc(68px + env(safe-area-inset-top));
   left: 12px;
   right: 12px;
   z-index: 8;

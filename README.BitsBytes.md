@@ -1,16 +1,23 @@
-# Bits & Bytes Chat 0.3.2
+# Bits & Bytes Chat 0.3.3
 
 Windows 11 desktop app built from OpenCode **v1.18.34**, upstream commit `aec0b9a6d8898f68f923aaf08b7306d931fd9d76`. The full source and runnable build are in this folder. The original upstream README and MIT license are retained.
 
 ## Start
 
-Double-click **Start BitsBytesChat.cmd**. Both this launcher and **Start BitsBytes Mobile.cmd** open the same v0.3.2 application, which includes desktop chat and mobile access. There is one engine, data directory and set of features. The launcher reads the main package version and brings an existing current window forward. If an older desktop/mobile copy or a copy without a visible window is still running, it offers to close that copy; enter **Y** only when you are ready to interrupt its active work. It never closes a copy without this choice. Startup failures remain visible and logs are saved under `%LOCALAPPDATA%\BitsBytesChat\launcher`. Keep the accompanying `Start BitsBytesChat.ps1` beside the CMD file. The executable is `packages\desktop\dist\0.3.2\win-unpacked\BitsBytesChat.exe`. An optional installer is `packages\desktop\dist\0.3.2\BitsBytesChat-win-x64.exe`. This personal build is unsigned.
+Double-click **Start BitsBytesChat.cmd**. Both this launcher and **Start BitsBytes Mobile.cmd** open the same v0.3.3 application, which includes desktop chat and mobile access. There is one engine, data directory and set of features. The launcher reads the main package version and brings an existing current window forward. If an older desktop/mobile copy or a copy without a visible window is still running, it offers to close that copy; enter **Y** only when you are ready to interrupt its active work. It never closes a copy without this choice. Startup failures remain visible and logs are saved under `%LOCALAPPDATA%\BitsBytesChat\launcher`. Keep the accompanying `Start BitsBytesChat.ps1` beside the CMD file. The executable is `packages\desktop\dist\0.3.3\win-unpacked\BitsBytesChat.exe`. An optional installer is `packages\desktop\dist\0.3.3\BitsBytesChat-win-x64.exe`. This personal build is unsigned.
 
 For the phone, open **Settings → Mobile access**, enable it and pair your phone while both devices are on the same network. The phone uses the computer's chats, model providers, tools and document helpers. Keep the computer running. See `MOBILE_ACCESS.md` for pairing, certificate and upload instructions. The earlier `dist\mobile` package is historical and is no longer targeted by either launcher.
 
 If a Python environment points at an absent installation, startup repairs its home from the compatible pinned interpreter already installed in the app's runtime, preserving packages and a backup of the configuration. An unavailable audio worker shows a repair action in **Settings → Audio** while chat and mobile access continue to open. **Set up local components** now repairs existing environments as well as creating missing ones.
 
-## New in 0.3
+## New in 0.3.3
+
+- Phone recording now has its own microphone in the composer. Pause/Resume, square Cancel and upward-arrow Finish are separate actions. Finish uploads in resumable chunks, transcribes on the laptop and attaches to the original chat draft; normal Send remains separate. Cancel retains audio on the phone without uploading. Saved browser chunks survive interruptions and can be recovered, downloaded or deleted from Audio uploads.
+- Phone PDF code loads only when previewing a document. Compact attachment styling and notifications keep the draft unobstructed. A second tab cannot replace a live recording.
+- Damaged optional saved-state files are preserved in recovery copies instead of preventing startup. Valid queues and artifacts survive an invalid neighboring entry. Concurrent document publication retains every revision, and nonexistent revisions produce an error instead of showing another version.
+- Windows source and upstream history are backed up in the private [DerkOttersberg/BitsBytesChat repository](https://github.com/DerkOttersberg/BitsBytesChat). QA scripts are included under `packages/desktop/scripts`; live AI checks explicitly opt in and default to GPT-5.6 Luna.
+
+## Chat and document features
 
 - While the assistant works: **Enter queues**, **Ctrl+Enter steers**, **Shift+Enter adds a line**. The upward arrow uses the selected default; the bent arrow uses the alternate action; the square stops and pauses pending work. Queue rows support Edit, reorder, delete, retry and a side chat. Settings → General changes the default follow-up behavior.
 - **/plan** adds a removable lightbulb chip and enables read-only planning, including under Full access. Expand the proposed-plan card or open its tab. Edit, Save/Revert, export and select earlier revisions. **Implement this plan** submits the selected saved revision.
@@ -67,7 +74,7 @@ This fork has its own app ID `nl.bitsbytes.chat`, protocol, icon and data/config
 
 ## Build and verification
 
-Run **Build Windows.ps1** to install dependencies, type-check, build the embedded engine and package Windows. It uses Bun 1.3.14. The downloaded Bun is retained in `.tools` for this checkout. The engine retains upstream version 1.18.34 for compatibility with published plugin dependencies; this app has version 0.3.2. Mobile access is built and packaged with this same application; a separate mobile package is no longer produced.
+Run **Build Windows.ps1** to install dependencies, type-check, build the embedded engine and package Windows. It uses Bun 1.3.14. The downloaded Bun is retained in `.tools` for this checkout. The engine retains upstream version 1.18.34 for compatibility with published plugin dependencies; this app has version 0.3.3. Mobile access is built and packaged with this same application; a separate mobile package is no longer produced.
 
 Relevant source: `packages/desktop/src/main/bitsbytes*.ts`, `src/renderer/bitsbytes`, `src/bitsbytes`, and `resources/bitsbytes`. The Python recording worker is a local JSON-lines daemon; Word preview exports are separate processes; jobs have durable identifiers, manifests, progress, errors and artifact references. Local agent capabilities are exposed through its authenticated stdio MCP adapter.
 

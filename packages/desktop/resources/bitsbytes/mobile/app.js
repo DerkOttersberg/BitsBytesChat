@@ -38,10 +38,12 @@ const button = (text, fn, className) => {
   element.onclick = fn
   return element
 }
+let noticeTimer
 const notice = (text) => {
+  clearTimeout(noticeTimer)
   $("#notice").textContent = text
   $("#notice").hidden = !text
-  if (text) setTimeout(() => ($("#notice").hidden = true), 7000)
+  if (text) noticeTimer = setTimeout(() => ($("#notice").hidden = true), 7000)
 }
 async function request(path, options = {}) {
   const response = await fetch(path, { ...options, credentials: "same-origin" })
@@ -83,17 +85,23 @@ function audioControls() {
 }
 async function attachTranscript(upload, sessionID) {
   const reference = await api("transcript-reference", { id: upload.jobID })
-  const key = "bb.draft." + sessionID, value = JSON.parse(localStorage.getItem(key) || "{}")
+  const key = "bb.draft." + sessionID, value = draft(sessionID)
   localStorage.setItem(key, JSON.stringify({ ...value, transcripts: [
     ...(value.transcripts || []).filter((row) => row.id !== upload.jobID),
     { id: upload.jobID, revision: reference.revision, name: upload.name },
   ] }))
   if (sessionID === state.chat) attachments()
 }
-const draft = () => {
+const draft = (sessionID = state.chat) => {
+  const key = "bb.draft." + sessionID, source = localStorage.getItem(key)
   try {
-    return JSON.parse(localStorage.getItem(draftKey()) || "{}")
+    const value = JSON.parse(source || "{}")
+    if (!value || typeof value !== "object" || Array.isArray(value)
+      || ["skills", "transcripts"].some(key => value[key] !== undefined && (!Array.isArray(value[key])
+        || !value[key].every(row => row && typeof row.id === "string")))) throw Error(C.error)
+    return value
   } catch {
+    if (source) try { localStorage.setItem(key + ".recovery", source) } catch {}
     return {}
   }
 }
@@ -246,7 +254,12 @@ async function recordings(root, generation) {
     group.append(node("strong", C.audioLocal), node("p", C.audioForeground, "muted"))
     for (const recording of rows) {
       const row = node("div", undefined, "list-row")
-      row.append(node("strong", recording.name), node("small", recording.status === "attached" ? C.audioAttached : recording.status === "processing" ? C.processing : C.audioSaved))
+      if (recording.status === "recording") {
+        row.append(node("strong", recording.name), node("small", C.audioOtherTab))
+        group.append(row)
+        continue
+      }
+      row.append(node("strong", recording.name), node("small", recording.error || (recording.status === "attached" ? C.audioAttached : recording.status === "processing" ? C.processing : C.audioSaved)))
       if (recording.status !== "attached") row.append(button(C.audioFinish, async () => {
         if (audio.active || audio.working) { notice(C.audioInProgress); return }
         audio.working = true

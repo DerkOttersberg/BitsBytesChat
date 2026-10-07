@@ -15,6 +15,7 @@ import type { BBEvent, Job, Settings, Skill, State, Model } from "../bitsbytes/t
 import { BBProvider } from "./bitsbytes-provider"
 import { modelConfiguration } from "./bitsbytes-models"
 import { repairPythonHome } from "./bitsbytes-runtime"
+import { readState, stateRecord } from "./bitsbytes-state"
 import { bbt } from "../bitsbytes/copy"
 import type { ServerReadyData } from "../preload/types"
 
@@ -69,7 +70,11 @@ export class BitsBytes {
     await mkdir(this.root, { recursive: true })
     await this.artifacts.start()
     await this.runs.start()
-    this.settings = { ...DEFAULTS, ...JSON.parse(await readFile(join(this.root, "settings.json"), "utf8").catch(() => "{}")) }
+    this.settings = { ...DEFAULTS, ...await readState(this.root, "settings.json", {}, value => stateRecord(value)
+      && Object.entries(DEFAULTS).every(([key, sample]) => value[key] === undefined
+        || (key === "microphone" ? value[key] === null || Number.isInteger(value[key]) : typeof value[key] === typeof sample))
+      && (value.engine === undefined || ["parakeet", "whisper", "groq"].includes(String(value.engine)))
+      && (value.acceleration === undefined || ["auto", "cpu"].includes(String(value.acceleration)))) }
     this.progress("skill packages")
     const intake = join(this.root, "skills/bits-en-bytes-intake")
     if (!existsSync(join(intake, "SKILL.md"))) {
@@ -92,9 +97,12 @@ export class BitsBytes {
         child.once("error", () => done()); child.once("exit", () => done())
       })
     }
-    this.accessModes = JSON.parse(await readFile(join(this.root, "access-modes.json"), "utf8").catch(() => "{}"))
-    this.transcriptSources = JSON.parse(await readFile(join(this.root, "transcript-bindings.json"), "utf8").catch(() => "{}"))
-    this.selection = JSON.parse(await readFile(join(this.root, "model-selection.json"), "utf8").catch(() => "null")) ?? undefined
+    this.accessModes = await readState(this.root, "access-modes.json", {}, value => stateRecord(value)
+      && Object.values(value).every(mode => mode === "ask" || mode === "full"))
+    this.transcriptSources = await readState(this.root, "transcript-bindings.json", {}, value => stateRecord(value)
+      && Object.values(value).every(row => stateRecord(row) && Object.values(row).every(revision => Number.isInteger(revision) && Number(revision) > 0)))
+    this.selection = await readState(this.root, "model-selection.json", undefined as typeof this.selection, value => value === null
+      || (stateRecord(value) && typeof value.providerID === "string" && typeof value.modelID === "string")) ?? undefined
     this.progress("encrypted provider credentials")
     await this.provider.start()
     const oldAuth = join(process.env.XDG_DATA_HOME!, "opencode/auth.json")
