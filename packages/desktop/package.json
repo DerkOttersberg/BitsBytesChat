@@ -5,10 +5,9 @@
   "version": "0.3.4",
   "type": "module",
   "license": "MIT",
-  "homepage": "https://opencode.ai",
+  "homepage": "https://github.com/DerkOttersberg/BitsBytesChat",
   "author": {
-    "name": "OpenCode",
-    "email": "hello@opencode.ai"
+    "name": "Derk Ottersberg"
   },
   "scripts": {
     "typecheck": "tsgo -b",

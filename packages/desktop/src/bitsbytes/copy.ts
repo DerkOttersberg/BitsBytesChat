@@ -1,5 +1,8 @@
 // English is the initial product locale. All added product copy lives in this typed dictionary.
 export const copy = {
+  mcpRobloxExample: "Roblox Studio example",
+  mcpTitle: "Custom MCP servers", mcpHint: "Add local tools or a remote MCP endpoint. Tool actions follow each chat’s permissions.", mcpNew: "Add MCP server", mcpConfig: "Server configuration (JSON)", mcpConfigHint: "Use type, command or url, enabled and an optional timeout in milliseconds. Local environment values and remote headers are supported. Values are saved in the local engine configuration and masked here; leave their placeholders or values blank to keep them.", mcpEmpty: "No custom MCP servers configured.", mcpSaved: "MCP settings saved.", mcpSavedWarning: "Settings are saved, but a connection could not be applied. Review the error and retry Save.", mcpRefresh: "Refresh MCP status", mcpRoblox: "Roblox Studio setup", mcpRobloxHint: "Enable Studio as an MCP server in Roblox Studio’s Assistant settings. Use the local command shown in its setup instructions; this app does not install or open Studio.", mcpConnected: "Connected", mcpDisabled: "Disabled", mcpFailed: "Connection failed", mcpAuth: "Authentication required", mcpRegistration: "Client registration required", mcpUnknown: "Status unavailable", mcpPending: "Connecting…", mcpRemove: "Remove MCP server", mcpLocalExample: "Local example", mcpRemoteExample: "Remote example",
+  "bb.error.mcpName": "Use a unique server name starting with a letter, followed by letters, numbers, underscores or hyphens. Built-in server names are protected.", "bb.error.mcpConfig": "Check the MCP configuration. Use the supported V1 local or remote fields; keep existing stored-value placeholders only on their original server.", "bb.error.mcpMissing": "This custom MCP server is no longer configured.",
   sheetCellLimit: "Long values and formulas are shortened in this preview. Open or download the file to view the complete contents.",
   "bb.error.workerUnavailable": "Audio is unavailable. Repair local components in Settings → Audio. Chat and mobile access remain available.",
   startupFailed: "Bits & Bytes Chat could not finish starting. Your saved data has been kept. Startup details are in: {{path}}",
@@ -38,7 +41,7 @@ export const copy = {
   localWorker: "Local transcription and documents", setup: "Install local components", setupReady: "Local components are ready",
   setupHint: "One-time setup downloads Python and speech libraries. Download the model once before your first recording.",
   downloadParakeet: "Download Parakeet", downloadWhisper: "Download Whisper", acceleration: "Acceleration", automatic: "Automatic", cpu: "CPU",
-  computerControl: "Windows application control", installComputer: "Install Windows tools", computerHint: "Uses Windows-MCP for mouse, keyboard and app control. OpenCode tool permissions still apply.",
+  computerControl: "Windows application control", installComputer: "Install Windows tools", computerHint: "Uses Windows-MCP for mouse, keyboard and app control. Each chat’s tool permissions still apply.",
   credentialsHint: "Credentials are encrypted with Windows and stored outside this Desktop folder.",
   running: "Working…", done: "Done", fit: "Fit width", openChat: "Open chat", createIntake: "Create intake", selectFile: "Choose a file",
   addToChat: "Add to chat",

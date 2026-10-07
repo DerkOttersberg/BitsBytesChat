@@ -7,6 +7,7 @@ import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
 import { usePermission } from "@/context/permission"
 import { useSDK } from "@/context/sdk"
+import { usePlatform } from "@/context/platform"
 import { useSync } from "@/context/sync"
 import { sessionPermissionRequest, sessionQuestionRequest } from "./session-request-tree"
 
@@ -14,9 +15,10 @@ export const todoState = (input: {
   count: number
   done: boolean
   live: boolean
+  retainIncomplete?: boolean
 }): "hide" | "clear" | "open" | "close" => {
   if (input.count === 0) return "hide"
-  if (!input.live) return "clear"
+  if (!input.live && (!input.retainIncomplete || input.done)) return "clear"
   if (!input.done) return "open"
   return "close"
 }
@@ -28,6 +30,7 @@ const idle = { type: "idle" as const }
 export function createSessionComposerController(options?: { closeMs?: number | (() => number) }) {
   const params = useParams()
   const sdk = useSDK()
+  const platform = usePlatform()
   const sync = useSync()
   const serverSync = useServerSync()
   const language = useLanguage()
@@ -64,7 +67,9 @@ export function createSessionComposerController(options?: { closeMs?: number | (
   const [store, setStore] = createStore({
     sessionID: params.id,
     responding: undefined as string | undefined,
-    dock: todos().length > 0 && !done() && live(),
+    dock: todoDockAtBoundary(
+      todoState({ count: todos().length, done: done(), live: live(), retainIncomplete: !!platform.bitsbytes }),
+    ),
     closing: false,
     opening: false,
   })
@@ -110,7 +115,8 @@ export function createSessionComposerController(options?: { closeMs?: number | (
     }, closeMs())
   }
 
-  // Keep stale turn todos from reopening if the model never clears them.
+  // Upstream clears stale turn todos. Desktop retains unfinished work through
+  // Stop/idle so the user can review it or resume the same task.
   const clear = () => {
     const id = params.id
     if (!id) return
@@ -128,6 +134,7 @@ export function createSessionComposerController(options?: { closeMs?: number | (
           count,
           done: complete,
           live: active,
+          retainIncomplete: !!platform.bitsbytes,
         })
 
         if (!previous || previous[0] !== id) {
@@ -195,7 +202,9 @@ export function createSessionComposerController(options?: { closeMs?: number | (
     dock: () =>
       store.sessionID === params.id
         ? store.dock
-        : todoDockAtBoundary(todoState({ count: todos().length, done: done(), live: live() })),
+        : todoDockAtBoundary(
+            todoState({ count: todos().length, done: done(), live: live(), retainIncomplete: !!platform.bitsbytes }),
+          ),
     closing: () => store.sessionID === params.id && store.closing,
     opening: () => store.sessionID === params.id && store.opening,
   }

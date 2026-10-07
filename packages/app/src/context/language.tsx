@@ -4,6 +4,8 @@ import { createStore } from "solid-js/store"
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { pluralCategory, type UiI18nPluralKey } from "@opencode-ai/ui/context/i18n"
 import { Persist, persisted } from "@/utils/persist"
+import { usePlatform } from "@/context/platform"
+import { brandTemplate, resolveBrandedTemplate } from "./language-brand"
 import { dict as en } from "@/i18n/en"
 import { dict as uiEn } from "@opencode-ai/ui/i18n/en"
 import {
@@ -167,6 +169,7 @@ export const { use: useLanguage, provider: LanguageProvider } = createSimpleCont
   name: "Language",
   gate: false,
   init: (props: { locale?: Locale; onNativeTranslations?: (bundle: DesktopNativeBundle) => void }) => {
+    const platform = usePlatform()
     const initial = props.locale ?? readStoredLocale() ?? detectLocale()
     const [store, setStore, _, ready] = persisted(
       Persist.global("language", ["language.v1"]),
@@ -189,17 +192,23 @@ export const { use: useLanguage, provider: LanguageProvider } = createSimpleCont
       initialValue: dicts.get(initial) ?? base,
     })
 
-    const t = i18n.translator(() => dict() ?? base, i18n.resolveTemplate) as (
-      key: keyof Dictionary,
-      params?: Record<string, string | number | boolean>,
-    ) => string
+    const translate = i18n.translator(() => dict() ?? base) as (key: keyof Dictionary) => string
+    const applicationName = () =>
+      platform.bitsbytes ? (platform.applicationName ?? translate("bitsbytes.brand")) : undefined
+    const t = (key: keyof Dictionary, params?: Record<string, string | number | boolean>) =>
+      resolveBrandedTemplate(String(key), translate(key), params, applicationName())
 
     const plural = (key: PluralKey, count: number, params?: Record<string, string | number | boolean>) => {
       const category = pluralCategory(intl(), count)
       const current = (dict.loading ? base : (dict() ?? base)) as Record<string, string>
       const candidate = `${key}.${category}`
       const fallback = `${key}.other`
-      return i18n.resolveTemplate(current[candidate] ?? current[fallback] ?? fallback, { ...params, count })
+      return resolveBrandedTemplate(
+        candidate,
+        current[candidate] ?? current[fallback] ?? fallback,
+        { ...params, count },
+        applicationName(),
+      )
     }
 
     const label = (value: Locale) => DESKTOP_NATIVE_LABELS[value]
@@ -217,7 +226,9 @@ export const { use: useLanguage, provider: LanguageProvider } = createSimpleCont
       const current = dict()
       if (!current) return
       props.onNativeTranslations(
-        createDesktopNativeBundle(locale(), (key) => current[key] ?? DESKTOP_NATIVE_ENGLISH[key]),
+        createDesktopNativeBundle(locale(), (key) =>
+          brandTemplate(key, current[key] ?? DESKTOP_NATIVE_ENGLISH[key], applicationName()),
+        ),
       )
     })
 

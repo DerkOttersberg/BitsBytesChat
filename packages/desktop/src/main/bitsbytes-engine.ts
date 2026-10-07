@@ -33,7 +33,7 @@ export async function engineRequest<T = unknown>(
   const signal = deadline && options.signal ? AbortSignal.any([deadline, options.signal]) : (deadline ?? options.signal)
   return fetch(server.url + path, { ...options, headers, signal })
     .then(async (response) => {
-      if (!response.ok) throw new Error(`OpenCode ${response.status}: ${(await response.text()).slice(0, 500)}`)
+      if (!response.ok) throw new Error(`${bbt("brand")} ${response.status}: ${(await response.text()).slice(0, 500)}`)
       return response.status === 204 ? (undefined as T) : ((await response.json()) as T)
     })
     .catch((error) => {
@@ -68,6 +68,8 @@ export async function inspectEngine(
           info: {
             id: string
             role: string
+            parentID?: string
+            time?: { created?: number }
             tokens?: { input?: number; output?: number; reasoning?: number }
             error?: unknown
           }
@@ -85,6 +87,9 @@ export async function inspectEngine(
       messages: state[1].map((row) => ({
         id: row.info.id,
         assistant: row.info.role === "assistant",
+        parentID: typeof row.info.parentID === "string" ? row.info.parentID : undefined,
+        created: typeof row.info.time?.created === "number" && Number.isFinite(row.info.time.created) && row.info.time.created >= 0 ? row.info.time.created : undefined,
+        aborted: Boolean(row.info.error && typeof row.info.error === "object" && "name" in row.info.error && row.info.error.name === "MessageAbortedError"),
         text: row.parts
           .filter((part) => part.type === "text")
           .map((part) => part.text ?? "")

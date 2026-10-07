@@ -3,7 +3,7 @@ import { createMemo } from "solid-js"
 import { useServerSync } from "./server-sync"
 import { useSDK } from "./sdk"
 import type { Message, Part } from "@opencode-ai/sdk/v2/client"
-import { messageKey } from "@/utils/session-message"
+import { upsertMessage } from "@/utils/session-message"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 
@@ -68,13 +68,12 @@ export function mergeOptimisticPage(page: MessagePage, items: OptimisticItem[]) 
   const confirmed: string[] = []
 
   for (const item of items) {
-    const result = Binary.search(session, messageKey(item.message), messageKey)
-    const found = result.found
-    if (!found) session.splice(result.index, 0, item.message)
+    const found = session.some((message) => message.id === item.message.id)
+    if (!found) upsertMessage(session, item.message)
 
     const current = part.get(item.message.id)
     if (found && hasParts(current, item.parts)) {
-      confirmed.push(item.message.id)
+      if (!confirmed.includes(item.message.id)) confirmed.push(item.message.id)
       continue
     }
 
@@ -93,8 +92,7 @@ export function mergeOptimisticPage(page: MessagePage, items: OptimisticItem[]) 
 export function applyOptimisticAdd(draft: OptimisticStore, input: OptimisticAddInput) {
   const messages = draft.message[input.sessionID]
   if (messages) {
-    const result = Binary.search(messages, messageKey(input.message), messageKey)
-    messages.splice(result.index, 0, input.message)
+    upsertMessage(messages, input.message)
   } else {
     draft.message[input.sessionID] = [input.message]
   }
@@ -104,8 +102,9 @@ export function applyOptimisticAdd(draft: OptimisticStore, input: OptimisticAddI
 export function applyOptimisticRemove(draft: OptimisticStore, input: OptimisticRemoveInput) {
   const messages = draft.message[input.sessionID]
   if (messages) {
-    const index = messages.findIndex((message) => message.id === input.messageID)
-    if (index >= 0) messages.splice(index, 1)
+    for (let index = messages.length - 1; index >= 0; index--) {
+      if (messages[index].id === input.messageID) messages.splice(index, 1)
+    }
   }
   delete draft.part[input.messageID]
 }

@@ -724,6 +724,36 @@
   width: 100%;
 }
 
+[data-component="read-image-attachments"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 6px;
+
+  [data-slot="read-image-thumbnail"] {
+    display: block;
+    width: 64px;
+    height: 48px;
+    border: 1px solid var(--border-weak-base);
+    border-radius: 6px;
+    overflow: hidden;
+    cursor: zoom-in;
+    background: var(--background-base);
+    padding: 0;
+
+    &:focus-visible {
+      outline: 2px solid var(--border-interactive-base);
+      outline-offset: 2px;
+    }
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+  }
+}
+
 [data-component="dock-prompt"][data-kind="permission"] {
   position: relative;
   display: flex;

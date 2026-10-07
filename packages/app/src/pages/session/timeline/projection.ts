@@ -18,7 +18,7 @@ export function createTimelineProjection(input: {
   const messageByID = createMemo(() => new Map(input.messages().map((message) => [message.id, message] as const)))
   const assistantMessagesByParent = createMemo(() => {
     const result = new Map<string, AssistantMessage[]>()
-    input.messages().forEach((message) => {
+    messageByID().forEach((message) => {
       if (message.role !== "assistant") return
       const messages = result.get(message.parentID)
       if (messages) {

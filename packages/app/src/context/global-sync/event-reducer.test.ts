@@ -418,6 +418,87 @@ describe("applyDirectoryEvent", () => {
     expect(store.part.msg_a).toBeUndefined()
   })
 
+  test("unchanged message timestamps reconcile in place while stale duplicate IDs are repaired", () => {
+    const sessionID = "ses_1"
+    const [store, setStore] = createStore(
+      baseState({ message: { [sessionID]: [userMessage("msg_same", sessionID, 1)] } }),
+    )
+    const original = store.message[sessionID]![0]
+    applyDirectoryEvent({
+      event: {
+        type: "message.updated",
+        properties: { info: { ...userMessage("msg_same", sessionID, 1), time: { created: 1, completed: 2 } } },
+      },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+    expect(store.message[sessionID]![0]).toBe(original)
+    expect(original.time).toEqual({ created: 1, completed: 2 })
+    setStore("message", sessionID, [
+      userMessage("msg_same", sessionID, 1),
+      userMessage("msg_other", sessionID, 2),
+      userMessage("msg_same", sessionID, 3),
+    ])
+    applyDirectoryEvent({
+      event: { type: "message.updated", properties: { info: userMessage("msg_same", sessionID, 3) } },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+    expect(store.message[sessionID]?.map((message) => message.id)).toEqual(["msg_other", "msg_same"])
+  })
+
+  test.each([0, 2, 4])("reconciles a repeated message ID when its timestamp becomes %s", (created) => {
+    const sessionID = "ses_1"
+    const [store, setStore] = createStore(
+      baseState({
+        message: {
+          [sessionID]: [
+            userMessage("msg_before", sessionID, 1),
+            { ...userMessage("msg_same", sessionID, 2), role: "assistant" } as Message,
+            userMessage("msg_after", sessionID, 3),
+          ],
+        },
+        part: { msg_same: [textPart("prt_same", sessionID, "msg_same")] },
+      }),
+    )
+    for (const completed of [undefined, 5]) {
+      applyDirectoryEvent({
+        event: {
+          type: "message.updated",
+          properties: {
+            info: { ...userMessage("msg_same", sessionID, created), role: "assistant", time: { created, completed } },
+          },
+        },
+        store,
+        setStore,
+        push() {},
+        directory: "/tmp",
+        loadLsp() {},
+      })
+    }
+
+    expect(store.message[sessionID]).toHaveLength(3)
+    expect(store.message[sessionID]?.filter((message) => message.id === "msg_same")).toHaveLength(1)
+    expect(store.message[sessionID]?.find((message) => message.id === "msg_same")?.time).toEqual({
+      created,
+      completed: 5,
+    })
+    expect(store.message[sessionID]?.map((message) => message.id)).toEqual(
+      created === 0
+        ? ["msg_same", "msg_before", "msg_after"]
+        : created === 4
+          ? ["msg_before", "msg_after", "msg_same"]
+          : ["msg_before", "msg_same", "msg_after"],
+    )
+    expect(store.part.msg_same?.map((part) => part.id)).toEqual(["prt_same"])
+  })
+
   test("upserts and prunes message parts", () => {
     const sessionID = "ses_1"
     const messageID = "msg_1"

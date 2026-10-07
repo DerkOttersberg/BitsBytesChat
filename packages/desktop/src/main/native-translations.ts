@@ -5,6 +5,7 @@ import {
   type DesktopNativeBundle,
   type DesktopNativeKey,
 } from "@opencode-ai/app/i18n/desktop-native"
+import { bbt } from "../bitsbytes/copy"
 
 let bundle: DesktopNativeBundle = { locale: "en", messages: { ...DESKTOP_NATIVE_ENGLISH } }
 
@@ -20,5 +21,5 @@ export function setNativeTranslations(next: DesktopNativeBundle) {
 }
 
 export function nativeT(key: DesktopNativeKey, params?: Record<string, string | number>) {
-  return formatDesktopNativeMessage(bundle.messages[key], params)
+  return formatDesktopNativeMessage(bundle.messages[key].replace(/\bOpenCode(?: Desktop)?\b/g, bbt("brand")), params)
 }

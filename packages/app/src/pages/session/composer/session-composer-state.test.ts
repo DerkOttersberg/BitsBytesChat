@@ -125,6 +125,30 @@ describe("todoState", () => {
   test("clears completed todos when the session is no longer live", () => {
     expect(todoState({ count: 2, done: true, live: false })).toBe("clear")
   })
+
+  test("desktop keeps unfinished todos available through Stop, idle and Resume", () => {
+    const states = [true, false, false, true].map((live) =>
+      todoState({ count: 2, done: false, live, retainIncomplete: true }),
+    )
+    expect(states).toEqual(["open", "open", "open", "open"])
+    expect(states.map(todoDockAtBoundary)).toEqual([true, true, true, true])
+  })
+
+  test("desktop entry and route boundaries expose unfinished idle todos", () => {
+    expect(todoDockAtBoundary(todoState({ count: 2, done: false, live: false, retainIncomplete: true }))).toBe(true)
+  })
+
+  test("desktop still closes finished active todos and clears finished idle todos", () => {
+    expect(todoState({ count: 2, done: true, live: true, retainIncomplete: true })).toBe("close")
+    expect(todoState({ count: 2, done: true, live: false, retainIncomplete: true })).toBe("clear")
+    expect(todoDockAtBoundary(todoState({ count: 2, done: true, live: false, retainIncomplete: true }))).toBe(false)
+  })
+
+  test("retaining unfinished desktop work does not create an empty dock or alter upstream clearing", () => {
+    expect(todoState({ count: 0, done: false, live: false, retainIncomplete: true })).toBe("hide")
+    expect(todoState({ count: 2, done: false, live: false, retainIncomplete: false })).toBe("clear")
+    expect(todoState({ count: 2, done: false, live: false })).toBe("clear")
+  })
 })
 
 describe("todoDockAtBoundary", () => {

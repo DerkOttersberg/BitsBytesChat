@@ -1,5 +1,6 @@
 import { BBArtifacts } from "./bitsbytes-artifacts"
 import { BBRuns, type RunPrompt, type Inspection, type InspectionOptions } from "./bitsbytes-runs"
+import { BBMcpSettings } from "./bitsbytes-mcp"
 import { BBBrowser } from "./bitsbytes-browser"
 import { BBMobile } from "./bitsbytes-mobile"
 import { spawn } from "node:child_process"
@@ -60,6 +61,7 @@ export class BitsBytes {
   private transcriptReads = new Map<string, Set<number>>()
   private transcriptSources: Record<string, Record<string, number>> = {}
   private configuration = Promise.resolve()
+  private customMcp?: BBMcpSettings
   private accessModes: Record<string, "ask" | "full"> = {}
   private selection?: { providerID: string; modelID: string }
   private stateSaving = Promise.resolve()
@@ -424,6 +426,7 @@ export class BitsBytes {
     return inspectEngine(await this.engine(), prompt, this.protocols, options)
   }
   private async dispatchRun(prompt: RunPrompt, signal?: AbortSignal) {
+    await this.customMcp?.apply(prompt.directory).catch(() => undefined)
     return dispatchEngine(await this.engine(), prompt, { protocol: this.protocols.get(prompt.sessionID), contextRoot: join(this.root, "run-context"), resolveAttachment: uri => this.resolveAttachment(uri, prompt.sessionID), signal })
   }
   private async runCall(action: string, args: Record<string, unknown>) {
@@ -444,6 +447,16 @@ export class BitsBytes {
     return this.stateSaving
   }
   async call(method: string, args: Record<string, unknown> = {}): Promise<unknown> {
+    if (method.startsWith("mcp.settings.")) {
+      this.customMcp ??= new BBMcpSettings(join(process.env.XDG_CONFIG_HOME!, "opencode/opencode.json"),
+        (path, options, directory) => this.engineFetch(path, options, directory),
+        () => [join(this.root, "workspace"), ...Object.values(this.runs.chats).flatMap(chat => chat.last ? [chat.last.directory] : [])])
+      const operation = this.configuration.catch(() => undefined).then(() => this.customMcp!.call(method.slice("mcp.settings.".length), args))
+      this.configuration = operation.then(() => undefined, () => undefined)
+      const result = await operation
+      this.emit({ type: "refresh" })
+      return result
+    }
     if (method.startsWith("mobile.")) return this.mobile.call(method.slice(7), args)
     if (method.startsWith("runs.")) return this.runCall(method.slice(5), args)
     if (method.startsWith("browser.")) return this.browser.call(method.slice(8), args)

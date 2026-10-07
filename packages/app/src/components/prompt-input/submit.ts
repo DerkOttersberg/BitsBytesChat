@@ -285,7 +285,9 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     const sessionID = params.id
     if (!sessionID) return Promise.resolve()
 
-    serverSync().session.set("todo", sessionID, [])
+    // Stopping a Bits & Bytes run pauses work; its durable task list remains
+    // useful for reviewing progress and resuming the same Goal.
+    if (!platform.bitsbytes) serverSync().session.set("todo", sessionID, [])
 
     input.onAbort?.()
     // A storage failure must remain visible without preventing interruption.

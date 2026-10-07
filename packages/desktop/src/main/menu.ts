@@ -19,7 +19,12 @@ type Deps = {
 }
 
 export function createMenu(deps: Deps) {
-  if (process.platform !== "darwin") return
+  if (process.platform !== "darwin") {
+    // Electron's default menu binds Ctrl+W to closing the window, even when
+    // the renderer is showing a dialog or has no closable tab.
+    Menu.setApplicationMenu(null)
+    return
+  }
 
   const template = DESKTOP_MENU.filter((menu) => desktopMenuVisible(menu, "macos")).map((menu) => {
     if (menu.role) return { role: nativeRole(menu.role), label: nativeT(menu.labelKey) }

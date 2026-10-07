@@ -8,9 +8,9 @@ import { Dialog } from "@opencode-ai/ui/dialog"
 import { List } from "@opencode-ai/ui/list"
 import { showToast } from "@/utils/toast"
 import { extractPromptFromParts } from "@/utils/prompt"
-import type { TextPart as SDKTextPart } from "@opencode-ai/sdk/v2/client"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { useLanguage } from "@/context/language"
+import { forkMessageLabel } from "./fork-message-label"
 
 interface ForkableMessage {
   id: string
@@ -42,12 +42,12 @@ export const DialogFork: Component = () => {
       if (message.role !== "user") continue
 
       const parts = sync().data.part[message.id] ?? []
-      const textPart = parts.find((x): x is SDKTextPart => x.type === "text" && !x.synthetic && !x.ignored)
-      if (!textPart) continue
+      const text = forkMessageLabel(parts, language.t("common.attachment"))
+      if (text === undefined) continue
 
       result.push({
         id: message.id,
-        text: textPart.text.replace(/\n/g, " ").slice(0, 200),
+        text,
         time: formatTime(new Date(message.time.created)),
       })
     }

@@ -165,7 +165,7 @@ export const { use: useHighlights, provider: HighlightsProvider } = createSimple
     }
 
     const start = (previous: string) => {
-      if (!settings.general.releaseNotes()) {
+      if (platform.bitsbytes || !settings.general.releaseNotes()) {
         markSeen()
         return
       }

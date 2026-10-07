@@ -15,6 +15,39 @@ mock.module("@opencode-ai/session-ui/message-part", () => ({
 const { Timeline, TimelineRow } = await import("./rows")
 
 describe("current session timeline rows", () => {
+  test("replayed assistant IDs render once while distinct identical answers remain separate", () => {
+    const assistant = {
+      id: "msg_answer",
+      type: "assistant",
+      agent: "build",
+      model: { id: "model", providerID: "provider" },
+      content: [{ type: "text", text: "same answer" }],
+      time: { created: 2, completed: 3 },
+    } satisfies SessionMessageInfo
+    const source = [
+      { id: "msg_user", type: "user", text: "request", time: { created: 1 } },
+      assistant,
+      { ...assistant, time: { created: 3, completed: 4 } },
+      { ...assistant, id: "msg_other_answer", time: { created: 5, completed: 6 } },
+    ] satisfies SessionMessageInfo[]
+    const normalized = normalizeSessionMessages("ses_1", source)
+    const messages = new Map(normalized.messages.map((message) => [message.id, message]))
+    const result = Timeline.constructSessionMessageRows(
+      source,
+      (messageID) => messages.get(messageID),
+      (messageID) => normalized.parts.get(messageID) ?? [],
+      true,
+      "idle",
+      true,
+      normalized.messages.filter((message) => message.role === "user"),
+    )
+    expect(result.rows.map(TimelineRow.key)).toEqual([
+      "user-message:msg_user",
+      "assistant-part:msg_user:msg_answer:text:0",
+      "assistant-part:msg_user:msg_other_answer:text:0",
+    ])
+  })
+
   test("derives turns and tagged rows from chronological current messages", () => {
     const source = [
       { id: "msg_1", type: "user", text: "first", time: { created: 1 } },

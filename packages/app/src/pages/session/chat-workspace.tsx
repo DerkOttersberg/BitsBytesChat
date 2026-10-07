@@ -1,6 +1,3 @@
-import { useTabs } from "../../context/tabs"
-import { useServerSDK } from "../../context/server-sdk"
-import { ServerConnection } from "../../context/server"
 import { For, Show, Switch, Match, createEffect, onCleanup, onMount, untrack, type JSX } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
@@ -33,7 +30,6 @@ export function ChatWorkspace(props: { sessionID?: string; chat: (headerActions:
   const platform = usePlatform(), language = useLanguage(), sdk = useSDK(), file = useFile(), local = useLocal(), sync = useSync()
   const session = useSessionLayout()
   const prompt = usePrompt()
-  const historyTabs = useTabs(), serverSDK = useServerSDK()
   const [store, setStore] = createStore({ tabs: [] as PanelTab[], active: "", collapsed: true, menu: false, width: 520, busy: false })
   const catalog = new Map<string, { id: string; sessionID: string; filename: string; revision?: number; kind?: string; path?: string; turnID?: string; history?: { revision: number; source: string }[] }>()
   const owner = () => props.sessionID ?? `draft:${sdk().directory}`
@@ -179,7 +175,6 @@ export function ChatWorkspace(props: { sessionID?: string; chat: (headerActions:
       const boundary = messages[completed + 1]?.id
       const fork = await api.session.fork({ sessionID: source, messageID: boundary })
       localStorage.setItem(sideChatContextKey(directory, fork.id), String(fork.time.created))
-      historyTabs.addSessionTab({ server: ServerConnection.key(serverSDK().server), sessionId: fork.id })
       await platform.bitsbytes!.call("access.set", { sessionID: fork.id, mode: access.mode })
       await platform.bitsbytes!.call("runs.inherit", { from: source, sessionID: fork.id })
       local.session.promote(directory, fork.id, { agent: selection.agent, model: selection.model, variant: selection.variant })

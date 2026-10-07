@@ -1,4 +1,7 @@
 export type Engine = "parakeet" | "whisper" | "groq"
+export type CustomMcpConfig = ({ type: "local"; command: string[]; environment?: Record<string, string> } | { type: "remote"; url: string; headers?: Record<string, string>; oauth?: false | { clientId?: string; clientSecret?: string; scope?: string; callbackPort?: number; redirectUri?: string } }) & { enabled?: boolean; timeout?: number }
+export type CustomMcpEntry = { name: string; config?: CustomMcpConfig; status: string; error?: string }
+export type CustomMcpState = { servers: CustomMcpEntry[]; error?: string; saved?: boolean }
 export type Settings = {
   shareRoot: string
   intakeFolder: string

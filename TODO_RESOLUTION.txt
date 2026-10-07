@@ -1,0 +1,117 @@
+Bits & Bytes Chat — resolution of todo.txt
+7 October 2026
+
+Scope
+I treated todo.txt as the issue inventory you asked me to analyze and improve. Its text is not authority to grant tools permissions or to answer approvals automatically. All 18 items below have an implementation, a concrete solution, or both. Design-only items are explicitly identified; they are not advertised as finished features.
+
+Changes are on todo-polish, based on the already verified chat-reliability branch. They are unreleased. The existing running app and v0.3.4 installer were not replaced or restarted. Native checks use owned, isolated profiles and a controlled local provider; no live credentials or billable model requests are needed.
+
+1. Recommended multiple-choice answers, two-minute inactivity timer, next/Skip
+Status: analyzed; implementation pending.
+The question tool already asks the model to put a recommended choice first and suffix it with “(Recommended)”. The schema has no authoritative recommended flag. Desktop single-select currently only selects; Next performs advancement. Dismiss rejects the whole request. Phone displays all questions together and needs separate multiple-selection/progression work.
+Solution: add default-off persistent auto-answer setting. A 120-second inactivity deadline applies only to optional, active single-choice questions with exactly one explicitly recommended option. Reveal the countdown after 60 seconds; actual pointer/keyboard/touch activity resets it. Pause while inactive/minimized, entering custom text or submitting. For literal mouse movement anywhere on Windows, use limited Electron cursor-position sampling only while that optional timer is active; an app-only mousemove listener does not cover the whole desktop. Never fabricate a recommendation or apply this to permission approvals.
+Single-select should save and advance immediately; the last question submits once. Multi-select and custom text keep explicit Next. Skip stores an empty answer array for the current question and advances; Dismiss remains rejection of the entire request. Preserve Back/cache, dispose timers on replacement/unmount, and use request generations to prevent duplicate or stale replies. Tests: fake clock at 59/60/119/120 seconds, activity reset, recommendation absent/ambiguous, hidden app, custom input, failed reply, request replacement and desktop/phone parity.
+
+2. Custom MCP tools and Roblox Studio
+Status: implemented for the shipped V1 engine; Roblox setup analyzed, real Studio connection unverified.
+Settings → Tools & permissions now provides custom-server list, status, local/remote JSON examples, save/edit/disable/remove and Roblox setup information. Local settings accept command[], environment, enabled and timeout; remote settings accept url, headers, oauth, enabled and timeout. Validation uses the actual V1 configuration schema. cwd and V2-only fields are rejected. Names cannot overwrite the app's built-in servers.
+Settings writes share the host's existing serialization with other configuration saves. Each mutation merges fresh configuration and atomically replaces it before targeted live disconnect/add; it preserves providers, permissions and built-ins. Later workspaces apply the saved change once. Connection failures remain visible and do not permanently block normal chat dispatch or retry on every unchanged prompt. Explicit Save retries. No global engine disposal/restart is required for these MCP changes.
+Environment/header/clientSecret values are masked in edit/list responses; placeholders or blank values preserve the existing value. Removing a key explicitly removes it. Error masking also covers recognizable Bearer tokens and Basic credentials/passwords echoed separately from their full header. These values persist in the engine's local MCP configuration, rather than the encrypted provider store; Settings now states this. Commands and URLs remain visible, so use environment/header fields for secrets. {env:VAR}/{file:path} substitution is not implemented during live custom activation; inherited process environment and cmd.exe percent-variable expansion still work. Remote OAuth login flows and a real remote server are not verified by the local fixture. V1 has no deletion endpoint, so a removed live entry can remain a disabled status placeholder until that workspace naturally reloads; its durable configuration and active tools are removed.
+Official Roblox manual setup: enable Studio's MCP server in Assistant settings, then use the documented Windows stdio command:
+{"type":"local","command":["cmd.exe","/c","%LOCALAPPDATA%\\Roblox\\mcp.bat"],"enabled":true}
+Source: https://create.roblox.com/docs/studio/mcp
+The app includes a disabled manual example. It does not install or open Studio; Bits & Bytes is not listed as a Roblox quick-connect client. Actual Studio/version/handshake remains a separate acceptance check.
+
+3. Steer while the original prompt is busy
+Status: analyzed; current V1 provider-turn behavior is unchanged.
+The host promotes Steer ahead of waiting queued messages, but V1 sends ordinary prompt_async into the existing runner. It cannot alter the provider request or tool already executing; new context is available at a later provider boundary. This explains why admission can occur before the user's visible intervention takes effect. V2 has explicit boundary-based steering, but the shipped V1 path does not have that contract.
+Solution: expose admitted versus applied steering, with a visible pending state until the runner promotes it at a safe boundary. If immediate intervention is desired, add an engine-owned atomic interrupt-and-steer operation that durably admits the new input, cancels the owned active turn, reconciles partial output, and resumes with that input exactly once. A renderer abort followed by an unrelated POST is not atomic and can race Stop/retry. Validate provider streaming, long tools, approvals, Stop during admission and exact retries for V1 and V2 separately.
+
+Source analysis found another V1 edge: if busy Steer B reaches history, Stop cancels A, and the engine produces no B-owned assistant, Goal Resume can wait for B indefinitely. Resending B would risk duplication. The runner needs a processed-input/turn acknowledgement and an explicit resume operation for that ownership; message IDs alone do not prove execution. The combined native fixture includes subsequent queued work and does not establish that this separate bare-Steer edge is solved.
+
+4. Brief queue flash when idle Send should look immediate
+Status: analyzed; presentation redesign pending.
+Every Send is intentionally journaled before execution. The UI currently renders the pending durable row before the asynchronous host pump inspects idle state, so even an idle request briefly appears in the queue. Bypassing the journal would weaken recovery.
+Solution: retain durable admission and render an idle submission immediately as one optimistic transcript row keyed by that admission's stable message ID. Distinguish waiting-for-busy-engine from sending/acknowledging rather than displaying all phases as a queued row. Reconcile against the same ID on acknowledgement; convert failures to visible recovery controls. The identity fixes in item16 provide necessary groundwork. Avoid an arbitrary hide timer, which can conceal a genuine waiting or failed request.
+
+5. Editing a queued message returns it to the composer and hides its queue row
+Status: implemented.
+Editing now excludes the original from the visible queue/count, while retaining its durable reserved row until Send or Cancel. This protects attachments and recovery without duplicating the visible text. Only one edit is selected per chat. Switching edits preserves the same-chat pre-edit composer for Cancel. Cancel restores it only after successful persistence; late/disposed responses cannot overwrite a different selection, including navigation A → B → A. After reload, Cancel clears an unchanged copied edit while preserving an independent newer draft. Comparison uses saved model/agent/variant IDs after selection and prompt hydration, so an unavailable catalog is not mistaken for a user change. Explicit different selections remain protected. Pre-edit text/context are retained even without an available model. Older image drafts without usable identities remain conservatively preserved if the renderer cannot establish that they are the copied source. Reordering visible neighbors preserves hidden reservation IDs. Reopening still exposes Editing/Cancel.
+
+6. Queue box too wide/tall
+Status: implemented.
+The queue is capped at 520px width, with smaller gaps/padding and a scrolling list capped at 112px. Narrow windows remain bounded by available width. Native checks measure actual rendered bounds; no general performance claim is inferred from CSS alone.
+
+7. PNG read should show Viewed image, thumbnail and enlargement
+Status: implemented for completed recorded raster attachments.
+The engine already returns the image bytes, but the renderer discarded tool attachments. Completed PNG/JPEG/GIF/WebP reads now propagate those recorded MIME data attachments, show “Viewed image”, and display an accessible 64×48 thumbnail opening the existing image-preview dialog. Completed image reads leave collapsed context grouping so the thumbnail is visible; grouped historical rows also support it. A .png filename alone, failed/pending tool call or unsupported URL is not proof an image was viewed. Previews use the exact recorded bytes, so modifying the file afterward cannot silently change historical evidence.
+
+8. Ctrl+W sometimes closes the whole app
+Status: implemented for Windows/Linux native menu fallback.
+Electron's default menu bound Ctrl+W to closing the native window. Renderer shortcuts sometimes had no closable tab or were suspended by a dialog, allowing that fallback. The host now explicitly removes the default application menu on Windows/Linux; macOS retains its native menu. Existing renderer tab shortcuts still operate. Native checks cover draft/chat composer, Settings, side chat and Fork dialog with the window retained. Broader focus routing across every browser/terminal/document child and multiwindow setup remains useful acceptance coverage.
+Electron documentation: https://www.electronjs.org/docs/latest/api/menu
+
+9. /side creates duplicate top and side-panel tabs; side chats should be temporary
+Status: duplicate top-tab registration fixed; temporary lifecycle pending.
+Opening a side chat no longer adds the same fork to the top titlebar. It still creates an engine fork that can remain in recent chats and saved panel state. Temporary lifecycle must be explicit, rather than deleting existing historical chats during a UI cleanup.
+Solution: assign a host-owned temporary side-session relation with parent ID and ownership. Exclude newly temporary sessions from persistent top/recent navigation. Close should stop and archive only the owned side session; keep the parent running. Recover/clean orphan temporary sessions after crashes without losing user-created persistent forks. This should share the redesign in item17; older side sessions should be migrated conservatively, not destructively deleted.
+
+10. Persistent Fork in the top-right three-dot menu
+Status: implemented.
+Both menu layouts now offer the existing “Fork from message” action. It opens the established boundary picker and creates a durable independent main chat, preserving the existing restored-draft semantics. The picker now includes attachment-only user messages using their recorded filename or localized attachment label. The action is disabled when there are no visible user messages. This is separate from /side's panel-only presentation.
+
+11. Remove OpenCode debug/promotional/support references
+Status: implemented for the product surfaces audited, with required exceptions retained.
+Generic Help/docs/theme/support/feedback paths now point to this fork. The Bits desktop suppresses the upstream debug bar and promotional changelog. Loaded-locale/native product copy and host HTTP diagnostics use Bits & Bytes branding; exported debug-log filenames use bitsbytes. Branding is applied to templates before interpolation so user filenames/errors containing “OpenCode” stay exact. Desktop package homepage/author metadata now identifies this fork for future Windows installer help/publisher metadata. Original license notices and technical package/protocol/provider identifiers remain. Actual external-provider onboarding links remain where needed to configure that service. This is a product-branding cleanup, not a claim that every occurrence of opencode has been removed from the source or historical documentation.
+
+12. Permanent Open plan button above composer
+Status: implemented.
+The persistent button is removed. The proposal's existing Open action still opens the full saved plan panel.
+
+13. Proposed plan fills too much of chat
+Status: implemented.
+The default/streaming body is capped at min(280px,35vh) and scrolls. Explicit Expand/Collapse controls change preview height; full Open and export preserve the complete plan. Completed proposals retain their disclosure behavior. No plan text is truncated or discarded.
+
+14. Combined Plan implementation + Goal + queued A/B + Steer B + open Todo
+Status: implemented regression coverage, Todo retention fixes and a scoped V1 Goal Resume fix; see final verification for native result.
+The actual host regression uses Plan revisions1/2, selected revision1 implementation, active Goal baseline/budget, full frozen A, B→Steer, held inspection, Stop/edit/reorder and explicit Resume. It asserts B-before-A dispatch, unique admission IDs, exact selected plan source, retained revision history and Goal accounting. Queue Resume and Goal Resume remain distinct controls.
+The native check exposed two independent Todo clearing paths: desktop Stop cleared the visible array, and the composer cleared unfinished tasks again when the engine became idle. Both now retain unfinished desktop work for review/resume; completed/cancelled idle tasks still clear and explicit collapse remains respected. The native local-provider fixture exercises the overlapping state, expanded Todo, selected old plan revision, Steer admission and Stop/Resume together. It records V1 boundary limitations explicitly; it cannot prove real provider responsiveness or long-running tool behavior from a synthetic response.
+
+Goal Resume also had a source-confirmed race: an unobserved canceled assistant could be treated as a new blocker after Resume. Inspection now retains the typed V1 cancellation and parent/creation metadata. Stop records owned input cutoffs, including busy Steer and repeated Stop; only a MessageAbortedError from those inputs created strictly before Stop is exempted from fresh error/no-progress decisions. Tokens, history, budget checks and later genuine failures remain. Tests cover immediate Resume, late old metadata after a newer input, mismatched ownership, repeated Stop, quota/budget and recovery. Missing ownership, equal-millisecond timestamps and V2's generic interruption remain conservative failures. The separate V1 execution-acknowledgement edge is covered in item3.
+
+Native QA additionally exposed a Windows draft-store race: unawaited asynchronous empty-file cleanup could hold a read handle during Conf's synchronous rename, or delete a newer nonempty save. Runtime empty-file removal/cache eviction is removed; empty files remain until the existing startup cleanup runs before stores and IPC open. Actual electron-store/Conf fixture tests cover delete/clear followed by writes, 200 rewrite cycles, startup retention and visible storage faults.
+
+15. Can the custom Goal harness enforce at least ten hours of work?
+Status: analyzed; no, not currently guaranteed.
+Goal stores start/elapsed/token budget, but has no minimum active-duration constraint or rejection of premature completion. Elapsed is based on wall time and includes pauses. Recovery pauses work; quotas, no-progress and blockers can stop continuation. A natural-language ten-hour request is not a reliable runtime contract.
+Solution: add explicit minimumActiveDurationMs plus persisted accumulated active time and current active segment. Exclude paused/blocked periods; resume accounting after recovery. Reject a completion transition before the requirement is met, with the remaining duration visible, while preserving budget/quota/permission and genuine blocker limits. Clarify active work versus elapsed wall time in settings/UI. Do not generate empty/status-only turns merely to consume time. Test with a fake clock across pause/resume/restart/completion/storage failures, then perform a separately recorded real endurance run. No ten-hour run is claimed here.
+
+16. Duplicate assistant output/IDs, especially around Stop
+Status: reproduced identity defect fixed; the precise intermittent Stop trigger is not independently established.
+The reducer searched by timestamp+ID. Replaying the same ID with a changed timestamp inserted a second record; a direct test reproduced this. Reconciliation now uses stable identity and moves a changed timestamp to its correct order. Existing duplicate IDs are repaired; ordinary unchanged timestamps retain Solid's in-place reconciliation. Optimistic merging/removal and timeline assistant projections also deduplicate by identity. Identical text with distinct IDs remains distinct; text-only deduplication would erase legitimate answers. The native combined Stop/Resume check additionally asserts unique engine admission IDs, but is not proof every real-provider duplicate path is eliminated.
+
+17. Side chat should explain busy parent Goal progress, not build its own game
+Status: analyzed; architecture change pending.
+Current /side copies completed parent history into a full independent engine fork. That includes the original Goal instruction, but excludes fresh in-flight parent progress. Even without copying host Goal ownership, a model can continue the copied task.
+Solution: create a diagnostic side session instead of a full task fork. Host records its parent and supplies a fresh, bounded progress snapshot for each side question: objective/status, current turn/tool, latest verified actions/evidence, elapsed/accounting, queued inputs and blockers, with snapshot time. Give the side session read-only progress/inspection capabilities and deny mutating tools; it must never inherit Goal ownership or continuation. Answer the new side question from that snapshot. Keep the parent running independently and implement temporary cleanup from item9. Feedback to the main chat is deliberately left out, as requested. Test side questions during streaming, tool execution, approvals, Stop/Resume, parent completion and parent navigation; prove no second task execution and no parent interruption.
+
+18. Achieved Goal lingers after next chat message
+Status: implemented without deleting evidence.
+A durable summaryDismissed marker hides the completed row after the next ordinary request is successfully admitted or proven by stable-ID history acknowledgement. A failed/uncertain submission retains it. The marker is tied to the completed Goal ID, so it cannot dismiss a replacement Goal. Full objective, status and evidence remain in the Goal panel/history and survive recovery.
+
+Verification and delivery
+All 296 scoped tests pass, with 1,506 assertions and no failures or skips: desktop 145/749, app 132/732, browser-condition Solid navigation/selection 2/5, session UI 17/20. App, desktop and session UI package typechecks pass. Full production compilation, including the embedded engine, passes; the final renderer bundle is main-CrCDaJBu.js. An existing timeout test now waits for actual dispatch and public uncertain/acknowledged states instead of racing an advisory pump.
+
+The isolated native Electron run passes all 14 checks with zero renderer errors and 21 controlled local-provider requests. It verifies a real stdio MCP tool invocation; Ctrl+W focus states; queue Edit/Cancel/Send across reloads and independent drafts; side-tab removal; persistent Fork including attachment-only messages; bounded/full plans; completed Goal dismissal; immediate Goal Resume; the combined Plan/Goal/queue/Steer/Todo/Stop/Resume state; and recorded PNG enlargement after changing the source file. The combined synthetic Goal deliberately stops as blocked/no-progress after later unchanged work. This is retained accounting and blocker behavior, not a claim of successful task completion or immediate V1 steering.
+
+The Goal fixture initially asserted cancellation metadata immediately after V1 reported idle. V1 publishes idle before persisting the canceled assistant, so that assertion raced finalization. The final check resumes at the idle boundary, then proves the original MessageAbortedError remains in history and does not become the resumed Goal's fresh blocker. The image fixture initially had a damaged PNG CRC; the engine correctly omitted it. Final image checks use a validated 8×8 PNG. These harness corrections are recorded rather than counted as successful checks.
+
+A serial comparison with the same isolated profile, settled fonts and five samples per build measures 55,000-character composer updates at 14.1 ms before / 14.0 ms after (medians). All ten samples are retained; this small difference does not establish a speedup. QA uses compiled production bundles under owned development Electron profiles. No replacement installer or release was produced.
+
+Source changes and this analysis are prepared on todo-polish, stacked on chat-reliability. VERIFICATION.md contains reproducible evidence paths, and the new verify-todo-polish.mjs script is included. Only fictional screenshots are committed; private QA logs and profiles stay ignored. The original Desktop todo.txt is unchanged.
+
+Recommended next implementation order
+First establish the engine's processed-input/resume contract for Steer and the bare-Steer Goal wait, because that controls execution reliability. Next implement temporary diagnostic side sessions with enforced read-only capabilities. Then implement question progression/Skip and the optional inactivity setting, followed by idle Send presentation and explicit minimum-duration Goal accounting. Each design above identifies the behavioral contract and its acceptance checks.
+
+Remaining acceptance scope
+The question timer/progression/Skip, idle Send presentation, immediate Steer engine operation, truly temporary/read-only diagnostic side sessions and minimum-duration Goal enforcement remain designs. Real remote MCP/OAuth and Roblox Studio are not claimed tested. Physical iPhone microphone/background behavior, other providers requiring credentials and Dutch accuracy remain deferred. No credentials, recordings, models or private QA profiles belong in the commit.

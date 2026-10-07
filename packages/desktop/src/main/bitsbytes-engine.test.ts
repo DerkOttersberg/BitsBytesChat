@@ -33,7 +33,7 @@ test("engine metadata retains authentication, encoded workspace and response sem
   expect(await engineRequest(server, "/metadata", { headers: { "x-qa": "kept" } }, "D:\\QA space\\é")).toEqual({ ready: true })
   expect(seen[0]).toEqual({ url: "/metadata", auth: "Basic " + Buffer.from("qa:fixture-only").toString("base64"), directory: encodeURIComponent("D:\\QA space\\é"), custom: "kept" })
   expect(await engineRequest(server, "/empty", {}, "D:\\QA")).toBeUndefined()
-  await expect(engineRequest(server, "/bad", {}, "D:\\QA")).rejects.toThrow("OpenCode 503: unavailable")
+  await expect(engineRequest(server, "/bad", {}, "D:\\QA")).rejects.toThrow("Bits & Bytes Chat 503: unavailable")
 })
 
 test.each(["headers", "body"])("a stalled metadata %s read expires and a later read works", async phase => {

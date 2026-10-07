@@ -12,6 +12,8 @@ If a Python environment points at an absent installation, startup repairs its ho
 
 ## Unreleased follow-up
 
+The `todo-polish` follow-up adds custom MCP configuration in **Settings → Tools & permissions**, compact queue editing, a persistent Fork menu action, bounded plan previews and recorded image thumbnails. It also addresses Windows Ctrl+W fallback, duplicate message identities, Todo retention during paused work, and dismissal of completed Goal summaries. The item-by-item analysis in `TODO_RESOLUTION.txt` distinguishes implemented changes from remaining designs, including immediate Steer, diagnostic temporary side chats and minimum-duration Goals. These changes have not replaced the published installer.
+
 The verified changes on `chat-reliability` are available in [draft PR #1](https://github.com/DerkOttersberg/BitsBytesChat/pull/1). The published installer remains `v0.3.4`. [VERIFICATION.md](VERIFICATION.md) records the reproduced failures, checks, measurements and remaining limits.
 
 Queue controls remain responsive during slow engine reads. Stop cancels that chat's preparation and admission transport, and still attempts interruption if saving the pause fails. Unsent work stays available for Resume; attempted admission is reconciled before retry. A later stopped preparation cannot erase earlier delivery uncertainty. Failed durable writes pause automatic work, retain the error and require explicit Resume after storage returns. Busy polling avoids repeatedly downloading full history when only status is needed.

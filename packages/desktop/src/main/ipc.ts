@@ -10,7 +10,8 @@ import type { FatalRendererError, ServerReadyData, TitlebarTheme } from "../prel
 import { runDesktopMenuAction } from "./desktop-menu-actions"
 import { setForceFocus } from "./debug"
 import { assertAttachmentBudget, createPickedFileAuthorizations } from "./attachment-picker"
-import { getStore, removeStoreFileIfEmpty } from "./store"
+import { getStore } from "./store"
+import { createStoreHandlers } from "./store-handlers"
 import {
   getPinchZoomEnabled,
   getWindowID,
@@ -117,35 +118,15 @@ export function registerIpcHandlers(deps: Deps) {
     if (!bundle) throw new Error("Invalid native translation bundle")
     deps.setNativeTranslations(bundle)
   })
-  ipcMain.handle("store-get", (_event: IpcMainInvokeEvent, name: string, key: string) => {
-    try {
-      const store = getStore(name)
-      const value = store.get(key)
-      if (value === undefined || value === null) return null
-      return typeof value === "string" ? value : JSON.stringify(value)
-    } catch {
-      return null
-    }
-  })
-  ipcMain.handle("store-set", (_event: IpcMainInvokeEvent, name: string, key: string, value: string) => {
-    getStore(name).set(key, value)
-  })
-  ipcMain.handle("store-delete", (_event: IpcMainInvokeEvent, name: string, key: string) => {
-    getStore(name).delete(key)
-    void removeStoreFileIfEmpty(name)
-  })
-  ipcMain.handle("store-clear", (_event: IpcMainInvokeEvent, name: string) => {
-    getStore(name).clear()
-    void removeStoreFileIfEmpty(name)
-  })
-  ipcMain.handle("store-keys", (_event: IpcMainInvokeEvent, name: string) => {
-    const store = getStore(name)
-    return Object.keys(store.store)
-  })
-  ipcMain.handle("store-length", (_event: IpcMainInvokeEvent, name: string) => {
-    const store = getStore(name)
-    return Object.keys(store.store).length
-  })
+  const stores = createStoreHandlers(getStore)
+  ipcMain.handle("store-get", (_event: IpcMainInvokeEvent, name: string, key: string) => stores.get(name, key))
+  ipcMain.handle("store-set", (_event: IpcMainInvokeEvent, name: string, key: string, value: string) =>
+    stores.set(name, key, value),
+  )
+  ipcMain.handle("store-delete", (_event: IpcMainInvokeEvent, name: string, key: string) => stores.delete(name, key))
+  ipcMain.handle("store-clear", (_event: IpcMainInvokeEvent, name: string) => stores.clear(name))
+  ipcMain.handle("store-keys", (_event: IpcMainInvokeEvent, name: string) => stores.keys(name))
+  ipcMain.handle("store-length", (_event: IpcMainInvokeEvent, name: string) => stores.length(name))
   ipcMain.handle("draft-get", (_event, key: string) => drafts.get(key))
   ipcMain.handle("draft-set", (_event, key: string, value: string) => drafts.set(key, value))
   ipcMain.handle("draft-delete", (_event, key: string) => drafts.set(key, null))

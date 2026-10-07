@@ -44,7 +44,10 @@ export namespace Timeline {
   ) {
     const turns: { user: UserMessage; assistants: AssistantMessage[] }[] = []
     const turnByUserID = new Map<string, (typeof turns)[number]>()
+    const seen = new Set<string>()
     messages.forEach((message) => {
+      if (seen.has(message.id)) return
+      seen.add(message.id)
       const projected = getMessage(message.id)
       if (message.type === "shell" && projected?.role === "user") {
         const assistant = getMessage(`${message.id}:assistant`)

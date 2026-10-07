@@ -1,6 +1,9 @@
 import { DESKTOP_NATIVE_ENGLISH } from "./desktop-native"
 
 export const dict = {
+  "bitsbytes.brand": "Bits & Bytes Chat",
+  "error.page.report.project": "to the project",
+  "error.chain.mcpConnectionFailed": 'MCP server "{{name}}" failed.',
   "bitsbytes.planReadOnly": "Plan mode is read-only. Remove the Plan chip or implement the approved plan before running commands.",
   "bitsbytes.planPlaceholder": "Describe the task you want to plan", "bitsbytes.goalPlaceholder": "What should I keep working toward?",
   "bitsbytes.plan": "Plan", "bitsbytes.goal": "Goal", "bitsbytes.planDescription": "Explore and agree a plan before implementing", "bitsbytes.goalDescription": "Keep working toward a saved objective",

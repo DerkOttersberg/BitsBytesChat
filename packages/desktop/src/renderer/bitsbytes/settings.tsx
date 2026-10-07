@@ -3,6 +3,7 @@ import { createStore } from "solid-js/store"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import type { Settings, State } from "../../bitsbytes/types"
 import { bbt, bbError } from "../../bitsbytes/copy"
+import { McpSettings } from "./mcp-settings"
 
 export function BitsBytesSettings(props: { page: "audio" | "tools" | "chatgpt" }) {
   const api = window.api.bitsbytes
@@ -56,6 +57,7 @@ export function BitsBytesSettings(props: { page: "audio" | "tools" | "chatgpt" }
           <label>{bbt("groqKey")}<input type="password" autocomplete="off" value={store.groq} placeholder={store.data?.groqSet ? bbt("keyStored") : ""} onInput={event => setStore("groq", event.currentTarget.value)} /></label><ButtonV2 variant="neutral" disabled={!!store.busy || !store.groq} onClick={() => void run("keys.save", { groq: store.groq })}>{bbt("saveKeys")}</ButtonV2>
         </Show>
           <Show when={props.page === "tools"}>
+            <McpSettings />
             <h3>{bbt("artifactsRuntime")}</h3><p class="bb-subtle">{bbt("artifactsHint")}</p><ButtonV2 disabled={!!store.busy} onClick={() => void run("artifact.setup")}>{bbt("installArtifacts")}</ButtonV2>
           <h3>{bbt("browserControl")}</h3><p class="bb-subtle">{bbt("browserHint")}</p><label class="bb-check"><input type="checkbox" checked={store.values.browserControl} onChange={event => setStore("values", "browserControl", event.currentTarget.checked)} />{bbt("enableBrowser")}</label>
           <h3>{bbt("computerControl")}</h3><p class="bb-subtle">{bbt("computerHint")}</p><label class="bb-check"><input type="checkbox" checked={store.values.computerControl} onChange={event => setStore("values", "computerControl", event.currentTarget.checked)} />{bbt("enable")}</label><div class="bb-actions"><ButtonV2 disabled={!!store.busy} onClick={() => void save()}>{bbt("save")}</ButtonV2><ButtonV2 variant="neutral" disabled={!!store.busy} onClick={() => void run("setup", { computer: true })}>{bbt("installComputer")}</ButtonV2></div>

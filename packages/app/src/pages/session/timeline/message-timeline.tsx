@@ -62,6 +62,7 @@ import { useFileComponent } from "@opencode-ai/ui/context/file"
 import { shouldMarkBoundaryGesture, normalizeWheelDelta } from "@/pages/session/message-gesture"
 import { SessionContextUsage } from "@/components/session-context-usage"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
+import { DialogFork } from "@/components/dialog-fork"
 import { useLanguage } from "@/context/language"
 import { useSessionKey } from "@/pages/session/session-layout"
 import { useSessionArchive } from "@/pages/session/session-archive"
@@ -288,7 +289,11 @@ export function MessageTimeline(props: {
     const id = sessionID()
     if (!id) return []
     const messages = sync().data.session_message[id] ?? []
-    return visibleTurns(messages, sessionMessages().filter(message => message.role === "user"), props.userMessages)
+    return visibleTurns(
+      messages,
+      sessionMessages().filter((message) => message.role === "user"),
+      props.userMessages,
+    )
   })
   const info = createMemo(() => {
     const id = sessionID()
@@ -1172,8 +1177,15 @@ export function MessageTimeline(props: {
                 aria-hidden={workingTurn(assistantPartRow().userMessageID)}
               >
                 {renderAssistantPartGroup(assistantPartRow, onSizeChange)}
-                <Show when={lastAssistantGroupKey().get(assistantPartRow().userMessageID) === assistantPartRow().group.key}>
-                  <ArtifactCards sessionID={sessionID()!} messageIDs={(assistantMessagesByParent().get(assistantPartRow().userMessageID) ?? emptyAssistantMessages).map(message => message.id)} />
+                <Show
+                  when={lastAssistantGroupKey().get(assistantPartRow().userMessageID) === assistantPartRow().group.key}
+                >
+                  <ArtifactCards
+                    sessionID={sessionID()!}
+                    messageIDs={(
+                      assistantMessagesByParent().get(assistantPartRow().userMessageID) ?? emptyAssistantMessages
+                    ).map((message) => message.id)}
+                  />
                 </Show>
               </div>
             </div>
@@ -1535,6 +1547,12 @@ export function MessageTimeline(props: {
                                 >
                                   <DropdownMenu.ItemLabel>{language.t("common.rename")}</DropdownMenu.ItemLabel>
                                 </DropdownMenu.Item>
+                                <DropdownMenu.Item
+                                  disabled={!props.userMessages.length}
+                                  onSelect={() => dialog.show(() => <DialogFork />)}
+                                >
+                                  <DropdownMenu.ItemLabel>{language.t("command.session.fork")}</DropdownMenu.ItemLabel>
+                                </DropdownMenu.Item>
                                 <Show when={shareEnabled()}>
                                   <DropdownMenu.Item
                                     onSelect={() => {
@@ -1610,6 +1628,12 @@ export function MessageTimeline(props: {
                                 }}
                               >
                                 {language.t("common.rename")}
+                              </MenuV2.Item>
+                              <MenuV2.Item
+                                disabled={!props.userMessages.length}
+                                onSelect={() => dialog.show(() => <DialogFork />)}
+                              >
+                                {language.t("command.session.fork")}
                               </MenuV2.Item>
                               <Show when={shareEnabled()}>
                                 <MenuV2.Item

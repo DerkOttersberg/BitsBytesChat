@@ -1,0 +1,44 @@
+.bb-proposed-plan {
+  border: 1px solid var(--border-weak-base);
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 8px 0;
+}
+
+.bb-proposed-plan summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.bb-proposed-plan-body {
+  max-height: min(280px, 35vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 16px 16px;
+}
+
+.bb-proposed-plan-body[data-expanded="true"] {
+  max-height: none;
+  overflow: visible;
+}
+
+.bb-proposed-plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-weak-base);
+}
+
+.bb-plan-chevron {
+  margin-left: auto;
+  transition: transform 0.15s ease;
+}
+
+.bb-proposed-plan[open] .bb-plan-chevron {
+  transform: rotate(180deg);
+}

@@ -4,7 +4,6 @@ import { rmSync } from "node:fs"
 import { join } from "node:path"
 
 import { SETTINGS_STORE } from "./store-keys"
-import { deleteStoreFileIfEmpty } from "./store-cleanup"
 
 const cache = new Map<string, Store>()
 
@@ -23,10 +22,6 @@ export function getStore(name = SETTINGS_STORE) {
   })
   cache.set(name, next)
   return next
-}
-
-export async function removeStoreFileIfEmpty(name: string) {
-  if (await deleteStoreFileIfEmpty(electron.app.getPath("userData"), name)) cache.delete(name)
 }
 
 export function removeStoreFile(name: string) {

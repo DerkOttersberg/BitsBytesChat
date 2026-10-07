@@ -378,6 +378,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       agent,
       session: {
         ready: savedReady,
+        selection: () => clone(scope()),
         reset() {
           setStore({ draft: undefined, promoting: undefined })
         },

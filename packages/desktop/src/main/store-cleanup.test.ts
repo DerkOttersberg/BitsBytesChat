@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, readdir, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { cleanupStoreFiles, deleteStoreFileIfEmpty } from "./store-cleanup"
+import { join, resolve } from "node:path"
+import { cleanupStoreFiles } from "./store-cleanup"
 
 const roots: string[] = []
 
@@ -18,7 +18,13 @@ async function writeStore(root: string, name: string, value: string, modified: D
 }
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
+  await Promise.all(
+    roots.splice(0).map((root) => {
+      if (!resolve(root).startsWith(resolve(join(tmpdir(), "opencode-store-cleanup-"))))
+        throw new Error("Invalid fixture path")
+      return rm(root, { recursive: true, force: true })
+    }),
+  )
 })
 
 describe("store cleanup", () => {
@@ -81,13 +87,18 @@ describe("store cleanup", () => {
     expect(remaining).toHaveLength(100)
   })
 
-  test("removes a scoped store immediately when it becomes empty", async () => {
+  test("startup cleanup preserves malformed and non-object scoped contents", async () => {
     const root = await tempRoot()
-    await writeStore(root, "opencode.draft.empty.dat", "{}", new Date("2026-07-01T00:00:00.000Z"))
-    await writeStore(root, "opencode.global.dat", "{}", new Date("2026-07-01T00:00:00.000Z"))
+    const now = new Date("2026-07-01T00:00:00.000Z")
+    await writeStore(root, "opencode.workspace.invalid.dat", "{damaged", now)
+    await writeStore(root, "opencode.workspace.array.dat", "[]", now)
+    await writeStore(root, "opencode.workspace.null.dat", "null", now)
 
-    expect(await deleteStoreFileIfEmpty(root, "opencode.draft.empty.dat")).toBe(true)
-    expect(await deleteStoreFileIfEmpty(root, "opencode.global.dat")).toBe(false)
-    expect(await readdir(root)).toEqual(["opencode.global.dat"])
+    expect((await cleanupStoreFiles(root, now.getTime())).deleted).toEqual([])
+    expect((await readdir(root)).sort()).toEqual([
+      "opencode.workspace.array.dat",
+      "opencode.workspace.invalid.dat",
+      "opencode.workspace.null.dat",
+    ])
   })
 })

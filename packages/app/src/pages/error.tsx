@@ -6,7 +6,6 @@ import { Component, createSignal, onMount, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { usePlatform } from "@/context/platform"
 import { useLanguage } from "@/context/language"
-import { Icon } from "@opencode-ai/ui/icon"
 import { errorDescriptionKey } from "./error-description"
 
 export type InitError = {
@@ -60,7 +59,7 @@ function formatInitError(error: InitError, t: Translator): string {
   switch (error.name) {
     case "MCPFailed": {
       const name = typeof data.name === "string" ? data.name : ""
-      return t("error.chain.mcpFailed", { name })
+      return t("error.chain.mcpConnectionFailed", { name })
     }
     case "ProviderAuthError": {
       const providerID = typeof data.providerID === "string" ? data.providerID : t("common.unknown")
@@ -354,10 +353,9 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
             <button
               type="button"
               class="flex items-center text-text-interactive-base gap-1"
-              onClick={() => platform.openExternal("https://opencode.ai/desktop-feedback")}
+              onClick={() => platform.openExternal("https://github.com/DerkOttersberg/BitsBytesChat/issues/new")}
             >
-              <div>{language.t("error.page.report.discord")}</div>
-              <Icon name="discord" class="text-text-interactive-base" />
+              <div>{language.t("error.page.report.project")}</div>
             </button>
           </div>
           <Show when={platform.version}>

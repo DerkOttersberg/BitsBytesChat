@@ -14,6 +14,8 @@ type StoreCandidate = {
   empty: boolean
 }
 
+// Run only before live stores/IPC are opened. Async reads/removal must not race
+// Conf's synchronous atomic replacement or evict a newly written store.
 export async function cleanupStoreFiles(userDataPath: string, now = Date.now()) {
   const entries = await readdir(userDataPath, { withFileTypes: true }).catch(() => [])
   const candidates = (
@@ -59,18 +61,6 @@ export async function cleanupStoreFiles(userDataPath: string, now = Date.now()) 
   )
 
   return { scanned: candidates.length, deleted }
-}
-
-export async function deleteStoreFileIfEmpty(userDataPath: string, name: string) {
-  if (!storeKind(name)) return false
-
-  const file = join(userDataPath, name)
-  const stats = await stat(file).catch(() => undefined)
-  if (!stats?.isFile()) return false
-  if (!(await isEmptyStore(file, stats.size))) return false
-
-  await rm(file, { force: true })
-  return true
 }
 
 function storeKind(name: string): StoreKind | undefined {

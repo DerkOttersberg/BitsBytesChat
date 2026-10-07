@@ -7,6 +7,7 @@ import type {
 } from "@opencode-ai/client/promise"
 import type { AssistantMessage, FilePart, Message, Part, ToolPart, UserMessage } from "@opencode-ai/sdk/v2"
 import { Option, Schema } from "effect"
+import { Binary } from "@opencode-ai/core/util/binary"
 
 const emptyTokens = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
 const emptyModel: { id: string; providerID: string; variant?: string } = { id: "", providerID: "" }
@@ -19,6 +20,28 @@ export function compareMessages(a: Pick<Message, "id" | "time">, b: Pick<Message
 }
 
 export const messageKey = (message: Pick<Message, "id" | "time">) => message.time.created + message.id
+
+export function messageUpdateIndex(messages: Message[], message: Message) {
+  const result = Binary.search(messages, messageKey(message), messageKey)
+  if (!result.found || messages[result.index].id !== message.id) return
+  if (messages.some((item, index) => index !== result.index && item.id === message.id)) return
+  return result.index
+}
+
+export function upsertMessage(messages: Message[], message: Message) {
+  const index = messageUpdateIndex(messages, message)
+  if (index !== undefined) {
+    messages[index] = message
+    return
+  }
+  // A retried legacy admission can correct its timestamp without changing ID.
+  // Identity stays authoritative; ordering only chooses the insertion position.
+  for (let index = messages.length - 1; index >= 0; index--) {
+    if (messages[index].id === message.id) messages.splice(index, 1)
+  }
+  const result = Binary.search(messages, messageKey(message), messageKey)
+  messages.splice(result.index, 0, message)
+}
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)

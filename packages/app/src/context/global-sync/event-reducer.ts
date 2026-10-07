@@ -15,7 +15,7 @@ import type { State, VcsCache } from "./types"
 import { trimSessions } from "./session-trim"
 import { dropSessionCaches } from "./session-cache"
 import { diffs as list, message as clean } from "@/utils/diffs"
-import { messageKey } from "@/utils/session-message"
+import { messageUpdateIndex, upsertMessage } from "@/utils/session-message"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const SESSION_CONTENT_EVENTS = new Set([
@@ -276,16 +276,16 @@ export function applyDirectoryEvent(input: {
         input.setStore("message", info.sessionID, [info])
         break
       }
-      const result = Binary.search(messages, messageKey(info), messageKey)
-      if (result.found) {
-        input.setStore("message", info.sessionID, result.index, reconcile(info))
+      const index = messageUpdateIndex(messages, info)
+      if (index !== undefined) {
+        input.setStore("message", info.sessionID, index, reconcile(info))
         break
       }
       input.setStore(
         "message",
         info.sessionID,
         produce((draft) => {
-          draft.splice(result.index, 0, info)
+          upsertMessage(draft, info)
         }),
       )
       break

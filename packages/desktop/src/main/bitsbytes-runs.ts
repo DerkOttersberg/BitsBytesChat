@@ -11,12 +11,12 @@ export type RunPrompt = {
   legacyParts?: unknown[]; files?: { uri: string; name?: string }[]; agents?: { name: string }[]
   draft?: unknown; protocol?: "v1" | "v2"; mode?: "normal" | "plan"; goal?: boolean; delivery?: "queue" | "steer"; prepared?: boolean; turnID?: string
 }
-export type QueuedInput = { id: string; prompt: RunPrompt; status: "pending" | "sending" | "uncertain" | "failed"; sentAt?: number; error?: string; editing?: boolean; delivery: "queue" | "steer" }
-export type Goal = { id: string; objective: string; status: "active" | "paused" | "blocked" | "usageLimited" | "budgetLimited" | "complete"; reason: string; evidence: string; started: number; elapsed: number; tokens: number; budget?: number; lastTurn?: string; firstID?: string; continuations: number; baseline?: number; progress?: string }
+export type QueuedInput = { id: string; prompt: RunPrompt; status: "pending" | "sending" | "uncertain" | "failed"; sentAt?: number; error?: string; editing?: boolean; delivery: "queue" | "steer"; dismissGoalID?: string }
+export type Goal = { id: string; objective: string; status: "active" | "paused" | "blocked" | "usageLimited" | "budgetLimited" | "complete"; reason: string; evidence: string; started: number; elapsed: number; tokens: number; budget?: number; lastTurn?: string; firstID?: string; continuations: number; baseline?: number; progress?: string; summaryDismissed?: boolean; pendingInputIDs?: string[]; stoppedInputs?: { id: string; before: number }[] }
 export type Plan = { id: string; revision: number; text: string; versions: { revision: number; text: string }[] }
 export type ChatRun = { sessionID: string; mode: "normal" | "plan"; goalDraft: boolean; replaceGoal?: boolean; paused: boolean; queue: QueuedInput[]; goal?: Goal; plan?: Plan; last?: RunPrompt; awaiting?: boolean; error: string }
 export type ChatRunPanel = Pick<ChatRun, "goal" | "plan">
-export type Inspection = { busy: boolean; messages: { id: string; text: string; tokens: number; tools: number; progress?: string; assistant?: boolean; error?: string }[] }
+export type Inspection = { busy: boolean; messages: { id: string; text: string; tokens: number; tools: number; progress?: string; assistant?: boolean; error?: string; parentID?: string; created?: number; aborted?: boolean }[] }
 export type InspectionOptions = { readBusyMessages?: boolean }
 export type DispatchResult = void | "not-sent"
 
@@ -119,7 +119,7 @@ export class BBRuns {
         await this.save(chat); void this.pump(chat.sessionID)
         return existing
       }
-      const item: QueuedInput = { id: prompt.id, prompt, status: "pending", delivery: args.delivery === "steer" ? "steer" : "queue" }
+      const item: QueuedInput = { id: prompt.id, prompt, status: "pending", delivery: args.delivery === "steer" ? "steer" : "queue", dismissGoalID: chat.goal?.status === "complete" ? chat.goal.id : undefined }
       if (existing) chat.queue.splice(chat.queue.indexOf(existing), 1, item)
       else chat.queue.push(item)
       await this.save(chat); void this.pump(chat.sessionID); return item
@@ -128,7 +128,7 @@ export class BBRuns {
     if (["delete", "edit", "cancel-edit", "steer", "retry"].includes(action)) {
       if (!item || item.status === "sending") throw new Error("bb.error.deliveryConflict")
       if (action === "delete") { chat.queue = chat.queue.filter(row => row !== item); if (!chat.queue.some(row => row.error)) chat.error = "" }
-      if (action === "edit") item.editing = true
+      if (action === "edit") { for (const entry of chat.queue) if (entry.editing) entry.editing = false; item.editing = true }
       if (action === "cancel-edit") item.editing = false
       if (action === "steer" || action === "retry") { item.delivery = action === "steer" ? "steer" : item.delivery; item.status = "pending"; item.error = ""; chat.error = ""; chat.paused = false }
     }
@@ -137,7 +137,18 @@ export class BBRuns {
       if (!Array.isArray(ids) || new Set(ids).size !== chat.queue.length || chat.queue.some(item => !ids.includes(item.id) || item.status === "sending")) throw new Error("bb.error.deliveryConflict")
       chat.queue.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id))
     }
-    if (action === "stop") { chat.paused = true; chat.awaiting = false; this.admissions.get(chat.sessionID)?.abort(); if (chat.goal?.status === "active") { chat.goal.elapsed = Date.now() - chat.goal.started; chat.goal.status = "paused"; chat.goal.reason = "stopped" } }
+    if (action === "stop") {
+      if (chat.goal && chat.goal.status !== "complete") {
+        const goal = chat.goal
+        const before = Date.now()
+        // Steer may replace chat.last while the original provider turn is still
+        // running. Retain ownership of every admitted input until its boundary.
+        const ids = new Set([...(goal.pendingInputIDs ?? []), ...(chat.awaiting && chat.last?.protocol !== "v2" && chat.last ? [chat.last.id] : [])])
+        if (ids.size) goal.stoppedInputs = [...(goal.stoppedInputs ?? []).filter(row => !ids.has(row.id)), ...[...ids].map(id => ({ id, before }))]
+        if (goal.status === "active") { goal.elapsed = before - goal.started; goal.status = "paused"; goal.reason = "stopped" }
+      }
+      chat.paused = true; chat.awaiting = false; this.admissions.get(chat.sessionID)?.abort()
+    }
     if (action === "resume") { chat.paused = false; for (const entry of chat.queue) if (entry.status === "failed") entry.status = "pending" }
     if (action === "goal-pause" && chat.goal) { chat.goal.elapsed = Date.now() - chat.goal.started; chat.goal.status = "paused" }
     if (action === "goal-resume" && chat.goal) { if (chat.goal.budget && chat.goal.tokens >= chat.goal.budget) throw new Error("bb.error.goalBudget"); chat.goal.status = "active"; chat.goal.reason = ""; chat.goal.continuations = 0; chat.paused = false }
@@ -162,7 +173,7 @@ export class BBRuns {
       if (!version || !chat.last) throw new Error("bb.error.invalidRequest")
       chat.mode = "normal"
       const prompt = { ...chat.last, mode: "normal" as const, agent: "build", id: this.messageID(), text: "PLEASE IMPLEMENT THIS PLAN:\n" + version.text, legacyParts: [{ type: "text", text: `Implement approved plan · revision ${version.revision}` }, { type: "text", text: "PLEASE IMPLEMENT THIS PLAN:\n" + version.text, synthetic: true }], files: undefined, agents: undefined, draft: undefined }
-      chat.queue.push({ id: prompt.id, prompt, delivery: "queue", status: "pending" }); chat.paused = false
+      chat.queue.push({ id: prompt.id, prompt, delivery: "queue", status: "pending", dismissGoalID: chat.goal?.status === "complete" ? chat.goal.id : undefined }); chat.paused = false
     }
     await this.save(chat)
     void this.pump(chat.sessionID)
@@ -189,7 +200,7 @@ export class BBRuns {
       // Discard the snapshot if Stop, an edit or reordering changed its candidate.
       if (chat.paused || candidate !== (chat.queue.find(item => item.delivery === "steer" && !item.editing) ?? chat.queue[0])) return
       // Admission acknowledgements can precede projected history. Hold the next input until reconciled.
-      if (candidate && state.messages.some(row => row.id === candidate.id)) { chat.queue = chat.queue.filter(row => row !== candidate); chat.error = ""; await this.save(chat); return }
+      if (candidate && state.messages.some(row => row.id === candidate.id)) { this.dismissGoal(chat, candidate); chat.queue = chat.queue.filter(row => row !== candidate); chat.error = ""; await this.save(chat); return }
       if (candidate?.status === "sending" && !state.busy && Date.now() - (candidate.sentAt ?? Date.now()) > 30000) {
         candidate.status = "uncertain"; candidate.error = "bb.error.deliveryUnknown"
         chat.awaiting = false; chat.error = candidate.error
@@ -203,14 +214,23 @@ export class BBRuns {
       if (!state.busy && chat.goal && last && last.id > (chat.goal.firstID ?? "") && chat.goal.lastTurn !== last.id) {
         const goal = chat.goal
         goal.lastTurn = last.id; goal.tokens = Math.max(0, state.messages.reduce((sum, row) => sum + row.tokens, 0) - (goal.baseline ?? 0)); goal.elapsed = Date.now() - goal.started
+        // Never guess from error text or suppress a fresh retry of the same
+        // input. Equal-millisecond timestamps remain conservatively failures.
+        const stopped = last.error !== undefined && last.aborted === true && last.parentID !== undefined && last.created !== undefined
+          && goal.stoppedInputs?.some(row => row.id === last.parentID && last.created! < row.before)
+        const parent = state.messages.findIndex(row => row.id === last.parentID)
+        if (goal.pendingInputIDs && parent >= 0) {
+          const completed = new Set(state.messages.slice(0, parent + 1).map(row => row.id))
+          goal.pendingInputIDs = goal.pendingInputIDs.filter(id => !completed.has(id))
+        }
         const turn = state.messages.slice(state.messages.findIndex(row => row.id === reference.id) + 1).filter(row => row.assistant)
         const progress = turn.flatMap(row => row.progress ? [row.progress] : []).join(":")
         if (goal.status === "active") {
-          if (last.error) { goal.status = /429|quota|limit/i.test(last.error) ? "usageLimited" : "blocked"; goal.reason = last.error }
+          if (last.error && !stopped) { goal.status = /429|quota|limit/i.test(last.error) ? "usageLimited" : "blocked"; goal.reason = last.error }
           if (goal.budget && goal.tokens >= goal.budget) { goal.status = "budgetLimited"; goal.reason = "budget" }
-          if (goal.continuations > 0 && (turn.every(row => row.tools === 0) || (progress && goal.progress === progress))) { goal.status = "blocked"; goal.reason = "no-progress" }
+          if (!last.error && !stopped && goal.status === "active" && goal.continuations > 0 && (turn.every(row => row.tools === 0) || (progress && goal.progress === progress))) { goal.status = "blocked"; goal.reason = "no-progress" }
         }
-        goal.progress = progress
+        if (!stopped) goal.progress = progress
         await this.save(chat)
       }
       if (!candidate) {
@@ -227,6 +247,7 @@ export class BBRuns {
       priorSentAt = candidate.sentAt
       attempt = candidate
       candidate.status = "sending"; candidate.sentAt = Date.now(); chat.last = candidate.prompt; chat.awaiting = true; chat.error = ""; candidate.prompt.delivery = candidate.delivery
+      if (chat.goal && chat.goal.status !== "complete" && candidate.prompt.protocol !== "v2") chat.goal.pendingInputIDs = [...new Set([...(chat.goal.pendingInputIDs ?? []), candidate.id])]
       await this.save(chat)
       if (chat.paused) {
         this.unsent(chat, candidate, priorSentAt)
@@ -239,6 +260,7 @@ export class BBRuns {
         this.unsent(chat, candidate, priorSentAt)
         await this.save(chat); return
       }
+      this.dismissGoal(chat, candidate)
       // Keep the durable row until the engine exposes its stable message ID.
       await this.save(chat)
     } catch (error) {
@@ -254,6 +276,9 @@ export class BBRuns {
       if (chat.goal?.status === "active" && /429|quota|rate.?limit/i.test(chat.error)) { chat.goal.status = "usageLimited"; chat.goal.reason = chat.error }
       await this.save(chat).catch(() => undefined)
     } finally { this.admissions.delete(id); this.active.delete(id) }
+  }
+  private dismissGoal(chat: ChatRun, item: QueuedInput) {
+    if (chat.goal?.status === "complete" && item.dismissGoalID === chat.goal.id) chat.goal.summaryDismissed = true
   }
   private storageFailure(chat: ChatRun, error: unknown) {
     // Unsaved state cannot dispatch automatically after storage recovers.
@@ -282,9 +307,15 @@ function recoverChatRun(id: string, value: unknown): ChatRun | undefined {
       && ["pending", "sending", "uncertain", "failed"].includes(item.status)
       && item.prompt?.sessionID === id && item.prompt.id === item.id
       && typeof item.prompt.text === "string" && typeof item.prompt.directory === "string")
+  const editing = queue.find(item => item.editing)
   const plan = validPlan(chat.plan) ? chat.plan : undefined
-  const goal = validGoal(chat.goal) ? chat.goal : undefined
-  return { ...chat, queue, plan, goal }
+  const goal = validGoal(chat.goal) ? {
+    ...chat.goal,
+    summaryDismissed: typeof chat.goal.summaryDismissed === "boolean" ? chat.goal.summaryDismissed : undefined,
+    pendingInputIDs: validInputIDs(chat.goal.pendingInputIDs) ? chat.goal.pendingInputIDs : undefined,
+    stoppedInputs: validStoppedInputs(chat.goal.stoppedInputs) ? chat.goal.stoppedInputs : undefined,
+  } : undefined
+  return { ...chat, queue: queue.map(item => ({ ...item, ...(item.editing && item !== editing ? { editing: false } : {}), dismissGoalID: typeof item.dismissGoalID === "string" && item.dismissGoalID ? item.dismissGoalID : undefined })), plan, goal }
 }
 
 function validPlan(value: unknown): value is Plan {
@@ -306,4 +337,14 @@ function validGoal(value: unknown): value is Goal {
     && (["started", "elapsed", "tokens", "continuations"] as const).every(field => Number.isFinite(goal[field]) && goal[field] >= 0)
     && (["budget", "baseline"] as const).every(field => goal[field] === undefined || (Number.isFinite(goal[field]) && goal[field]! >= 0))
     && (["lastTurn", "firstID", "progress"] as const).every(field => goal[field] === undefined || typeof goal[field] === "string")
+}
+
+function validInputIDs(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(id => typeof id === "string" && id.length > 0 && id.length <= 512) && new Set(value).size === value.length
+}
+
+function validStoppedInputs(value: unknown): value is NonNullable<Goal["stoppedInputs"]> {
+  return Array.isArray(value) && value.every(row => row && typeof row === "object" && !Array.isArray(row)
+    && typeof row.id === "string" && row.id.length > 0 && row.id.length <= 512 && Number.isFinite(row.before) && row.before >= 0)
+    && new Set(value.map(row => row.id)).size === value.length
 }

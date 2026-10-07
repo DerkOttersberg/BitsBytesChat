@@ -8,7 +8,7 @@ import { join, resolve } from "node:path"
 
 const servers: ReturnType<typeof createServer>[] = []
 async function fixture(protocol: "v1" | "v2") {
-  const state = { busy: true, requests: [] as string[], output: "working" }
+  const state = { busy: true, requests: [] as string[], output: "working", error: { message: "fixture error" } as unknown, parentID: "msg_user" as unknown, created: 123 as unknown }
   const server = createServer((request, response) => {
     state.requests.push(request.url!)
     response.setHeader("content-type", "application/json")
@@ -38,8 +38,10 @@ async function fixture(protocol: "v1" | "v2") {
               info: {
                 id: "msg_assistant",
                 role: "assistant",
+                parentID: state.parentID,
+                time: { created: state.created },
                 tokens: { input: 10, output: 4 },
-                error: { message: "fixture error" },
+                error: state.error,
               },
               parts: [{ type: "text", text: "Answer" }, tool],
             },
@@ -50,7 +52,7 @@ async function fixture(protocol: "v1" | "v2") {
               id: "msg_assistant",
               type: "assistant",
               tokens: { input: 10, output: 4 },
-              error: { message: "fixture error" },
+              error: state.error,
               content: [{ type: "text", text: "Answer" }, tool],
             },
           ]
@@ -99,6 +101,32 @@ test.each(["v1", "v2"] as const)(
     expect(f.state.requests.filter((path) => path === "/global/health")).toHaveLength(1)
   },
 )
+
+test("V1 inspection retains typed cancellation ownership without inferring it from error text", async () => {
+  const f = await fixture("v1"), protocols = new Map<string, "v1" | "v2">()
+  const aborted = { name: "MessageAbortedError", data: { message: "Aborted" } }
+  f.state.error = aborted
+  const result = await inspectEngine(f.server, f.prompt, protocols)
+  expect(result.messages[1]).toMatchObject({ parentID: "msg_user", created: 123, aborted: true, error: JSON.stringify(aborted) })
+  for (const error of ["MessageAbortedError", { message: "MessageAbortedError" }, { name: "UnknownError", data: { message: "Aborted" } }]) {
+    f.state.error = error
+    expect((await inspectEngine(f.server, f.prompt, protocols)).messages[1]).toMatchObject({ aborted: false, error: JSON.stringify(error) })
+  }
+  f.state.parentID = 42; f.state.created = "123"
+  const damaged = (await inspectEngine(f.server, f.prompt, protocols)).messages[1]
+  expect(damaged.parentID).toBeUndefined()
+  expect(damaged.created).toBeUndefined()
+})
+
+test("V2 generic interruption retains its error and supplies no invented cancellation ownership", async () => {
+  const f = await fixture("v2")
+  f.state.error = { type: "unknown", message: "Provider turn interrupted" }
+  const message = (await inspectEngine(f.server, f.prompt, new Map())).messages[1]
+  expect(message.error).toBe(JSON.stringify(f.state.error))
+  expect(message.aborted).toBeUndefined()
+  expect(message.parentID).toBeUndefined()
+  expect(message.created).toBeUndefined()
+})
 
 test("retrying an uncertain admission still reconciles its late acknowledgement while the engine is busy", async () => {
   const f = await fixture("v1"), root = await mkdtemp(join(tmpdir(), "bb-inspection-retry-"))

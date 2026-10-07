@@ -67,6 +67,7 @@ import { partDefaultOpen } from "./part-default-open"
 import { animate } from "motion"
 import { attached, inline, kind, typeLabel } from "./message-file"
 import { readPartText } from "./message-part-text"
+import { readToolImages, type ReadImageState, type RecordedReadImage } from "./read-tool-images"
 import { SessionProgressIndicatorV2 } from "../v2/components/session-progress-indicator-v2"
 
 async function writeClipboard(text: string): Promise<boolean> {
@@ -472,13 +473,14 @@ export function getToolInfo(
   tool: string,
   input: any = {},
   metadata: Record<string, unknown> | undefined = {},
+  readState?: ReadImageState,
 ): ToolInfo {
   const i18n = useI18n()
   switch (tool) {
     case "read":
       return {
         icon: "glasses",
-        title: i18n.t("ui.tool.read"),
+        title: i18n.t(readToolImages(readState).length ? "ui.tool.viewedImage" : "ui.tool.read"),
         subtitle: input.filePath ? getFilename(input.filePath) : undefined,
       }
     case "list":
@@ -829,6 +831,7 @@ export function AssistantParts(props: {
 
 function isContextGroupTool(part: PartType): part is ToolPart {
   return part.type === "tool" && CONTEXT_GROUP_TOOLS.has(part.tool)
+    && (part.tool !== "read" || readToolImages(part.state).length === 0)
 }
 
 function contextToolDetail(part: ToolPart): string | undefined {
@@ -836,6 +839,7 @@ function contextToolDetail(part: ToolPart): string | undefined {
     part.tool,
     part.state.input ?? {},
     "metadata" in part.state ? part.state.metadata : undefined,
+    part.state,
   )
   if (info.subtitle) return info.subtitle
   if (part.state.status === "error") return part.state.error
@@ -861,7 +865,7 @@ function contextToolTrigger(part: ToolPart, i18n: ReturnType<typeof useI18n>) {
       if (offset !== undefined) args.push("offset=" + offset)
       if (limit !== undefined) args.push("limit=" + limit)
       return {
-        title: i18n.t("ui.tool.read"),
+        title: i18n.t(readToolImages(part.state).length ? "ui.tool.viewedImage" : "ui.tool.read"),
         subtitle: filePath ? getFilename(filePath) : "",
         args,
       }
@@ -1142,6 +1146,11 @@ export function ContextToolGroup(props: {
                       </div>
                     </div>
                   </div>
+                  <ReadImageAttachments
+                    images={partAccessor().tool === "read" ? readToolImages(partAccessor().state) : []}
+                    filename={trigger().subtitle}
+                    onContentRendered={props.onSizeChange}
+                  />
                 </div>
               )
             }}
@@ -1459,6 +1468,7 @@ export function Part(props: MessagePartProps) {
 export interface ToolProps {
   input: Record<string, any>
   metadata: Record<string, any>
+  attachments?: FilePart[]
   tool: string
   sessionID?: string
   output?: string
@@ -1548,6 +1558,10 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
   const emptyMetadata: Record<string, any> = {}
 
   const input = () => part().state?.input ?? emptyInput
+  const attachments = () => {
+    const state = part().state
+    return state.status === "completed" ? state.attachments : undefined
+  }
   // @ts-expect-error
   const partMetadata = () => part().state?.metadata ?? emptyMetadata
   const taskId = createMemo(() => {
@@ -1617,6 +1631,7 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
               tool={part().tool}
               sessionID={part().sessionID}
               metadata={partMetadata()}
+              attachments={attachments()}
               // @ts-expect-error
               output={part().state.output}
               status={part().state.status}
@@ -1776,11 +1791,42 @@ PART_MAPPING["reasoning"] = function ReasoningPartDisplay(props) {
   )
 }
 
+function ReadImageAttachments(props: {
+  images: readonly RecordedReadImage[]
+  filename?: string
+  onContentRendered?: () => void
+}) {
+  const dialog = useDialog(), i18n = useI18n()
+  return (
+    <Show when={props.images.length}>
+      <div data-component="read-image-attachments">
+        <For each={props.images}>
+          {image => {
+            const filename = () => getFilename(image.filename || props.filename || i18n.t("ui.imagePreview.alt"))
+            return (
+              <button
+                type="button"
+                data-slot="read-image-thumbnail"
+                aria-label={i18n.t("ui.tool.enlargeImage", { filename: filename() })}
+                title={filename()}
+                onClick={() => dialog.show(() => <ImagePreview src={image.url} alt={filename()} />)}
+              >
+                <img src={image.url} alt={filename()} loading="lazy" onLoad={() => props.onContentRendered?.()} />
+              </button>
+            )
+          }}
+        </For>
+      </div>
+    </Show>
+  )
+}
+
 ToolRegistry.register({
   name: "read",
   render(props) {
     const data = useData()
     const i18n = useI18n()
+    const images = createMemo(() => readToolImages(props))
     const args: string[] = []
     if (props.input.offset) args.push("offset=" + props.input.offset)
     if (props.input.limit) args.push("limit=" + props.input.limit)
@@ -1796,10 +1842,15 @@ ToolRegistry.register({
           {...props}
           icon="glasses"
           trigger={{
-            title: i18n.t("ui.tool.read"),
+            title: i18n.t(images().length ? "ui.tool.viewedImage" : "ui.tool.read"),
             subtitle: props.input.filePath ? getFilename(props.input.filePath) : "",
             args,
           }}
+        />
+        <ReadImageAttachments
+          images={images()}
+          filename={typeof props.input.filePath === "string" ? getFilename(props.input.filePath) : undefined}
+          onContentRendered={props.onContentRendered}
         />
         <For each={loaded()}>
           {(filepath) => (

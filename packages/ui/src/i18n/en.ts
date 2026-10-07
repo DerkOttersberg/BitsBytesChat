@@ -1,6 +1,6 @@
 export const dict: Record<string, string> = {
   "ui.artifact.revision": "Revision {{revision}}", "ui.artifact.preparing": "Preparing preview…", "ui.artifact.error": "Preview unavailable",
-  "ui.plan.writing": "Writing plan…", "ui.plan.title": "Proposed plan", "ui.plan.export": "Export", "ui.plan.open": "Open plan", "ui.plan.implement": "Implement this plan",
+  "ui.plan.writing": "Writing plan…", "ui.plan.title": "Proposed plan", "ui.plan.export": "Export", "ui.plan.open": "Open plan", "ui.plan.implement": "Implement this plan", "ui.plan.expand": "Expand plan", "ui.plan.collapse": "Collapse plan",
   "ui.sessionReview.title": "Session changes",
   "ui.sessionReview.title.git": "Git changes",
   "ui.sessionReview.title.branch": "Branch changes",
@@ -151,6 +151,8 @@ export const dict: Record<string, string> = {
   "ui.scrollView.ariaLabel": "scrollable content",
 
   "ui.tool.read": "Read",
+  "ui.tool.viewedImage": "Viewed image",
+  "ui.tool.enlargeImage": "Enlarge {{filename}}",
   "ui.tool.loaded": "Loaded",
   "ui.tool.list": "List",
   "ui.tool.glob": "Glob",
