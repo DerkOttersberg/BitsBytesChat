@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import { basename, extname, join } from "node:path"
 import { copyFile, mkdir, open, readFile, realpath, rename, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
+import { StringDecoder } from "node:string_decoder"
 import type { DocumentArtifact, ArtifactVersion, SpreadsheetGrid } from "../bitsbytes/types"
 import { BBArtifactRuntime } from "./bitsbytes-artifact-runtime"
 import { fileHash } from "./bitsbytes-file-hash"
@@ -120,9 +121,7 @@ export class BBArtifacts {
     if (selected.item.kind === "spreadsheet") { const cached = join(this.root, "previews/pdf", basename(selected.source)); return this.runtime.call<SpreadsheetGrid>("grid", { path: existsSync(cached) ? cached : selected.source, sheet: args.sheet, offset: args.offset, limit: args.limit }) }
     if (selected.item.kind === "image") return { data: new Uint8Array(await readFile(selected.source)), mime: selected.item.mime }
     if (selected.item.kind === "html" || selected.item.kind === "code") {
-      const text = await readFile(selected.source, "utf8")
-      if (text.length > 8e6) throw new Error("bb.error.fileTooLarge")
-      return { text, mime: selected.item.mime }
+      return { text: await readPreviewText(selected.source), mime: selected.item.mime }
     }
     return { text: "" }
   }
@@ -162,6 +161,26 @@ export class BBArtifacts {
       finally { this.pending.delete(key); await this.persist(); if (this.items.find(row => row.id === item.id) === item) this.changed(item) }
     })
   }
+}
+
+async function readPreviewText(path: string) {
+  const file = await open(path, "r")
+  try {
+    // No UTF-8 source fitting the existing character limit needs this many
+    // bytes. Reject oversized snapshots before allocating their complete text.
+    if ((await file.stat()).size > 8e6 * 4) throw new Error("bb.error.fileTooLarge")
+    const buffer = Buffer.alloc(64 * 1024), decoder = new StringDecoder("utf8")
+    let text = ""
+    for (;;) {
+      const result = await file.read(buffer, 0, buffer.length, null)
+      if (!result.bytesRead) break
+      text += decoder.write(buffer.subarray(0, result.bytesRead))
+      if (text.length > 8e6) throw new Error("bb.error.fileTooLarge")
+    }
+    text += decoder.end()
+    if (text.length > 8e6) throw new Error("bb.error.fileTooLarge")
+    return text
+  } finally { await file.close() }
 }
 
 async function checkPDF(path: string) {

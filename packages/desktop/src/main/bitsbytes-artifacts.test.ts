@@ -55,6 +55,33 @@ integration("saved copies retain the published revision and exact bytes", async 
   expect(await readFile(target, "utf8")).toBe(original)
 })
 
+integration("text previews preserve the exact character limit, BOM and Unicode across read boundaries and revisions", async () => {
+  const f = await fixture(), path = join(f.folder, "source.txt")
+  const prefix = "\uFEFF" + "a".repeat(65531) + "🌿"
+  const original = prefix + "é".repeat(8e6 - prefix.length)
+  expect(Buffer.byteLength(original)).toBeGreaterThan(8e6)
+  await writeFile(path, original)
+  const artifact = await f.artifacts.publish(path, "ses_preview")
+  await writeFile(path, "Small newer source 🌿")
+  await f.artifacts.publish(path, "ses_preview")
+  expect((await f.artifacts.content(artifact.id, { revision: 1 })).text).toBe(original)
+  expect((await f.artifacts.content(artifact.id)).text).toBe("Small newer source 🌿")
+  expect(await readFile(artifact.source!, "utf8")).toBe(original)
+})
+
+integration("over-limit Unicode previews fail without changing their saved source or preventing the next revision", async () => {
+  const f = await fixture(), path = join(f.folder, "source.html")
+  const original = "é".repeat(8e6) + "🌿"
+  await writeFile(path, original)
+  const artifact = await f.artifacts.publish(path, "ses_preview")
+  await expect(f.artifacts.content(artifact.id)).rejects.toThrow("bb.error.fileTooLarge")
+  expect(await readFile(artifact.source!, "utf8")).toBe(original)
+  await writeFile(path, "<!doctype html><p>Ready again 🌿</p>")
+  await f.artifacts.publish(path, "ses_preview")
+  expect((await f.artifacts.content(artifact.id)).text).toBe("<!doctype html><p>Ready again 🌿</p>")
+  await expect(f.artifacts.content(artifact.id, { revision: 1 })).rejects.toThrow("bb.error.fileTooLarge")
+})
+
 integration("simultaneous publications retain every immutable revision and focus only the first result", async () => {
   const f = await fixture()
   const paths = [join(f.folder, "first.html"), join(f.folder, "second.html")]
