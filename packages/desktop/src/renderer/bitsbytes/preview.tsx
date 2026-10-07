@@ -23,9 +23,12 @@ export function WordPreview(props: { bytes: Uint8Array; close?: () => void }) {
   const [document, setDocument] = createSignal<Awaited<ReturnType<typeof getDocument>["promise"]>>()
   let rendering: { cancel: () => void; promise: Promise<void> } | undefined
   createEffect(() => {
+    let current = true
+    setError(""); setDocument(undefined); setPages(0); setPage(1)
+    if (canvas) { canvas.width = 0; canvas.height = 0 }
     const load = getDocument({ data: props.bytes.slice() })
-    void load.promise.then((pdf) => { setDocument(pdf); setPages(pdf.numPages); setPage(1) }).catch((reason) => setError(bbError(reason)))
-    onCleanup(() => { rendering?.cancel(); void load.destroy() })
+    void load.promise.then((pdf) => { if (current) { setDocument(pdf); setPages(pdf.numPages); setPage(1) } }).catch((reason) => { if (current) setError(bbError(reason)) })
+    onCleanup(() => { current = false; rendering?.cancel(); void load.destroy().catch(() => undefined) })
   })
   createEffect(() => {
     const pdf = document()
@@ -45,8 +48,8 @@ export function WordPreview(props: { bytes: Uint8Array; close?: () => void }) {
       canvas.style.width = `${viewport.width}px`
       canvas.style.height = `${viewport.height}px`
       rendering = sheet.render({ canvas, viewport, transform: pixel === 1 ? undefined : [pixel, 0, 0, pixel, 0, 0] })
-      await rendering.promise.catch((reason) => { if (reason.name !== "RenderingCancelledException") setError(bbError(reason)) })
-    }).catch((reason) => setError(bbError(reason)))
+      await rendering.promise.catch((reason) => { if (current && reason.name !== "RenderingCancelledException") setError(bbError(reason)) })
+    }).catch((reason) => { if (current) setError(bbError(reason)) })
     onCleanup(() => { current = false; rendering?.cancel() })
   })
   return <aside class="bb-preview">

@@ -10,11 +10,12 @@ export function DocumentPanel(props: { id: string; revision?: number }) {
   const [store, setStore] = createStore({ artifact: undefined as DocumentArtifact | undefined, bytes: undefined as Uint8Array | undefined, error: "", text: "", image: "", loading: false, mode: "preview", revision: 0, sheet: "", offset: 0, pages: [] as number[], grid: undefined as SpreadsheetGrid | undefined })
   let generation = 0
   let identity = ""
+  let disposed = false
   async function update(artifact: DocumentArtifact) {
-    if (artifact.id !== props.id) return
-    setStore("artifact", artifact)
-    if (artifact.status !== "ready" && !(store.revision && artifact.history?.find(version => version.revision === store.revision)?.pdf)) return
+    if (disposed || artifact.id !== props.id) return
     const token = ++generation
+    setStore("artifact", artifact)
+    if (artifact.status !== "ready" && !(store.revision && artifact.history?.find(version => version.revision === store.revision)?.pdf)) { setStore("loading", false); return }
     setStore("loading", true)
     try {
       const args = { id: props.id, revision: store.revision || undefined, sheet: store.sheet || undefined, offset: store.offset }
@@ -45,14 +46,15 @@ export function DocumentPanel(props: { id: string; revision?: number }) {
   }
   onMount(() => {
     const unsubscribe = api.subscribe(event => { if (event.type === "artifact") void update(event.artifact) })
-    onCleanup(() => { generation++; unsubscribe(); if (store.image) URL.revokeObjectURL(store.image) })
+    onCleanup(() => { disposed = true; generation++; unsubscribe(); if (store.image) URL.revokeObjectURL(store.image) })
   })
   const refresh = () => { if (store.artifact) void update(store.artifact) }
   createEffect(() => {
     const id = props.id, revision = props.revision ?? 0
     if (id !== identity) { identity = id; generation++; untrack(() => { if (store.image) URL.revokeObjectURL(store.image) }); setStore({ artifact: undefined, bytes: undefined, text: "", image: "", loading: false, error: "", grid: undefined, sheet: "", mode: "preview" }) }
+    const token = ++generation
     setStore({ revision, offset: 0, pages: [], grid: undefined, bytes: undefined, error: "" })
-    void api.call<DocumentArtifact[]>("artifacts.list").then(items => { if (props.id !== id) return; const artifact = items.find(item => item.id === id); if (artifact) void update(artifact) }).catch(error => setStore("error", bbError(error)))
+    void api.call<DocumentArtifact[]>("artifacts.list").then(items => { if (disposed || token !== generation || props.id !== id) return; const artifact = items.find(item => item.id === id); if (artifact) void update(artifact) }).catch(error => { if (!disposed && token === generation && props.id === id) setStore("error", bbError(error)) })
   })
   const run = (method: string) => api.call(method, { id: props.id, revision: store.revision || undefined, path: store.artifact?.path }).catch(error => setStore("error", bbError(error)))
   const isolatedHTML = (text: string) => '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data: blob: https:; font-src data:; connect-src \'none\'; form-action \'none\'; base-uri \'none\';">' + text
@@ -81,6 +83,7 @@ export function BrowserPanel(props: { id: string; active: boolean }) {
   let host!: HTMLDivElement
   let frame = 0
   let lastBounds = ""
+  let generation = 0, disposed = false
   const run = async (action: string, args: Record<string, unknown> = {}) => {
     try { await api.call("browser." + action, { id: props.id, ...args }); setStore("error", "") }
     catch (error) { setStore("error", bbError(error)) }
@@ -97,14 +100,15 @@ export function BrowserPanel(props: { id: string; active: boolean }) {
   }
   const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(bounds) }
   onMount(() => {
-    const unsubscribe = api.subscribe(event => { if (event.type === "browser" && event.id === props.id) setStore({ url: event.url, title: event.title, loading: event.loading, canBack: event.canBack, canForward: event.canForward }) })
-    void api.call<{ id: string; url: string; title: string; loading: boolean; canBack: boolean; canForward: boolean }[]>("browser.list").then(items => { const item = items.find(item => item.id === props.id); if (item) setStore(item) })
+    const unsubscribe = api.subscribe(event => { if (event.type === "browser" && event.id === props.id) { generation++; setStore({ url: event.url, title: event.title, loading: event.loading, canBack: event.canBack, canForward: event.canForward }) } })
+    const token = generation
+    void api.call<{ id: string; url: string; title: string; loading: boolean; canBack: boolean; canForward: boolean }[]>("browser.list").then(items => { if (disposed || token !== generation) return; const item = items.find(item => item.id === props.id); if (item) setStore(item) }).catch(error => { if (!disposed && token === generation) setStore("error", bbError(error)) })
     const resize = new ResizeObserver(schedule); resize.observe(host)
     const observer = new MutationObserver(schedule); observer.observe(document.body, { childList: true, subtree: true })
     window.addEventListener("resize", schedule)
-    onCleanup(() => { unsubscribe(); resize.disconnect(); observer.disconnect(); cancelAnimationFrame(frame); window.removeEventListener("resize", schedule); void api.call("browser.hide", { id: props.id }).catch(() => undefined) })
+    onCleanup(() => { disposed = true; generation++; unsubscribe(); resize.disconnect(); observer.disconnect(); cancelAnimationFrame(frame); window.removeEventListener("resize", schedule); void api.call("browser.hide", { id: props.id }).catch(() => undefined) })
     bounds()
   })
   createEffect(() => { props.active; schedule() })
-  return <div class="bb-browser-panel"><form class="bb-browser-toolbar" onSubmit={event => { event.preventDefault(); void run("navigate", { url: store.url }) }}><button type="button" title={bbt("back")} aria-label={bbt("back")} disabled={!store.canBack} onClick={() => void run("back")}>←</button><button type="button" title={bbt("forward")} aria-label={bbt("forward")} disabled={!store.canForward} onClick={() => void run("forward")}>→</button><button type="button" title={bbt(store.loading ? "cancel" : "reload")} aria-label={bbt(store.loading ? "cancel" : "reload")} onClick={() => void run(store.loading ? "stop" : "reload")}>{store.loading ? "×" : "↻"}</button><input aria-label={bbt("address")} value={store.url} onInput={event => setStore("url", event.currentTarget.value)} /><button type="submit" title={bbt("navigate")} aria-label={bbt("navigate")}>↵</button></form><Show when={store.error}><p class="bb-error">{store.error}</p></Show><div ref={host} class="bb-browser-host" /></div>
+  return <div class="bb-browser-panel"><form class="bb-browser-toolbar" onSubmit={event => { event.preventDefault(); void run("navigate", { url: store.url }) }}><button type="button" title={bbt("back")} aria-label={bbt("back")} disabled={!store.canBack} onClick={() => void run("back")}>←</button><button type="button" title={bbt("forward")} aria-label={bbt("forward")} disabled={!store.canForward} onClick={() => void run("forward")}>→</button><button type="button" title={bbt(store.loading ? "cancel" : "reload")} aria-label={bbt(store.loading ? "cancel" : "reload")} onClick={() => void run(store.loading ? "stop" : "reload")}>{store.loading ? "×" : "↻"}</button><input aria-label={bbt("address")} value={store.url} onInput={event => { generation++; setStore("url", event.currentTarget.value) }} /><button type="submit" title={bbt("navigate")} aria-label={bbt("navigate")}>↵</button></form><Show when={store.error}><p class="bb-error">{store.error}</p></Show><div ref={host} class="bb-browser-host" /></div>
 }

@@ -38,6 +38,8 @@ Document publication retries wait for their saved registry entry. Preview-save f
 
 Desktop chat controls ignore older refresh responses. Temporary read errors remain visible until a successful read, and closed chats ignore late responses.
 
+Closed document and browser panels ignore late reads. A valid replacement PDF clears an earlier preview error, and a delayed browser snapshot cannot overwrite a newer address.
+
 ## New in 0.3.4
 
 - Unconfirmed engine admission now becomes a visible recoverable request after its timeout, without an endless busy state or automatic duplicate. A late acknowledgement reconciles the original message.
