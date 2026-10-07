@@ -159,6 +159,9 @@ export class BBRuns {
       const reference = candidate?.prompt ?? chat.last
       if (!reference) return
       const state = await this.inspect(reference)
+      // User controls remain available while inspection waits on the engine.
+      // Discard the snapshot if Stop, an edit or reordering changed its candidate.
+      if (chat.paused || candidate !== (chat.queue.find(item => item.delivery === "steer" && !item.editing) ?? chat.queue[0])) return
       // Admission acknowledgements can precede projected history. Hold the next input until reconciled.
       if (candidate && state.messages.some(row => row.id === candidate.id)) { chat.queue = chat.queue.filter(row => row !== candidate); chat.error = ""; await this.save(chat); return }
       if (candidate?.status === "sending" && !state.busy && Date.now() - (candidate.sentAt ?? Date.now()) > 30000) {
@@ -197,6 +200,10 @@ export class BBRuns {
       if (candidate.editing || ["failed", "uncertain", "sending"].includes(candidate.status)) return
       candidate.status = "sending"; candidate.sentAt = Date.now(); chat.last = candidate.prompt; chat.awaiting = true; chat.error = ""; candidate.prompt.delivery = candidate.delivery
       await this.save(chat)
+      if (chat.paused) {
+        candidate.status = "pending"; candidate.sentAt = undefined; chat.awaiting = false
+        await this.save(chat); return
+      }
       await this.dispatch(candidate.prompt)
       // Keep the durable row until the engine exposes its stable message ID.
       await this.save(chat)

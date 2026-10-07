@@ -23,6 +23,7 @@ const state = {
   generation: 0,
   sending: false,
   polling: false,
+  refreshGeneration: 0,
   refreshed: 0,
   drawerGeneration: 0,
 }
@@ -45,27 +46,36 @@ const notice = (text) => {
   $("#notice").hidden = !text
   if (text) noticeTimer = setTimeout(() => ($("#notice").hidden = true), 7000)
 }
-async function request(path, options = {}) {
-  const response = await fetch(path, { ...options, credentials: "same-origin" })
-  const value = await response.json()
-  if (response.status === 401) {
-    $("#app").hidden = true
-    $("#pair-screen").hidden = false
-    $("#pair-status").textContent = value.error
-  }
-  if (!response.ok) {
-    const error = Error(value.error || C.error)
-    error.status = response.status
+async function request(path, options = {}, timeout = options.method && options.method !== "GET" ? 0 : 15000) {
+  const controller = timeout ? new AbortController() : null,
+    timer = controller ? setTimeout(() => controller.abort(), timeout) : null
+  try {
+    const response = await fetch(path, { ...options, signal: options.signal || controller?.signal, credentials: "same-origin" })
+    const value = await response.json()
+    if (response.status === 401) {
+      $("#app").hidden = true
+      $("#pair-screen").hidden = false
+      $("#pair-status").textContent = value.error
+    }
+    if (!response.ok) {
+      const error = Error(value.error || C.error)
+      error.status = response.status
+      throw error
+    }
+    return value
+  } catch (error) {
+    if (controller?.signal.aborted) throw Error(C.disconnected)
     throw error
+  } finally {
+    clearTimeout(timer)
   }
-  return value
 }
 const api = (method, args = {}) =>
   request("/api", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ method, args }),
-  })
+  }, ["overview", "chat", "artifacts", "transcript-reference"].includes(method) ? 15000 : 0)
 const draftKey = () => "bb.draft." + state.chat
 const audio = new PhoneAudio({ copy: C, update: audioControls, notice, request, upload: uploadAudio, attach: attachTranscript })
 function audioControls() {
@@ -417,9 +427,9 @@ function interactions(chat) {
 }
 async function refresh() {
   if (!state.chat) return
-  const id = state.chat,
+  const id = state.chat, generation = ++state.refreshGeneration,
     [chat, files] = await Promise.all([api("chat", { sessionID: id }), api("artifacts", { sessionID: id })])
-  if (id !== state.chat) return
+  if (id !== state.chat || generation !== state.refreshGeneration) return
   $("#chat-title").textContent = chat.title || C.newChat
   state.files = files
   state.busy = Boolean(chat.status && chat.status.type !== "idle") || Boolean(chat.run.awaiting)
@@ -825,13 +835,13 @@ $("#pair-button").onclick = async () => {
   }
 }
 async function boot() {
-  await overview()
   $("#pair-screen").hidden = true
   $("#app").hidden = false
   restore()
-  await refresh()
   await audio.recover().catch(() => notice(C.audioStorage))
   audioControls()
+  await overview()
+  await refresh()
 }
 if (!invitation) void boot().catch((error) => notice(error.message))
 setInterval(async () => {

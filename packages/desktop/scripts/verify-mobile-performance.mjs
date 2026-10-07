@@ -9,8 +9,8 @@ const root = resolve("../.."), require = createRequire(join(root, ".tools/qa/pac
 const { chromium } = require("playwright")
 const pdf = dirname(createRequire(import.meta.url).resolve("pdfjs-dist/package.json"))
 const folders = {
-  before: join(root, "packages/desktop/dist/0.3.2/win-unpacked/resources/bitsbytes/mobile"),
-  after: join(root, "packages/desktop/resources/bitsbytes/mobile"),
+  before: process.env.BB_MOBILE_BEFORE || join(root, "packages/desktop/dist/0.3.2/win-unpacked/resources/bitsbytes/mobile"),
+  after: process.env.BB_MOBILE_AFTER || join(root, "packages/desktop/resources/bitsbytes/mobile"),
 }
 let selected = "before"
 const server = createServer(async (request, response) => {
@@ -18,7 +18,7 @@ const server = createServer(async (request, response) => {
   try {
     if (request.method === "POST") {
       let source = ""; for await (const bytes of request) source += bytes
-      const input = JSON.parse(source), overview = { chats: [], skills: [], models: [], engine: "parakeet" }
+      const input = JSON.parse(source), overview = { chats: [], skills: [], models: [{ id: "qa-model", name: "QA model", provider: "Local fixture", providerID: "fixture", variants: [] }], model: "fixture/qa-model", engine: "parakeet" }
       response.setHeader("content-type", "application/json")
       response.end(JSON.stringify(input.method === "overview" ? overview : {})); return
     }
@@ -41,6 +41,7 @@ try {
     const started = performance.now()
     await page.goto("http://127.0.0.1:" + server.address().port)
     await page.locator("#app").waitFor({ state: "visible" })
+    await page.waitForFunction(() => document.querySelector("#model")?.value !== "")
     const bootMs = performance.now() - started
     const resources = await page.evaluate(() => performance.getEntriesByType("resource").map(row => ({ path: new URL(row.name).pathname, bytes: row.decodedBodySize })))
     assert.deepEqual(errors, [])
@@ -51,7 +52,7 @@ try {
     const rows = samples.filter(row => row.build === build), times = rows.map(row => row.bootMs).sort((a, b) => a - b)
     return [build, { medianBootMs: (times[2] + times[3]) / 2, resourceBytes: rows[0].resourceBytes }]
   }))
-  const report = { workload: "Interleaved cold 390px browser loads, local API fixture, six samples per build", summary, samples }
-  await writeFile(join(root, ".tools/qa/results/mobile-performance-033.json"), JSON.stringify(report, null, 2))
+  const report = { workload: "Interleaved cold 390px browser loads until the model overview is usable, local API fixture, six samples per build", summary, samples }
+  await writeFile(join(root, ".tools/qa/results/" + (process.env.BB_MOBILE_PERFORMANCE_REPORT || "mobile-performance-033") + ".json"), JSON.stringify(report, null, 2))
   console.log(JSON.stringify(summary))
 } finally { await browser.close(); server.closeAllConnections(); await new Promise(done => server.close(done)) }

@@ -12,11 +12,14 @@ try {
   await app.evaluate(({ BrowserWindow }) => { for (const window of BrowserWindow.getAllWindows()) { window.webContents.setBackgroundThrottling(false); window.hide() } })
   const state = await page.evaluate(() => window.api.bitsbytes.call('state'))
   const server = await page.evaluate(() => window.api.awaitInitialization())
-  const headers = { 'content-type': 'application/json', 'x-opencode-directory': encodeURIComponent(state.root + '\\workspace') }
+  // Engine initialization can finish before the renderer's navigation listener mounts.
+  await page.locator('[contenteditable=true]').first().waitFor({ timeout: 90000 })
+  const directory = join(state.root, 'workspace')
+  const headers = { 'content-type': 'application/json', 'x-opencode-directory': encodeURIComponent(directory) }
   if (server.password) headers.authorization = 'Basic ' + Buffer.from(`${server.username ?? 'opencode'}:${server.password}`).toString('base64')
   const session = await fetch(server.url + '/session', { method: 'POST', headers, body: JSON.stringify({ title: 'QA benchmark — no AI request' }) }).then(r => r.json())
   clean = async () => { await page.evaluate(async()=>{const node=[...document.querySelectorAll('[data-titlebar-tab-title]')].find(n=>n.textContent?.startsWith('QA benchmark'));node?.closest('[data-titlebar-tab]')?.querySelector('[data-slot=tab-close] button')?.click();await new Promise(r=>setTimeout(r,100))});await fetch(server.url + '/session/' + session.id, { method: 'DELETE', headers }) }
-  await page.evaluate(detail => window.dispatchEvent(new CustomEvent('bitsbytes:session', { detail })), { directory: state.root + '\\workspace', sessionID: session.id })
+  await page.evaluate(detail => window.dispatchEvent(new CustomEvent('bitsbytes:session', { detail })), { directory, sessionID: session.id })
   const editor = page.locator(`.bb-workspace-chat[data-bb-chat="${session.id}"] [contenteditable=true]`).first()
   await editor.waitFor({ timeout: 90000 })
   if (process.argv.includes('--settled')) {

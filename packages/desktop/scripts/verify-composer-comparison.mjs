@@ -11,7 +11,8 @@ const release = process.env.BB_COMPARE_TAG || current.replaceAll(".", "")
 for (let round = 0; round < 3; round++) {
   for (const label of round % 2 ? ["after", "before"] : ["before", "after"]) {
     const tag = `${release}-controlled-${round}-${label}`
-    const executable = join(root, `packages/desktop/dist/${builds[label]}/win-unpacked/BitsBytesChat.exe`)
+    const executable = process.env[label === "before" ? "BB_BEFORE_EXECUTABLE" : "BB_AFTER_EXECUTABLE"]
+      || join(root, `packages/desktop/dist/${builds[label]}/win-unpacked/BitsBytesChat.exe`)
     await promisify(execFile)(process.execPath, ["scripts/verify-composer-performance.mjs", tag, "--settled"], {
       cwd: process.cwd(), env: { ...process.env, BB_QA_EXECUTABLE: executable }, timeout: 120000, windowsHide: true,
     })

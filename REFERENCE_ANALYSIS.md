@@ -1,5 +1,11 @@
 # Interface research and implementation — 0.3.0
 
+## Reliability follow-up — 7 October 2026
+
+The public [Codex remote engineering guide](https://developers.openai.com/blog/mastering-codex-remote-for-engineering) separates Queue from Steer and emphasizes intervening in ongoing work. [Claude Code interactive mode](https://code.claude.com/docs/en/interactive-mode) documents interruption and queued-message controls. For this fork, the practical requirement is that a user's Stop, Delete, edit or reorder must still take effect while the host waits for engine status. Delayed-inspection tests exposed violations of that requirement; the unreleased host now validates the current queue selection before admission and checks Stop again before dispatch.
+
+The phone remains a control surface for the same Windows engine. Its recovery changes address temporary startup failure, stalled metadata polling and responses arriving after navigation. They do not expand background microphone support or imply physical Safari verification. Controlled local measurements are effectively unchanged; the intent of this batch is predictable controls and recovery. Exact checks, retained samples and practical limits are recorded in `VERIFICATION.md`.
+
 ## Morning review — 7 October 2026
 
 The comparison uses public behavior and local tests. It does not reproduce private ChatGPT, Codex or Claude internals.

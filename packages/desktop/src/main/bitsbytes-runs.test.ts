@@ -30,6 +30,102 @@ test("queue survives renderer absence, retains full context and waits for idle",
   await f.runs.pump("ses_test")
   expect(f.runs.get("ses_test").queue).toHaveLength(0)
 })
+
+test("Stop during engine inspection keeps the queued request paused until Resume", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "bb-runs-test-"))
+  const entered = Promise.withResolvers<void>()
+  const inspection = Promise.withResolvers<Inspection>()
+  const sent: string[] = []
+  const runs = new BBRuns(folder, async () => { entered.resolve(); return inspection.promise }, async prompt => { sent.push(prompt.id) }, () => undefined)
+  fixtures.push({ runs, folder }); await runs.start()
+  runs.get("ses_test").paused = true
+  await runs.call("admit", { prompt: { sessionID: "ses_test", directory: folder, id: "msg_stopped", text: "Wait for Resume" } })
+  runs.get("ses_test").paused = false
+  const pumping = runs.pump("ses_test")
+  await entered.promise
+  await runs.call("stop", { sessionID: "ses_test" })
+  inspection.resolve({ busy: false, messages: [] })
+  await pumping
+  expect(sent).toEqual([])
+  expect(runs.get("ses_test").queue[0].status).toBe("pending")
+  expect(runs.get("ses_test").paused).toBe(true)
+  await runs.pump("ses_test")
+  expect(sent).toEqual([])
+  await runs.call("resume", { sessionID: "ses_test" })
+  for (let i = 0; i < 100 && !sent.length; i++) await new Promise(resolve => setTimeout(resolve, 5))
+  expect(sent).toEqual(["msg_stopped"])
+  await new Promise(resolve => setTimeout(resolve, 20))
+})
+
+test("Delete during engine inspection cannot dispatch the removed request", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "bb-runs-test-"))
+  const entered = Promise.withResolvers<void>()
+  const inspection = Promise.withResolvers<Inspection>()
+  const sent: string[] = []
+  const runs = new BBRuns(folder, async () => { entered.resolve(); return inspection.promise }, async prompt => { sent.push(prompt.id) }, () => undefined)
+  fixtures.push({ runs, folder }); await runs.start()
+  runs.get("ses_test").paused = true
+  await runs.call("admit", { prompt: { sessionID: "ses_test", directory: folder, id: "msg_deleted", text: "Remove this request" } })
+  runs.get("ses_test").paused = false
+  const pumping = runs.pump("ses_test")
+  await entered.promise
+  await runs.call("delete", { sessionID: "ses_test", id: "msg_deleted" })
+  inspection.resolve({ busy: false, messages: [] })
+  await pumping
+  expect(sent).toEqual([])
+  expect(runs.get("ses_test").queue).toHaveLength(0)
+  expect(JSON.parse(await readFile(join(folder, "chat-runs.json"), "utf8")).ses_test.queue).toEqual([])
+})
+
+test("Stop while admission is being journalled prevents dispatch and clears awaiting", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "bb-runs-test-"))
+  const entered = Promise.withResolvers<void>()
+  const inspection = Promise.withResolvers<Inspection>()
+  const sent: string[] = []
+  const runs = new BBRuns(folder, async () => { entered.resolve(); return inspection.promise }, async prompt => { sent.push(prompt.id) }, () => undefined)
+  fixtures.push({ runs, folder }); await runs.start()
+  runs.get("ses_test").paused = true
+  await runs.call("admit", { prompt: { sessionID: "ses_test", directory: folder, id: "msg_journalled", text: "Keep this unsent" } })
+  runs.get("ses_test").paused = false
+  const pumping = runs.pump("ses_test")
+  await entered.promise
+  inspection.resolve({ busy: false, messages: [] })
+  for (let i = 0; i < 20 && runs.get("ses_test").queue[0].status !== "sending"; i++) await Promise.resolve()
+  expect(runs.get("ses_test").queue[0].status).toBe("sending")
+  await runs.call("stop", { sessionID: "ses_test" })
+  await pumping
+  expect(sent).toEqual([])
+  expect(runs.get("ses_test").awaiting).toBe(false)
+  expect(runs.get("ses_test").queue[0].status).toBe("pending")
+  const saved = JSON.parse(await readFile(join(folder, "chat-runs.json"), "utf8")).ses_test
+  expect(saved.paused).toBe(true)
+  expect(saved.queue[0].status).toBe("pending")
+})
+
+test.each(["replace", "reorder"])("queue %s during engine inspection invalidates the stale candidate", async action => {
+  const folder = await mkdtemp(join(tmpdir(), "bb-runs-test-"))
+  const entered = Promise.withResolvers<void>()
+  const inspection = Promise.withResolvers<Inspection>()
+  const sent: string[] = []
+  const runs = new BBRuns(folder, async () => { entered.resolve(); return inspection.promise }, async prompt => { sent.push(prompt.text) }, () => undefined)
+  fixtures.push({ runs, folder }); await runs.start()
+  runs.get("ses_test").paused = true
+  await runs.call("admit", { prompt: { sessionID: "ses_test", directory: folder, id: "msg_first", text: "Original request" } })
+  await runs.call("admit", { prompt: { sessionID: "ses_test", directory: folder, id: "msg_second", text: "Second request" } })
+  runs.get("ses_test").paused = false
+  const pumping = runs.pump("ses_test")
+  await entered.promise
+  if (action === "replace") {
+    await runs.call("edit", { sessionID: "ses_test", id: "msg_first" })
+    await runs.call("admit", { prompt: { sessionID: "ses_test", directory: folder, id: "msg_new", text: "Corrected request" } })
+  }
+  if (action === "reorder") await runs.call("reorder", { sessionID: "ses_test", ids: ["msg_second", "msg_first"] })
+  inspection.resolve({ busy: false, messages: [] })
+  await pumping
+  expect(sent).toEqual([])
+  await runs.pump("ses_test")
+  expect(sent).toEqual([action === "replace" ? "Corrected request" : "Second request"])
+})
 test("Steer reaches an active engine and exact uncertain admission reconciles without duplicate", async () => {
   const f = await fixture(); f.fail.enabled = true
   await f.runs.call("admit", { delivery: "steer", prompt: f.prompt() }); await f.settle()
