@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, readdir, rm, rmdir, stat, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { tmpdir } from "node:os"
 import { BBArtifacts } from "./bitsbytes-artifacts"
@@ -64,7 +64,48 @@ test("independent recovery attempts retain separate exact copies", async () => {
   expect(await readFile(join(f.folder, "artifacts.json"), "utf8")).toBe(source)
 })
 
+test("queued direct previews contain a startup save failure and remain retryable", async () => {
+  const f = await fixture(), path = join(f.folder, "saved.html"), temporary = join(f.folder, "artifacts.json.tmp")
+  const text = "<!doctype html><p>Retained source 🌿</p>"
+  await writeFile(path, text)
+  const item = { id: "saved", sessionID: "ses_saved", path, source: path, filename: "saved.html", hash: "saved-hash", revision: 1, updated: 1, kind: "html", status: "queued", pdf: "", error: "", history: [{ revision: 1, hash: "saved-hash", source: path, pdf: "", updated: 1 }] }
+  const source = JSON.stringify([item])
+  await writeFile(join(f.folder, "artifacts.json"), source)
+  await mkdir(temporary)
+  await f.artifacts.start()
+  expect(f.artifacts.items[0].status).toBe("error")
+  expect(f.artifacts.items[0].error).toContain("artifacts.json.tmp")
+  expect(f.events.at(-1)?.artifact.status).toBe("error")
+  expect(await readFile(join(f.folder, "artifacts.json"), "utf8")).toBe(source)
+  await rmdir(temporary)
+  await f.artifacts.retry("saved")
+  const saved = JSON.parse(await readFile(join(f.folder, "artifacts.json"), "utf8"))
+  expect(saved[0].status).toBe("ready")
+  expect(saved[0].revision).toBe(1)
+  expect(saved[0].error).toBe("")
+  expect(await readFile(path, "utf8")).toBe(text)
+})
+
 const integration = process.env.BB_ARTIFACT_PYTHON ? test : test.skip
+integration("publication retries cannot acknowledge a snapshot that is still unsaved", async () => {
+  const f = await fixture(), path = join(f.folder, "storage.html"), temporary = join(f.folder, "artifacts.json.tmp")
+  const source = "<!doctype html><p>Complete saved source 🌿</p>"
+  await writeFile(path, source)
+  await mkdir(temporary)
+  await expect(f.artifacts.publish(path, "ses_storage")).rejects.toThrow()
+  await expect(f.artifacts.publish(path, "ses_storage")).rejects.toThrow()
+  expect(await readdir(f.folder)).not.toContain("artifacts.json")
+  await rmdir(temporary)
+  const item = await f.artifacts.publish(path, "ses_storage")
+  expect(item.status).toBe("ready")
+  const saved = JSON.parse(await readFile(join(f.folder, "artifacts.json"), "utf8"))
+  expect(saved).toHaveLength(1)
+  expect(saved[0].revision).toBe(1)
+  expect(saved[0].status).toBe("ready")
+  expect(await readFile(saved[0].source, "utf8")).toBe(source)
+  expect(await readFile(path, "utf8")).toBe(source)
+})
+
 integration("saved copies retain the published revision and exact bytes", async () => {
   const f = await fixture(), path = join(f.folder, "source.html")
   const original = "<!doctype html>" + "Source é 😀. ".repeat(100000)

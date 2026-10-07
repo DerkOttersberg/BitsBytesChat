@@ -34,6 +34,8 @@ Damaged queued editing metadata cannot block the composer. Queued images keep se
 
 Phone downloads stream the selected saved revision, including recovered PDF previews. Readable damaged document registries keep valid neighbors and exact recovery copies; unreadable registries fail visibly while preserving their saved history.
 
+Document publication retries wait for their saved registry entry. Preview-save failures retain an error and can recover through Retry after storage returns, keeping original sources and revision numbers.
+
 ## New in 0.3.4
 
 - Unconfirmed engine admission now becomes a visible recoverable request after its timeout, without an endless busy state or automatic duplicate. A late acknowledgement reconciles the original message.

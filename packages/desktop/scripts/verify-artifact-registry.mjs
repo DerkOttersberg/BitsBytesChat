@@ -1,14 +1,14 @@
 import assert from "node:assert/strict"
 import { randomUUID } from "node:crypto"
 import { createRequire } from "node:module"
-import { mkdir, readFile, readdir, stat, symlink, writeFile } from "node:fs/promises"
+import { mkdir, readFile, readdir, rmdir, stat, symlink, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 
 const root = resolve("../.."),
   desktop = resolve(process.env.BB_QA_MAIN || process.cwd())
 const { _electron } = createRequire(join(root, ".tools/qa/package.json"))("playwright")
 const report = { checks: [], errors: [] }
-for (const kind of ["damaged", "unreadable", "backup-failure"]) {
+for (const kind of ["damaged", "unreadable", "backup-failure", "ready-save-failure"]) {
   const profile = join(root, ".tools/qa/artifact-registry-" + randomUUID()),
     data = join(profile, "BitsBytesChat"),
     registry = join(data, "artifacts.json"),
@@ -25,7 +25,7 @@ for (const kind of ["damaged", "unreadable", "backup-failure"]) {
       updated: 1,
       kind: "html",
       mime: "text/html",
-      status: "ready",
+      status: kind === "ready-save-failure" ? "queued" : "ready",
       pdf: "",
       error: "",
       history: [
@@ -55,6 +55,7 @@ for (const kind of ["damaged", "unreadable", "backup-failure"]) {
   )
   if (kind === "unreadable") await mkdir(registry)
   else await writeFile(registry, original)
+  if (kind === "ready-save-failure") await mkdir(join(data, "artifacts.json.tmp"))
   // This shim changes only the owned diagnostic process. A single failed
   // recovery-copy write must remain an I/O failure, rather than trigger parsing fallback.
   await writeFile(
@@ -98,9 +99,27 @@ await import(pathToFileURL(${JSON.stringify(join(desktop, "out/main/index.js"))}
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach((window) => window.hide()))
       page.on("pageerror", (error) => report.errors.push(error.message))
       await page.locator("[contenteditable=true]").first().waitFor({ timeout: 90000 })
-      assert.equal(kind, "damaged", "An unreadable registry or failed recovery copy opened as empty state")
+      assert.ok(
+        ["damaged", "ready-save-failure"].includes(kind),
+        "An unreadable registry or failed recovery copy opened as empty state",
+      )
       const items = await page.evaluate(() => window.api.bitsbytes.call("artifacts.list"))
-      assert.deepEqual(items, [item])
+      if (kind === "ready-save-failure") {
+        assert.equal(items.length, 1)
+        assert.equal(items[0].status, "error")
+        assert.ok(items[0].error.includes("artifacts.json.tmp"))
+        assert.equal(await readFile(registry, "utf8"), original)
+        await rmdir(join(data, "artifacts.json.tmp"))
+        await page.evaluate(() => window.api.bitsbytes.call("artifact.retry", { id: "registry_saved" }))
+        const recovered = JSON.parse(await readFile(registry, "utf8"))
+        assert.equal(recovered.length, 1)
+        assert.equal(recovered[0].status, "ready")
+        assert.equal(recovered[0].error, "")
+        assert.equal(recovered[0].revision, 2)
+        report.checks.push(
+          "A queued direct preview save failure keeps the composer usable and recovers after explicit Retry without changing revision",
+        )
+      } else assert.deepEqual(items, [item])
       assert.equal(
         (
           await page.evaluate(() =>
@@ -112,15 +131,17 @@ await import(pathToFileURL(${JSON.stringify(join(desktop, "out/main/index.js"))}
     } catch (error) {
       startupError = error
     }
-    if (kind === "damaged") {
+    if (["damaged", "ready-save-failure"].includes(kind)) {
       if (startupError) throw startupError
       const backups = (await readdir(data)).filter((name) => name.startsWith("artifacts-recovery-"))
       assert.equal(backups.length, 1)
       assert.equal(await readFile(join(data, backups[0]), "utf8"), original)
-      assert.equal(await readFile(registry, "utf8"), original)
-      report.checks.push(
-        "Damaged registry opens with its valid document, complete historical source and exact recovery copy",
-      )
+      if (kind === "damaged") {
+        assert.equal(await readFile(registry, "utf8"), original)
+        report.checks.push(
+          "Damaged registry opens with its valid document, complete historical source and exact recovery copy",
+        )
+      }
     } else {
       assert.ok(startupError)
       const fatal = JSON.parse(await readFile(diagnostic, "utf8"))

@@ -61,9 +61,11 @@ export class BBArtifacts {
     const focus = !this.focused.has(focusKey)
     if (old?.hash === hash) {
       if (turnID) { old.turnID = turnID; old.turnIDs = [...new Set([...(old.turnIDs ?? []), turnID])] }
-      if (old.path !== actual) { old.path = actual; old.filename = basename(actual); await this.persist() }
-      else if (turnID) await this.persist()
-      this.focused.add(focusKey); this.changed(old, focus); return old
+      if (old.path !== actual) { old.path = actual; old.filename = basename(actual) }
+      await this.persist()
+      this.focused.add(focusKey); this.changed(old, focus)
+      if (old.status === "queued" || old.status === "exporting") await this.enqueue(old)
+      return old
     }
     const source = join(this.root, "previews/sources", hash + extname(actual).toLowerCase())
     const item: DocumentArtifact = { id, sessionID, turnID, turnIDs: [...new Set([...(old?.turnIDs ?? (old?.turnID ? [old.turnID] : [])), ...(turnID ? [turnID] : [])])], path: actual, filename: basename(actual), revision: (old?.revision ?? 0) + 1, hash, kind: checked.kind, mime: checked.mime, source, history: [...(old?.history ?? [])], status: "queued", updated: Date.now(), pdf: "", error: "" }
@@ -148,15 +150,15 @@ export class BBArtifacts {
     if (["html", "code", "image", "pdf"].includes(item.kind ?? "")) {
       item.status = "ready"
       if (item.kind === "pdf") { item.pdf = item.source ?? item.path; const version = item.history?.find(row => row.revision === item.revision); if (version) version.pdf = item.pdf }
-      return this.persist().then(() => this.changed(item))
+      return this.persist().catch(error => { item.status = "error"; item.error = String(error instanceof Error ? error.message : error) }).then(() => this.changed(item))
     }
     const key = `${item.id}:${item.revision}`
     if (this.pending.has(key)) return
     this.pending.add(key)
     this.queue = this.queue.catch(() => undefined).then(async () => {
       if (this.items.find(row => row.id === item.id) !== item) { this.pending.delete(key); return }
-      item.status = "exporting"; this.changed(item); await this.persist()
       try {
+        item.status = "exporting"; this.changed(item); await this.persist()
         const output = await this.runtime.call<{ pdf: string; formulaErrors?: unknown[] }>("render", { path: item.source, folder: join(this.root, "previews/pdf") })
         if (output.pdf) await checkPDF(output.pdf)
         item.pdf = output.pdf; item.status = "ready"
@@ -164,7 +166,11 @@ export class BBArtifacts {
         if (version) version.pdf = output.pdf
         if (output.formulaErrors?.length) item.error = "bb.error.formulaErrors"
       } catch (error) { item.status = "error"; item.error = String((error as Error).message ?? error) }
-      finally { this.pending.delete(key); await this.persist(); if (this.items.find(row => row.id === item.id) === item) this.changed(item) }
+      finally {
+        this.pending.delete(key)
+        await this.persist().catch(error => { item.status = "error"; item.error = String(error instanceof Error ? error.message : error) })
+        if (this.items.find(row => row.id === item.id) === item) this.changed(item)
+      }
     })
   }
 }
