@@ -26,17 +26,24 @@ export function useChatRun() {
   const [search] = useSearchParams<{ draftId?: string }>()
   const [store, setStore] = createStore<{ value?: RunState; error: string }>({ error: "" })
   const identity = () => params.id ?? draftAccessKey(sdk().scope, sdk().directory, search.draftId)
+  let generation = 0, disposed = false, selected = ""
   const refresh = async () => {
-    const sessionID = identity()
-    const value = await platform.bitsbytes?.call<RunState>("runs.get", { sessionID })
-    if (sessionID === identity()) setStore("value", value)
+    const sessionID = identity(), request = ++generation
+    if (selected !== sessionID) { selected = sessionID; setStore({ value: undefined, error: "" }) }
+    try {
+      const value = await platform.bitsbytes?.call<RunState>("runs.get", { sessionID })
+      if (!disposed && request === generation && sessionID === identity()) setStore({ value, error: "" })
+    } catch (error) {
+      if (!disposed && request === generation && sessionID === identity()) setStore("error", String(error))
+    }
   }
-  createEffect(() => { identity(); void refresh().catch(error => setStore("error", String(error))) })
+  createEffect(() => { identity(); void refresh() })
   const unsubscribe = platform.bitsbytes?.subscribe(event => { if (event.type === "run" && event.sessionID === identity()) void refresh() })
-  onCleanup(() => unsubscribe?.())
+  onCleanup(() => { disposed = true; generation++; unsubscribe?.() })
   const call = async (action: string, args: Record<string, unknown> = {}) => {
-    try { await platform.bitsbytes?.call("runs." + action, { sessionID: identity(), ...args }); await refresh(); setStore("error", "") }
-    catch (error) { setStore("error", String(error).includes("bb.error.goalBudget") ? language.t("bitsbytes.goalBudgetReached") : String(error)); throw error }
+    const sessionID = identity()
+    try { await platform.bitsbytes?.call("runs." + action, { sessionID, ...args }); await refresh() }
+    catch (error) { if (!disposed && sessionID === identity()) setStore("error", String(error).includes("bb.error.goalBudget") ? language.t("bitsbytes.goalBudgetReached") : String(error)); throw error }
   }
   return { store, call, identity }
 }
