@@ -14,7 +14,7 @@ for (let round = 0; round < 3; round++) {
     const executable = process.env[label === "before" ? "BB_BEFORE_EXECUTABLE" : "BB_AFTER_EXECUTABLE"]
       || join(root, `packages/desktop/dist/${builds[label]}/win-unpacked/BitsBytesChat.exe`)
     await promisify(execFile)(process.execPath, ["scripts/verify-composer-performance.mjs", tag, "--settled"], {
-      cwd: process.cwd(), env: { ...process.env, BB_QA_EXECUTABLE: executable }, timeout: 120000, windowsHide: true,
+      cwd: process.cwd(), env: { ...process.env, BB_QA_EXECUTABLE: executable, BB_QA_MAIN: process.env[label === "before" ? "BB_BEFORE_MAIN" : "BB_AFTER_MAIN"] || "" }, timeout: 120000, windowsHide: true,
     })
     const report = JSON.parse(await readFile(join(root, ".tools/qa/results/composer-" + tag + ".json"), "utf8"))
     assert.equal(report.isolated, true)

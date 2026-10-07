@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module'
-import { mkdir, symlink, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { copyFile, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { join, resolve, sep } from 'node:path'
 import assert from 'node:assert/strict'
 
 const root=resolve('../..'),{_electron}=createRequire(join(root,'.tools/qa/package.json'))('playwright')
@@ -36,7 +36,15 @@ try {
   await page.getByRole('tab',{name:'Paged.csv',exact:true}).click()
   await panel.locator('.bb-sheet-scroll tr').first().getByText('Row 0',{exact:true}).waitFor()
   assert.equal(await panel.locator('.bb-sheet-scroll tr').count(),200)
-  await panel.getByRole('button',{name:'Next rows',exact:true}).click()
+  report.pendingPage=await panel.getByRole('button',{name:'Next rows',exact:true}).evaluate(button=>{
+    button.click();const row=button.closest('.bb-document-panel').querySelector('.bb-sheet-scroll tr')
+    return {number:row.querySelector('th').textContent,text:row.querySelector('td').textContent,disabled:button.disabled}
+  })
+  if(process.env.BB_CSV_PENDING_CHECK==='1'){
+    assert.equal(Number(report.pendingPage.number),Number(report.pendingPage.text.split(' ')[1])+1)
+    assert.equal(report.pendingPage.disabled,true)
+    report.checks.push('Pending page reads keep row labels paired with displayed data and hold paging controls')
+  }
   await panel.locator('.bb-sheet-scroll tr').first().getByText('Row 200',{exact:true}).waitFor()
   assert.equal(await panel.locator('.bb-sheet-scroll th').first().innerText(),'201')
   await panel.getByRole('button',{name:'Next rows',exact:true}).click()
@@ -46,6 +54,19 @@ try {
   await panel.getByRole('button',{name:'Previous rows',exact:true}).click()
   await panel.locator('.bb-sheet-scroll tr').first().getByText('Row 200',{exact:true}).waitFor()
   report.checks.push('CSV paging retains exact row values/numbers, final short page and previous navigation')
+  if(process.env.BB_CSV_PENDING_CHECK==='1'){
+    const artifact=(await call('artifacts.list',{})).find(item=>item.filename==='Paged.csv')
+    assert.ok(resolve(artifact.source).startsWith(resolve(data)+sep))
+    await copyFile(artifact.source,artifact.source+'.qa-backup');await rm(artifact.source)
+    await panel.getByRole('button',{name:'Next rows',exact:true}).click()
+    await panel.getByRole('alert').waitFor();assert.ok(await panel.getByRole('button',{name:'Next rows',exact:true}).isEnabled())
+    assert.equal(await panel.locator('.bb-sheet-scroll th').first().innerText(),'201')
+    await copyFile(artifact.source+'.qa-backup',artifact.source)
+    await panel.getByRole('button',{name:'Next rows',exact:true}).click()
+    await panel.locator('.bb-sheet-scroll tr').first().getByText('Row 400',{exact:true}).waitFor()
+    await panel.getByRole('alert').waitFor({state:'detached'})
+    report.checks.push('A failed page read releases controls, retains consistent data and recovers after its source returns')
+  }
   assert.equal(report.errors.length,0)
   await page.screenshot({path:join(root,'.tools/qa/results',tag+'.png')})
   console.log('PASS',report.checks.join('\nPASS '))

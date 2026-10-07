@@ -5,7 +5,7 @@ const root = resolve('../..')
 const { _electron } = createRequire(join(root, '.tools/qa/package.json'))('playwright')
 const version = JSON.parse(await readFile(join(root, 'packages/desktop/package.json'), 'utf8')).version
 if (!process.env.BB_QA_PROFILE) throw Error('Set BB_QA_PROFILE to an isolated QA profile; never benchmark the user profile.')
-const app = await _electron.launch({ executablePath: process.env.BB_QA_EXECUTABLE || join(root, `packages/desktop/dist/${version}/win-unpacked/BitsBytesChat.exe`), env: { ...process.env, LOCALAPPDATA: process.env.BB_QA_PROFILE }, timeout: 90000 })
+const app = await _electron.launch({ executablePath: process.env.BB_QA_EXECUTABLE || join(root, `packages/desktop/dist/${version}/win-unpacked/BitsBytesChat.exe`), ...(process.env.BB_QA_MAIN ? { args: [process.env.BB_QA_MAIN] } : {}), env: { ...process.env, LOCALAPPDATA: process.env.BB_QA_PROFILE }, timeout: 90000 })
 let clean
 try {
   const page = await app.firstWindow()
