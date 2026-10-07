@@ -1,3 +1,4 @@
+import { DesktopBridge } from "./desktop-bridge"
 export * as SessionV2 from "./session"
 export * from "./session/schema"
 
@@ -361,7 +362,7 @@ const layer = Layer.effect(
         Effect.uninterruptible(
           Effect.gen(function* () {
             yield* result.get(input.sessionID)
-            const prompt = resolvePrompt(input.prompt)
+            const prompt = yield* Effect.promise(() => resolvePrompt(input.prompt, input.sessionID))
             const messageID = input.id ?? SessionMessage.ID.create()
             const delivery = input.delivery ?? "steer"
             const expected = { sessionID: input.sessionID, messageID, prompt, delivery }
@@ -457,18 +458,22 @@ const layer = Layer.effect(
   }),
 )
 
-const resolvePrompt = (input: PromptInput.Prompt) =>
+const resolvePrompt = async (input: PromptInput.Prompt, sessionID: string) =>
   Prompt.make({
     text: input.text,
     agents: input.agents,
-    files: input.files?.map((file) => {
+    files: input.files ? await Promise.all(input.files.map(async (file) => {
+      if (file.uri.startsWith("bitsbytes://") && DesktopBridge.enabled()) {
+        const resolved = await DesktopBridge.call<{ text: string }>("attachment.resolve", { uri: file.uri, sessionID })
+        return { ...file, mime: "text/plain", description: resolved.text }
+      }
       const dataMime = file.uri.match(/^data:([^;,]+)[;,]/i)?.[1]
       const target = URL.canParse(file.uri) ? new URL(file.uri).pathname : (file.name ?? file.uri)
       return {
         ...file,
         mime: dataMime ?? (target.endsWith("/") ? "application/x-directory" : FSUtil.mimeType(target)),
       }
-    }),
+    })) : undefined,
   })
 
 export const node = makeGlobalNode({

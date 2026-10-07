@@ -59,6 +59,7 @@ export type FileContextItem = {
   commentID?: string
   commentOrigin?: "review" | "file"
   preview?: string
+  attachment?: { kind: "transcript" | "skill"; id: string; name: string; revision?: number }
 }
 
 export type ContextItem = FileContextItem
@@ -135,6 +136,7 @@ function clonePrompt(prompt: Prompt): Prompt {
 }
 
 function contextItemKey(item: ContextItem) {
+  if (item.attachment) return `${item.attachment.kind}:${item.attachment.id}:${item.attachment.revision ?? ""}`
   if (item.type !== "file") return item.type
   const start = item.selection?.startLine
   const end = item.selection?.endLine
@@ -156,7 +158,15 @@ function createPromptActions(setStore: SetStoreFunction<PromptStore>) {
     set(prompt: Prompt, cursorPosition?: number) {
       const next = clonePrompt(prompt)
       batch(() => {
-        setStore("prompt", next)
+        const references = next.filter((part): part is FileAttachmentPart => part.type === "file" && !!part.url?.startsWith("bitsbytes://"))
+        if (references.length) setStore("context", "items", items => [...items, ...references.flatMap(part => {
+          const url = new URL(part.url!)
+          if (url.hostname !== "transcript" && url.hostname !== "skill") return []
+          const item: FileContextItem = { type: "file", path: part.url!, comment: part.filename ?? url.hostname, attachment: { kind: url.hostname, id: decodeURIComponent(url.pathname.slice(1)), name: part.filename ?? url.hostname, revision: url.searchParams.has("revision") ? Number(url.searchParams.get("revision")) : undefined } }
+          const key = contextItemKey(item)
+          return items.some(row => row.key === key) ? [] : [{ ...item, key }]
+        })])
+        setStore("prompt", next.filter(part => !references.includes(part as FileAttachmentPart)))
         if (cursorPosition !== undefined) setStore("cursor", cursorPosition)
       })
     },

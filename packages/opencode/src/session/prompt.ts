@@ -1,3 +1,4 @@
+import { DesktopBridge } from "@opencode-ai/core/desktop-bridge"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import path from "path"
@@ -700,6 +701,10 @@ const layer = Layer.effect(
         "SessionPrompt.resolveUserPart",
       )(function* (part) {
         if (part.type === "file") {
+          if (part.url.startsWith("bitsbytes://") && DesktopBridge.enabled()) {
+            const resolved = yield* Effect.promise(() => DesktopBridge.call<{ text: string }>("attachment.resolve", { uri: part.url, sessionID: input.sessionID }))
+            return [{ ...part, messageID: info.id, sessionID: input.sessionID }, { type: "text", text: resolved.text, synthetic: true, messageID: info.id, sessionID: input.sessionID }]
+          }
           if (part.source?.type === "resource") {
             const { clientName, uri } = part.source
             yield* Effect.logInfo("mcp resource", { clientName, uri, mime: part.mime })

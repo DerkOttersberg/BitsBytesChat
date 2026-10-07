@@ -41,6 +41,9 @@ export type PromptInputV2Props = {
   borderUnderlay?: boolean
   class?: string
   modelControl?: JSX.Element
+  accessControl?: JSX.Element
+  audioControl?: JSX.Element
+  submitControl?: JSX.Element
   variantControlVisible?: boolean
   attachKeybind?: string[]
   attachShortcut?: string
@@ -195,9 +198,9 @@ export function PromptInputV2(props: PromptInputV2Props) {
           </Show>
         </div>
 
-        <div class="flex h-11 items-center px-2">
+        <div class="flex min-h-11 flex-wrap items-center gap-y-1 px-2 py-1" data-slot="prompt-controls">
           <div
-            class="flex min-w-0 flex-1 items-center gap-1"
+            class="flex shrink-0 items-center gap-1"
             aria-hidden={state.mode === "shell"}
             inert={state.mode === "shell" ? true : undefined}
             style={buttons()}
@@ -225,6 +228,11 @@ export function PromptInputV2(props: PromptInputV2Props) {
                 />
               )}
             </Show>
+            {props.accessControl}
+          </div>
+          <div class="flex min-w-0 max-w-full ml-auto items-center justify-end gap-1" data-slot="prompt-right-controls">
+          <div class="flex min-w-0 items-center justify-end gap-1" data-slot="prompt-model-controls"
+            aria-hidden={state.mode === "shell"} inert={state.mode === "shell" ? true : undefined} style={buttons()}>
             <Show
               when={props.modelControl}
               fallback={
@@ -254,7 +262,8 @@ export function PromptInputV2(props: PromptInputV2Props) {
               )}
             </Show>
           </div>
-          <PromptInputV2SubmitButton
+          {props.audioControl}
+          <Show when={props.submitControl} fallback={<PromptInputV2SubmitButton
             mode={state.mode}
             stopping={view.submit.stopping()}
             disabled={!props.controller.canSubmit()}
@@ -262,7 +271,8 @@ export function PromptInputV2(props: PromptInputV2Props) {
             stopLabel={i18n.t("ui.promptInput.stop")}
             onSubmit={props.controller.submit}
             onStop={props.controller.stop}
-          />
+          />}>{props.submitControl}</Show>
+          </div>
         </div>
       </form>
     </div>
@@ -402,13 +412,15 @@ export function PromptInputV2Attachments(props: {
                   openDelay={800}
                   contentClass="max-w-[300px] break-words"
                 >
-                  <CommentCardV2
+                  <Show when={comment.attachment} fallback={<CommentCardV2
                     comment={comment.comment ?? ""}
                     path={comment.path}
                     selection={comment.selection}
                     active={comment.key === props.activeCommentID}
                     onClick={() => props.onCommentClick?.(comment)}
-                  />
+                  />}>
+                    {attachment => <button type="button" class="flex items-center gap-2 rounded-lg border border-v2-border-border-base px-3 py-2 text-12-medium h-12 max-w-64" title={attachment().name} onClick={() => props.onCommentClick?.(comment)}><IconV2 name={attachment().kind === "skill" ? "outline-sparkles" : "outline-document"} /><span class="truncate">{attachment().name}</span></button>}
+                  </Show>
                 </TooltipV2>
                 <button
                   type="button"

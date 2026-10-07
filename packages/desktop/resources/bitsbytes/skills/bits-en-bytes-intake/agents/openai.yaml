@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bits en Bytes - Intakegesprek"
+  short_description: "Snel een Word-intake maken; onbekende velden mogen leeg"
+  default_prompt: "Gebruik $bits-en-bytes-intake. Verwerk mijn opname, stel hoogstens één korte aanvullende vraag en maak daarna direct het Word-formulier. Laat onbekende gegevens leeg."

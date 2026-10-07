@@ -1,6 +1,6 @@
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import type { AsyncStorage, SyncStorage } from "@solid-primitives/storage"
-import type { Accessor } from "solid-js"
+import type { Accessor, Component } from "solid-js"
 import type { DesktopMenuAction } from "../desktop-menu"
 import { ServerConnection } from "./server"
 import type { WslServersPlatform } from "../wsl/types"
@@ -29,6 +29,19 @@ export type FatalRendererErrorLog = {
 }
 
 type PlatformBase = {
+  applicationName?: string
+  settingsPanels?: { id: string; title: string; component: Component }[]
+  documentPanel?: Component<{ id: string; revision?: number }>
+  runPanel?: Component<{ sessionID: string; kind: "plan" | "goal" }>
+  browserPanel?: Component<{ id: string; active: boolean }>
+  providerSettings?: Component
+  bitsbytes?: {
+    call: <T = unknown>(method: string, args?: Record<string, unknown>) => Promise<T>
+    subscribe: (listener: (event: { type: string; [key: string]: unknown }) => void) => () => void
+  }
+  /** Optional native recording controls inside the chat composer. */
+  composerAudio?: Component<{ identity?: Accessor<unknown>; capture: () => (transcript: { text: string; path: string; jobID: string; revision?: number }) => void }>
+  recordingActive?: (identity?: unknown) => boolean
   /** App version */
   version?: string
 

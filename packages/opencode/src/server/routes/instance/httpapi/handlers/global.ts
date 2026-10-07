@@ -82,6 +82,9 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     })
 
     const dispose = Effect.fn("GlobalHttpApi.dispose")(function* () {
+      // BitsBytesChat writes its complete private configuration before disposal.
+      // Refresh the global cache too, so providers, skills and MCP toggles apply now.
+      yield* config.invalidate()
       yield* disposeAllInstancesAndEmitGlobalDisposed()
       return true
     })

@@ -288,7 +288,7 @@ export const loadCommands = (
           agent: command.agent,
           model: providerID && id ? { providerID, id } : undefined,
           subtask: command.subtask,
-          // source: command.source === "skill" ? undefined : command.source,
+          source: command.source,
         }
       })
     }

@@ -63,6 +63,7 @@ export type PromptInputV2Comment = {
   commentID?: string
   commentOrigin?: "review" | "file"
   preview?: string
+  attachment?: { kind: "transcript" | "skill"; id: string; name: string; revision?: number }
 }
 
 export type PromptInputV2PersistedState = {

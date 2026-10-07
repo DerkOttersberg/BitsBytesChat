@@ -10,6 +10,7 @@ import { SessionV2 } from "./session"
 import { SessionStore } from "./session/store"
 import { Wildcard } from "./util/wildcard"
 import { PermissionSaved } from "./permission/saved"
+import { DesktopBridge } from "./desktop-bridge"
 
 export { Effect, Rule, Ruleset } from "@opencode-ai/schema/permission"
 const missingAgentPermissions: Permission.Ruleset = [{ action: "*", resource: "*", effect: "deny" }]
@@ -155,6 +156,8 @@ const layer = Layer.effect(
     const evaluateInput = EffectRuntime.fnUntraced(function* (input: AssertInput) {
       const rules = yield* configured(input.sessionID, input.agent)
       if (denied(input, rules)) return { effect: "deny" as const, rules }
+      const desktop = yield* EffectRuntime.promise(() => DesktopBridge.permission(input.sessionID, input.action))
+      if (desktop) return { effect: desktop, rules }
       const all = [...rules, ...(yield* savedRules())]
       const effects = input.resources.map((resource) => evaluate(input.action, resource, all).effect)
       const effect: Permission.Effect = effects.includes("deny") ? "deny" : effects.includes("ask") ? "ask" : "allow"
@@ -247,7 +250,7 @@ const layer = Layer.effect(
             return
           }
 
-          if (input.reply === "always" && existing.request.save?.length) {
+          if (!DesktopBridge.enabled() && input.reply === "always" && existing.request.save?.length) {
             yield* saved.add({
               projectID: location.project.id,
               action: existing.request.action,
@@ -256,7 +259,7 @@ const layer = Layer.effect(
           }
           yield* Deferred.succeed(existing.deferred, undefined)
           pending.delete(input.requestID)
-          if (input.reply !== "always" || !existing.request.save?.length) return
+          if (DesktopBridge.enabled() || input.reply !== "always" || !existing.request.save?.length) return
 
           const rememberedRules = yield* savedRules()
           for (const [id, item] of pending) {

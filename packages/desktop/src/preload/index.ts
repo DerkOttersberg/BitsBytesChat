@@ -1,6 +1,10 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron"
 import type { ElectronAPI, WslServersEvent } from "./types"
 import type { UpdaterState } from "@opencode-ai/app/updater"
+import type { BBEvent } from "../bitsbytes/types"
+
+const bitsbytesCallbacks = new Set<(event: BBEvent) => void>()
+ipcRenderer.on("bitsbytes:event", (_: unknown, event: BBEvent) => { for (const callback of [...bitsbytesCallbacks]) callback(event) })
 
 const updaterCallbacks = new Set<(state: UpdaterState) => void>()
 let updaterState: UpdaterState | undefined
@@ -11,6 +15,13 @@ const updaterHandler = (_: unknown, state: UpdaterState) => {
 }
 
 const api: ElectronAPI = {
+  bitsbytes: {
+    call: (method, args) => ipcRenderer.invoke("bitsbytes:call", method, args),
+    subscribe: (listener) => {
+      bitsbytesCallbacks.add(listener)
+      return () => { bitsbytesCallbacks.delete(listener) }
+    },
+  },
   killSidecar: () => ipcRenderer.invoke("kill-sidecar"),
   installCli: () => ipcRenderer.invoke("install-cli"),
   awaitInitialization: () => ipcRenderer.invoke("await-initialization"),

@@ -1,0 +1,29 @@
+[data-component="prompt-effort"] {
+  width: 260px;
+  padding: 16px;
+  border: 1px solid var(--v2-border-border-base);
+  border-radius: 10px;
+  background: var(--v2-background-bg-layer-01);
+  color: var(--v2-text-text-base);
+  box-shadow: var(--v2-elevation-floating);
+  font-size: 13px;
+  outline: none;
+}
+[data-component="prompt-effort"] .effort-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+[data-component="prompt-effort"] .effort-value { color: #17637d; font-weight: 600; margin-top: 4px; }
+:root[data-color-scheme="dark"] [data-component="prompt-effort"] .effort-value { color: #79c9e5; }
+[data-component="prompt-effort"] .effort-description { color: var(--v2-text-text-weak); line-height: 1.5; margin: 12px 0; }
+[data-component="prompt-effort"] input[type="range"] { width: 100%; accent-color: #2596be; cursor: pointer; }
+[data-component="prompt-effort"] .effort-endpoints { display: flex; justify-content: space-between; color: var(--v2-text-text-weak); font-size: 11px; margin: 4px 0 12px; }
+[data-component="prompt-effort"] select {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 9px;
+  border: 1px solid var(--v2-border-border-base);
+  border-radius: 6px;
+  background: var(--v2-background-bg-layer-02);
+  color: var(--v2-text-text-base);
+  font: inherit;
+  cursor: pointer;
+}
+[data-component="prompt-effort"] :is(select, input):focus-visible { outline: 2px solid #2596be; outline-offset: 2px; }

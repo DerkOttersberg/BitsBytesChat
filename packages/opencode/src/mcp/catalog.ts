@@ -39,7 +39,7 @@ export function defs(client: Client, timeout?: number) {
   return listTools(client, timeout ?? DEFAULT_TIMEOUT).pipe(Effect.catch(() => Effect.void))
 }
 
-export function convertTool(mcpTool: MCPToolDef, client: Client, timeout?: number): Tool {
+export function convertTool(mcpTool: MCPToolDef, client: Client, timeout?: number, sessionID?: string): Tool {
   const inputSchema: JSONSchema7 = {
     ...(mcpTool.inputSchema as JSONSchema7),
     type: "object",
@@ -54,6 +54,7 @@ export function convertTool(mcpTool: MCPToolDef, client: Client, timeout?: numbe
       const result = await client.callTool(
         {
           name: mcpTool.name,
+          _meta: sessionID ? { sessionID } : undefined,
           arguments: (args || {}) as Record<string, unknown>,
         },
         CallToolResultSchema,

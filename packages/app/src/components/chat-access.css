@@ -1,0 +1,4 @@
+.bb-chat-access[data-component="button-v2"] { height: 28px; white-space: nowrap; font-weight: 440; }
+[data-component="button-v2"].bb-chat-access[data-mode="full"] { color: light-dark(#9e5a19, #e9ac72); background: light-dark(#b76a1510, #edaa6512); }
+[data-component="button-v2"].bb-chat-access[data-mode="full"]:hover:not(:disabled) { color: light-dark(#9e5a19, #e9ac72); background: light-dark(#b76a1520, #edaa6522); }
+.bb-access-warning { display: inline-grid; place-items: center; width: 14px; height: 14px; border: 1px solid currentColor; border-radius: 50%; font-size: 10px; font-weight: 650; line-height: 1; flex-shrink: 0; }

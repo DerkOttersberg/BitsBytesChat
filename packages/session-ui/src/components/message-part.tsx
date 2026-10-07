@@ -1,3 +1,5 @@
+import { ProposedPlan, proposedPlan } from "./proposed-plan"
+import { ArtifactCards } from "./artifact-cards"
 import {
   Component,
   createEffect,
@@ -761,7 +763,7 @@ export function AssistantParts(props: {
   const last = createMemo(() => grouped().at(-1)?.key)
 
   return (
-    <Index each={grouped()}>
+    <><Index each={grouped()}>
       {(entryAccessor) => {
         const entryType = createMemo(() => entryAccessor().type)
 
@@ -821,7 +823,7 @@ export function AssistantParts(props: {
           </Switch>
         )
       }}
-    </Index>
+    </Index><Show when={props.messages[0]}><ArtifactCards sessionID={props.messages[0].sessionID} messageIDs={props.messages.map(message => message.id)} /></Show></>
   )
 }
 
@@ -1280,6 +1282,7 @@ export function UserMessageDisplay(props: {
                     title={type === "file" ? name : undefined}
                     onClick={() => {
                       if (type === "image") openImagePreview(file.url, name)
+                      if (file.url.startsWith("bitsbytes://")) window.dispatchEvent(new CustomEvent("bitsbytes:attachment", { detail: { uri: file.url, name, sessionID: props.message.sessionID } }))
                     }}
                   >
                     <Show
@@ -1299,8 +1302,8 @@ export function UserMessageDisplay(props: {
                 <AttachmentCardV2
                   title={getFilename(name)}
                   hover={name}
-                  clickable={!!props.actions?.openAttachment}
-                  onClick={() => props.actions?.openAttachment?.(file)}
+                  clickable={file.url.startsWith("bitsbytes://") || !!props.actions?.openAttachment}
+                  onClick={() => file.url.startsWith("bitsbytes://") ? window.dispatchEvent(new CustomEvent("bitsbytes:attachment", { detail: { uri: file.url, name, sessionID: props.message.sessionID } })) : props.actions?.openAttachment?.(file)}
                 >
                   {typeLabel(name, file.mime, i18n.t("ui.common.file"))}
                 </AttachmentCardV2>
@@ -1732,7 +1735,7 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
     <Show when={text()}>
       <div data-component="text-part" data-timeline-part-id={part().id}>
         <div data-slot="text-part-body">
-          <PacedMarkdown text={text()} cacheKey={part().id} streaming={streaming()} />
+          <Show when={props.message.role === "assistant" && (props.message as AssistantMessage).agent === "plan" && proposedPlan(text())} fallback={<PacedMarkdown text={text()} cacheKey={part().id} streaming={streaming()} />}><ProposedPlan text={text()} sessionID={props.message.sessionID} streaming={streaming()} /></Show>
         </div>
         <Show when={showCopy()}>
           <div data-slot="text-part-copy-wrapper" data-interrupted={interrupted() ? "" : undefined}>

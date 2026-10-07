@@ -9,7 +9,7 @@ const channel = (() => {
   const raw = process.env.OPENCODE_CHANNEL
   if (raw === "dev" || raw === "beta" || raw === "prod") return raw
   if (process.env.OPENCODE_CHANNEL === "latest") return "prod"
-  return "dev"
+  return "prod"
 })()
 
 const nodePtyPkg = `@lydell/node-pty-${process.platform}-${process.arch}`
@@ -51,7 +51,7 @@ const require = __cjs_mod__.createRequire(import.meta.url);
 `,
         },
       },
-      externalizeDeps: { include: [nodePtyPkg] },
+      externalizeDeps: { include: [nodePtyPkg], exclude: ["@opencode-ai/core"] },
     },
     plugins: [
       {
@@ -91,10 +91,12 @@ const require = __cjs_mod__.createRequire(import.meta.url);
     },
   },
   renderer: {
+    define: { "import.meta.env.VITE_OPENCODE_CHANNEL": JSON.stringify("prod") },
     plugins: [appPlugin, sentry],
     publicDir: "../../../app/public",
     root: "src/renderer",
     build: {
+      commonjsOptions: { include: [/node_modules/, /mobile[\\/]vendor[\\/]qrcode\.js$/] },
       sourcemap: true,
       rollupOptions: {
         input: {

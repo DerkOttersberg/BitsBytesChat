@@ -6,7 +6,7 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { getCACertificates, setDefaultCACertificates } from "node:tls"
 import type { Event } from "electron"
-import { app, BrowserWindow } from "electron"
+import { app, BrowserWindow, dialog } from "electron"
 
 import { Deferred, Effect, Fiber } from "effect"
 import contextMenu from "electron-context-menu"
@@ -49,6 +49,8 @@ import { migrate } from "./migrate"
 import { cleanupStoreFiles } from "./store-cleanup"
 import { startBackgroundCli } from "./background-cli"
 import { setNativeTranslations } from "./native-translations"
+import { BitsBytes } from "./bitsbytes"
+import { bbt } from "../bitsbytes/copy"
 
 const APP_NAMES: Record<string, string> = {
   dev: "OpenCode Dev",
@@ -113,16 +115,24 @@ function ensureLoopbackNoProxy() {
 }
 
 const main = Effect.gen(function* () {
+  const bitsRoot = join(process.env.LOCALAPPDATA ?? app.getPath("appData"), "BitsBytesChat")
+  for (const dir of ["data", "config", "cache", "state", "workspace"]) mkdirSync(join(bitsRoot, dir), { recursive: true })
+  process.env.XDG_DATA_HOME = join(bitsRoot, "data")
+  process.env.XDG_CONFIG_HOME = join(bitsRoot, "config")
+  process.env.XDG_CACHE_HOME = join(bitsRoot, "cache")
+  process.env.XDG_STATE_HOME = join(bitsRoot, "state")
+  process.env.OPENCODE_DISABLE_AUTOUPDATE = "true"
+  process.env.OPENCODE_DISABLE_EXTERNAL_SKILLS = "true"
   contextMenu({ showSaveImageAs: true, showLookUpSelection: false, showSearchWithGoogle: false })
 
   // on macOS apps run in `/` which can cause issues with ripgrep
   try {
-    process.chdir(homedir())
+    process.chdir(join(bitsRoot, "workspace"))
   } catch {}
 
   process.env.OPENCODE_DISABLE_EMBEDDED_WEB_UI = "true"
 
-  const appId = app.isPackaged ? APP_IDS[CHANNEL] : "ai.opencode.desktop.dev"
+  const appId = "nl.bitsbytes.chat"
   const onboardingTestRoot = ((): string | undefined => {
     if (!TEST_ONBOARDING) return
 
@@ -138,11 +148,11 @@ const main = Effect.gen(function* () {
     process.env.XDG_STATE_HOME = join(root, "state")
     return root
   })()
-  app.setName(app.isPackaged ? APP_NAMES[CHANNEL] : "OpenCode Dev")
+  app.setName("Bits & Bytes Chat")
   app.setAppUserModelId(appId)
   app.setPath(
     "userData",
-    onboardingTestRoot ? join(onboardingTestRoot, "desktop") : join(app.getPath("appData"), appId),
+    onboardingTestRoot ? join(onboardingTestRoot, "desktop") : join(bitsRoot, "desktop"),
   )
   if (onboardingTestRoot) app.setPath("sessionData", join(onboardingTestRoot, "session"))
   initializeOldLayoutEligibility(app.getPath("userData"))
@@ -193,7 +203,6 @@ const main = Effect.gen(function* () {
   app.commandLine.appendSwitch("proxy-bypass-list", "<-loopback>")
   const features = app.commandLine.getSwitchValue("enable-features")
   app.commandLine.appendSwitch("enable-features", features ? `${jsCallStackFeature},${features}` : jsCallStackFeature)
-  if (!app.isPackaged) app.commandLine.appendSwitch("remote-debugging-port", "9222")
 
   if (!app.requestSingleInstanceLock()) {
     app.quit()
@@ -254,7 +263,7 @@ const main = Effect.gen(function* () {
 
   yield* Effect.promise(() => app.whenReady())
 
-  if (!TEST_ONBOARDING) migrate()
+  // This fork deliberately uses an independent profile; do not migrate another app's state.
   yield* Effect.promise(() => cleanupStoreFiles(app.getPath("userData"))).pipe(
     Effect.tap((result) =>
       Effect.sync(() => {
@@ -268,10 +277,12 @@ const main = Effect.gen(function* () {
       }),
     ),
   )
-  app.setAsDefaultProtocolClient("opencode")
+  app.setAsDefaultProtocolClient("bitsbytes-chat")
   registerRendererProtocol()
   setDockIcon()
   const updater = setupAutoUpdater(stopSidecars)
+  const bitsbytes = new BitsBytes(() => Effect.runPromise(Deferred.await(serverReady)), (stage) => logger.log("initializing local services", { stage }))
+  yield* Effect.promise(() => bitsbytes.start())
   const menuDeps = {
     trigger: (id: string) => {
       const win = getLastFocusedWindow()
@@ -281,6 +292,7 @@ const main = Effect.gen(function* () {
     relaunch,
   }
   registerIpcHandlers({
+    bitsbytes,
     killSidecar: () => killSidecar(),
     relaunch,
     awaitInitialization: Effect.fnUntraced(
@@ -421,4 +433,8 @@ const main = Effect.gen(function* () {
   if (windows.length) createMenu(menuDeps)
 })
 
-Effect.runFork(main)
+Effect.runFork(main.pipe(Effect.catchCause(() => Effect.sync(() => {
+  logger?.error("application startup failed; saved data retained")
+  dialog.showErrorBox(bbt("brand"), bbt("startupFailed").replace("{{path}}", join(app.getPath("userData"), "logs")))
+  app.quit()
+}))))

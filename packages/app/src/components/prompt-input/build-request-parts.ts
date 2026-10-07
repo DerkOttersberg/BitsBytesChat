@@ -17,6 +17,7 @@ type ContextFile = {
   commentID?: string
   commentOrigin?: "review" | "file"
   preview?: string
+  attachment?: { kind: "transcript" | "skill"; id: string; name: string; revision?: number }
 }
 
 type BuildRequestPartsInput = {
@@ -144,6 +145,11 @@ export function buildRequestParts(input: BuildRequestPartsInput) {
 
   const used = new Set(files.map((part) => part.url))
   const context = input.context.flatMap((item) => {
+    if (item.attachment) return [{
+      id: Identifier.ascending("part"), type: "file", mime: "text/plain",
+      filename: item.attachment.name,
+      url: `bitsbytes://${item.attachment.kind}/${encodeURIComponent(item.attachment.id)}${item.attachment.revision === undefined ? "" : `?revision=${item.attachment.revision}`}`,
+    } satisfies PromptRequestPart]
     const path = absolute(input.sessionDirectory, item.path)
     const url = `file://${encodeFilePath(path)}${fileQuery(item.selection)}`
     const comment = item.comment?.trim()

@@ -1,4 +1,6 @@
 export const dict: Record<string, string> = {
+  "ui.artifact.revision": "Revision {{revision}}", "ui.artifact.preparing": "Preparing preview…", "ui.artifact.error": "Preview unavailable",
+  "ui.plan.writing": "Writing plan…", "ui.plan.title": "Proposed plan", "ui.plan.export": "Export", "ui.plan.open": "Open plan", "ui.plan.implement": "Implement this plan",
   "ui.sessionReview.title": "Session changes",
   "ui.sessionReview.title.git": "Git changes",
   "ui.sessionReview.title.branch": "Branch changes",

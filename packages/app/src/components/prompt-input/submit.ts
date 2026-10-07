@@ -1,9 +1,14 @@
+import { usePlatform } from "../../context/platform"
+import type { Platform } from "../../context/platform"
+import { useSettings } from "../../context/settings"
+import { draftAccessKey } from "../chat-access"
 import type { Message, Session } from "@opencode-ai/sdk/v2/client"
 import { showToast } from "@/utils/toast"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { Binary } from "@opencode-ai/core/util/binary"
 import { useNavigate, useParams, useSearchParams } from "@solidjs/router"
 import { batch, startTransition, type Accessor } from "solid-js"
+import { unwrap } from "solid-js/store"
 import { useTabs } from "@/context/tabs"
 import { useServerSync, type ServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
@@ -49,6 +54,9 @@ type FollowupSendInput = {
   messageID?: string
   optimisticBusy?: boolean
   before?: () => Promise<boolean> | boolean
+  desktop?: Platform["bitsbytes"]
+  protocol?: Promise<"v1" | "v2">
+  delivery?: "queue" | "steer"
 }
 
 const draftText = (prompt: Prompt) => prompt.map((part) => ("content" in part ? part.content : "")).join("")
@@ -126,6 +134,21 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
     messageID,
     sessionDirectory: input.draft.sessionDirectory,
   })
+
+  if (input.desktop) {
+    if (!(await wait())) return false
+    const protocol = await input.protocol
+    await input.desktop.call("runs.admit", unwrap({ delivery: input.delivery ?? "queue", userText: text, prompt: {
+      sessionID: input.draft.sessionID, directory: input.draft.sessionDirectory, id: messageID,
+      protocol,
+      agent: input.draft.agent, model: input.draft.model, variant: input.draft.variant,
+      legacyParts: requestParts, text: requestParts.flatMap(part => part.type === "text" ? [part.text] : []).join("\n"),
+      files: requestParts.flatMap(part => part.type === "file" ? [{ uri: part.url, name: part.filename }] : []),
+      agents: requestParts.flatMap(part => part.type === "agent" ? [{ name: part.name }] : []),
+      draft: { ...input.draft, prompt: input.draft.prompt.map(part => part.type === "image" ? { type: "image", mime: part.mime, filename: part.filename, dataUrl: encodedImages.find(image => image.filename === part.filename)?.dataUrl } : part) },
+    } }))
+    return true
+  }
 
   const message: Message = {
     id: messageID,
@@ -225,13 +248,15 @@ type PromptSubmitInput = {
   newSessionWorktree?: Accessor<string | undefined>
   onNewSessionWorktreeReset?: () => void
   shouldQueue?: Accessor<boolean>
-  onQueue?: (draft: FollowupDraft) => void
+  onQueue?: (draft: FollowupDraft) => void | Promise<void>
   onAbort?: () => void
   onSubmit?: () => void
   model?: ModelSelection
 }
 
 export function createPromptSubmit(input: PromptSubmitInput) {
+  const platform = usePlatform()
+  const settings = useSettings()
   const navigate = useNavigate()
   const sdk = useSDK()
   const sync = useSync()
@@ -263,6 +288,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     serverSync().session.set("todo", sessionID, [])
 
     input.onAbort?.()
+    await platform.bitsbytes?.call("runs.stop", { sessionID })
 
     const key = pendingKey(sessionID)
     const queued = pending.get(key)
@@ -318,6 +344,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
   const handleSubmit = async (event: Event) => {
     event.preventDefault()
 
+    const accessKey = params.id ?? draftAccessKey(sdk().scope, sdk().directory, search.draftId)
     const target = prompt.capture()
     const submission = createPromptSubmissionState({
       target,
@@ -329,6 +356,10 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     const text = currentPrompt.map((part) => ("content" in part ? part.content : "")).join("")
     const images = input.imageAttachments().slice()
     const mode = input.mode()
+    if (mode === "shell" && platform.bitsbytes && (await platform.bitsbytes.call<{ plan: boolean }>("runs.permission", { sessionID: accessKey })).plan) {
+      showToast({ variant: "error", title: language.t("bitsbytes.plan"), description: language.t("bitsbytes.planReadOnly") })
+      return
+    }
 
     if (text.trim().length === 0 && images.length === 0 && input.commentCount() === 0) {
       if (input.working()) void abort()
@@ -415,6 +446,13 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           return undefined
         })
       if (created) {
+        if (platform.bitsbytes) {
+          const access = await platform.bitsbytes.call<{ mode: string }>("access.get", { sessionID: accessKey })
+            await platform.bitsbytes.call("access.set", { sessionID: created.id, mode: access.mode })
+            await platform.bitsbytes.call("runs.promote", { from: accessKey, sessionID: created.id })
+            await platform.bitsbytes.call("browser.promote", { from: `draft:${projectDirectory}`, to: created.id })
+          await platform.bitsbytes.call("access.set", { sessionID: accessKey, mode: "ask" })
+        }
         seed(sessionDirectory, created)
         session = created
         await startTransition(() => {
@@ -479,8 +517,8 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return true
     }
 
-    if (!isNewSession && mode === "normal" && input.shouldQueue?.()) {
-      input.onQueue?.(draft)
+    if (!platform.bitsbytes && !isNewSession && mode === "normal" && input.shouldQueue?.()) {
+      await input.onQueue?.(draft)
       clearContext(submission.target())
       clearInput()
       return
@@ -617,6 +655,9 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     }
 
     void sendFollowupDraft({
+      desktop: platform.bitsbytes,
+      protocol: sdk().protocol,
+      delivery: (event as CustomEvent<{ delivery?: "queue" | "steer" }>).detail?.delivery ?? ((event as KeyboardEvent).ctrlKey ? settings.general.followup() === "queue" ? "steer" : "queue" : settings.general.followup()),
       api: sdk().api.session,
       sync: sync(),
       serverSync: serverSync(),

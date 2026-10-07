@@ -1,3 +1,15 @@
+# Bits & Bytes Chat
+
+This repository contains the custom Windows desktop and phone companion app, based on OpenCode v1.18.34. It retains OpenCode's chat engine and adds local transcription, reusable skills, document previews and paired phone access.
+
+See [Bits & Bytes setup](README.BitsBytes.md), [mobile access](MOBILE_ACCESS.md), and [verification notes](VERIFICATION.md).
+
+The first custom commit is a source backup checkpoint. Mobile microphone support in version 0.3.3 is still being verified; the last delivered Windows build is 0.3.2. Credentials, private sessions, recordings, downloaded models and generated build files are excluded from Git.
+
+The original OpenCode documentation follows. Its license and attribution are preserved.
+
+---
+
 <p align="center">
   <a href="https://opencode.ai">
     <picture>

@@ -3,7 +3,7 @@ import { getFilename } from "@opencode-ai/core/util/path"
 import type { FilePart } from "@opencode-ai/sdk/v2"
 
 export function attached(part: FilePart) {
-  return part.url.startsWith("data:") && !inline(part)
+  return (part.url.startsWith("data:") || part.url.startsWith("bitsbytes://")) && !inline(part)
 }
 
 export function inline(part: FilePart) {

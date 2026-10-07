@@ -1,3 +1,4 @@
+import { DesktopBridge } from "./desktop-bridge"
 export * as Credential from "./credential"
 
 import { asc, eq } from "drizzle-orm"
@@ -60,6 +61,23 @@ const layer = Layer.effect(
         integrationID: row.integration_id,
         label: row.label,
         value: decode(row.value),
+      })
+    }
+
+    if (DesktopBridge.enabled()) {
+      const rows = yield* db.select().from(CredentialTable).all().pipe(Effect.orDie)
+      if (rows.length) {
+        yield* Effect.promise(() => DesktopBridge.call("credentials.v2.import", { records: rows.flatMap(row => { const value = stored(row); return value ? [value] : [] }) }))
+        yield* db.delete(CredentialTable).run().pipe(Effect.orDie)
+      }
+      const all = () => Effect.promise(() => DesktopBridge.call<Info[]>("credentials.v2.all"))
+      return Service.of({
+        all,
+        list: id => all().pipe(Effect.map(rows => rows.filter(row => row.integrationID === id))),
+        get: id => all().pipe(Effect.map(rows => rows.find(row => row.id === id))),
+        create: input => Effect.promise(() => DesktopBridge.call<Info>("credentials.v2.create", { ...input, id: ID.create(), label: input.label ?? "default" })),
+        update: (id, updates) => Effect.promise(async () => { await DesktopBridge.call("credentials.v2.update", { id, ...updates }) }),
+        remove: id => Effect.promise(async () => { await DesktopBridge.call("credentials.v2.remove", { id }) }),
       })
     }
 

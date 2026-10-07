@@ -3,6 +3,7 @@ import { createMemo, createResource, onCleanup, untrack, type Accessor } from "s
 import { useServerSync } from "@/context/server-sync"
 import { useSync } from "@/context/sync"
 import { same } from "@/utils/same"
+import { afterInheritedContext } from "../side-chat-context"
 
 const emptyUserMessages: UserMessage[] = []
 const sessionFreshness = 15_000
@@ -10,6 +11,7 @@ const sessionFreshness = 15_000
 export function createTimelineModel(input: {
   sessionID: Accessor<string | undefined>
   revertMessageID: Accessor<string | undefined>
+  hideBefore?: Accessor<number | undefined>
 }) {
   const serverSync = useServerSync()
   const sync = useSync()
@@ -50,7 +52,7 @@ export function createTimelineModel(input: {
   const userMessages = createMemo(() => selectUserMessages(messages()), emptyUserMessages, { equals: same })
   const visibleUserMessages = createMemo(
     () => {
-      return selectVisibleUserMessages(userMessages(), input.revertMessageID())
+      return afterInheritedContext(selectVisibleUserMessages(userMessages(), input.revertMessageID()), input.hideBefore?.())
     },
     emptyUserMessages,
     { equals: same },

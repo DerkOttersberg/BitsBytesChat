@@ -263,7 +263,7 @@ function isEditableTarget(target: EventTarget | null) {
 
 export const { use: useCommand, provider: CommandProvider } = createSimpleContext({
   name: "Command",
-  init: () => {
+  init: (props: { scopeID?: string }) => {
     const dialog = useDialog()
     const settings = useSettings()
     const language = useLanguage()
@@ -395,6 +395,8 @@ export const { use: useCommand, provider: CommandProvider } = createSimpleContex
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      const embedded = (event.target as HTMLElement)?.closest?.(".bb-embedded-chat") as HTMLElement | null
+      if (props.scopeID ? embedded?.dataset.bbChat !== props.scopeID : !!embedded) return
       if (suspended() || dialog.active) return
 
       const sig = signatureFromEvent(event)

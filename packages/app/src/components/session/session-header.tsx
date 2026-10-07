@@ -239,7 +239,7 @@ export function SessionHeader() {
     statusLabel: language.t("status.popover.trigger"),
     reviewLabel: language.t("command.review.toggle"),
     reviewKeybind: reviewTooltipKeybind(command),
-    reviewVisible: isDesktop(),
+    reviewVisible: isDesktop() && !platform.bitsbytes,
     reviewOpened: view().reviewPanel.opened(),
     onReviewToggle: () => view().reviewPanel.toggle(),
   }))
@@ -462,7 +462,7 @@ export function SessionHeader() {
                     </TooltipKeybind>
 
                     <div class="hidden md:flex items-center gap-1 shrink-0">
-                      <TooltipKeybind
+                      <Show when={!platform.bitsbytes}><TooltipKeybind
                         title={language.t("command.review.toggle")}
                         keybind={command.keybind("review.toggle")}
                       >
@@ -476,7 +476,7 @@ export function SessionHeader() {
                         >
                           <Icon size="small" name={view().reviewPanel.opened() ? "review-active" : "review"} />
                         </Button>
-                      </TooltipKeybind>
+                      </TooltipKeybind></Show>
 
                       <TooltipKeybind
                         title={language.t("command.fileTree.toggle")}

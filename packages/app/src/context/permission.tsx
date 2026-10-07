@@ -1,3 +1,4 @@
+import { usePlatform } from "./platform"
 import { createEffect, createMemo, createRoot, getOwner, onCleanup } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { createSimpleContext } from "@opencode-ai/ui/context"
@@ -225,6 +226,7 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
     )
   }
 
+  const desktop = usePlatform().bitsbytes
   const MAX_RESPONDED = 1000
   const RESPONDED_TTL_MS = 60 * 60 * 1000
   const responded = new Map<string, number>()
@@ -305,6 +307,7 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
   }
 
   async function shouldAutoRespondResolved(permission: PermissionRequest, directory?: string) {
+    if (desktop) return false
     const override = sessionAutoAccept(store.autoAccept, sessions(directory), permission, directory)
     if (override !== undefined) return override
     if (input.sync.session.lineage.peek(permission.sessionID)) return shouldAutoRespond(permission, directory)

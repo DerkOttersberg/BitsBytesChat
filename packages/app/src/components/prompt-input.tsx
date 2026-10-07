@@ -1,5 +1,6 @@
 import { useFilteredList } from "@opencode-ai/ui/hooks"
 import { useSpring } from "@opencode-ai/ui/motion-spring"
+import { ChatRuns } from "./chat-runs"
 import {
   createEffect,
   on,
@@ -73,6 +74,7 @@ import {
   type PromptInputSubmission,
 } from "./prompt-input/contracts"
 import { createPromptSubmit } from "./prompt-input/submit"
+import { captureTranscriptDraft } from "./prompt-input/transcript"
 import { PromptPopover, type AtOption, type SlashCommand } from "./prompt-input/slash-popover"
 import { PromptContextItems } from "./prompt-input/context-items"
 import { PromptImageAttachments } from "./prompt-input/image-attachments"
@@ -1377,7 +1379,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     // Note: Shift+Enter is handled earlier, before IME check
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault()
-      if (event.repeat) return
+      if (event.repeat || platform.recordingActive?.(prompt.capture())) return
       if (
         working() &&
         prompt
@@ -1434,6 +1436,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   }
   return (
     <div class="relative size-full flex flex-col gap-0">
+      <ChatRuns />
       {(promptReady(), null)}
       <PromptPopover
         popover={store.popover}
@@ -1461,7 +1464,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       />
       <DockShellForm
         data-dock-border-underlay="legacy"
-        onSubmit={handleSubmit}
+        onSubmit={(event) => {
+          if (platform.recordingActive?.(prompt.capture())) { event.preventDefault(); return }
+          return handleSubmit(event)
+        }}
         classList={{
           "group/prompt-input": true,
           "border-icon-info-active border-dashed": store.draggingType !== null,
@@ -1575,6 +1581,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             />
 
             <div class="flex items-center gap-1 pointer-events-auto">
+              {platform.composerAudio?.({ identity: () => prompt.capture(), capture: () => {
+                setStore("mode", "normal")
+                const target = prompt.capture()
+                const append = captureTranscriptDraft(target, id => language.t("prompt.recording.source", { id }))
+                return value => {
+                  append(value)
+                  if (target === prompt.capture()) requestAnimationFrame(() => editorRef.focus())
+                }
+              } })}
               <Tooltip placement="top" inactive={!working() && blank()} value={tip()}>
                 <IconButton
                   data-action="prompt-submit"

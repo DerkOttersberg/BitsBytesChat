@@ -1,6 +1,7 @@
 import { Show, type JSX } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useSettings } from "@/context/settings"
+import { usePlatform } from "@/context/platform"
 import { SessionPermissionDock } from "@/pages/session/composer/session-permission-dock"
 import { SessionQuestionDock } from "@/pages/session/composer/session-question-dock"
 import { SessionFollowupDock } from "@/pages/session/composer/session-followup-dock"
@@ -15,6 +16,7 @@ export function SessionComposerRegion(props: {
   const language = useLanguage()
   const controller = props.controller
   const settings = useSettings()
+  const platform = usePlatform()
   const rolled = () => {
     const revert = controller.revert()
     return revert?.items.length ? revert : undefined
@@ -140,7 +142,7 @@ export function SessionComposerRegion(props: {
                 />
               </Show>
               <Show
-                when={controller.child()}
+                  when={controller.child() && !platform.bitsbytes}
                 fallback={<Show when={!controller.state.blocked()}>{props.promptInput}</Show>}
               >
                 <div

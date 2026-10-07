@@ -4,6 +4,7 @@ import { Effect, Layer, Record, Result, Schema, Context } from "effect"
 import { NonNegativeInt } from "@opencode-ai/core/schema"
 import { Global } from "@opencode-ai/core/global"
 import { FSUtil } from "@opencode-ai/core/fs-util"
+import { DesktopBridge } from "@opencode-ai/core/desktop-bridge"
 
 export const OAUTH_DUMMY_KEY = "opencode-oauth-dummy-key"
 
@@ -56,6 +57,7 @@ const layer = Layer.effect(
     const decode = Schema.decodeUnknownOption(Info)
 
     const all = Effect.fn("Auth.all")(function* () {
+      if (DesktopBridge.enabled()) return yield* Effect.tryPromise({ try: () => DesktopBridge.call<Record<string, Info>>("credentials.all"), catch: fail("Failed to read encrypted credentials") })
       if (process.env.OPENCODE_AUTH_CONTENT) {
         try {
           return JSON.parse(process.env.OPENCODE_AUTH_CONTENT)
@@ -72,6 +74,7 @@ const layer = Layer.effect(
 
     const set = Effect.fn("Auth.set")(function* (key: string, info: Info) {
       const norm = key.replace(/\/+$/, "")
+      if (DesktopBridge.enabled()) { yield* Effect.tryPromise({ try: () => DesktopBridge.call("credentials.set", { key: norm, info }), catch: fail("Failed to save encrypted credentials") }); return }
       const data = yield* all()
       if (norm !== key) delete data[key]
       delete data[norm + "/"]
@@ -82,6 +85,7 @@ const layer = Layer.effect(
 
     const remove = Effect.fn("Auth.remove")(function* (key: string) {
       const norm = key.replace(/\/+$/, "")
+      if (DesktopBridge.enabled()) { yield* Effect.tryPromise({ try: () => DesktopBridge.call("credentials.remove", { key: norm }), catch: fail("Failed to remove encrypted credentials") }); return }
       const data = yield* all()
       delete data[key]
       delete data[norm]

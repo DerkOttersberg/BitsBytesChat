@@ -77,10 +77,15 @@ export function extractPromptFromParts(parts: Part[], opts?: { directory?: strin
 
   const inline: Inline[] = []
   const images: ImageAttachmentPart[] = []
+  const references: FileAttachmentPart[] = []
 
   for (const part of parts) {
     if (part.type === "file") {
       const filePart = part as FilePart
+      if (filePart.url.startsWith("bitsbytes://")) {
+        references.push({ type: "file", path: filePart.url, url: filePart.url, filename: filePart.filename, mime: "text/plain", content: "", start: 0, end: 0 })
+        continue
+      }
       const sourceText = filePart.source?.text
       if (sourceText) {
         const value = sourceText.value
@@ -199,6 +204,5 @@ export function extractPromptFromParts(parts: Part[], opts?: { directory?: strin
     result.push({ type: "text", content: "", start: 0, end: 0 })
   }
 
-  if (images.length === 0) return result
-  return [...result, ...images]
+  return [...result, ...images, ...references]
 }

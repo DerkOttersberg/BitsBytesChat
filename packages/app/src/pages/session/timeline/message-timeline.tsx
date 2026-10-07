@@ -12,6 +12,7 @@ import {
   type JSX,
 } from "solid-js"
 import { createStore, produce } from "solid-js/store"
+import { ArtifactCards } from "@opencode-ai/session-ui/artifact-cards"
 import { Dynamic } from "solid-js/web"
 import { useNavigate } from "@solidjs/router"
 import { useMutation } from "@tanstack/solid-query"
@@ -75,6 +76,7 @@ import { sessionTitle } from "@/utils/session-title"
 import { scheduleConnectedMeasure } from "./measure"
 import { observeElementOffsetReconnectAware } from "./observe-element-offset"
 import { createTimelineProjection } from "./projection"
+import { visibleTurns } from "./visible-turns"
 import { MessageComment, SummaryDiff, TimelineRow, TimelineRowMap } from "./rows"
 import { filterVirtualIndexes } from "./virtual-items"
 
@@ -236,6 +238,7 @@ function TimelineDiffView(props: { diff: SummaryDiff }) {
 }
 
 export function MessageTimeline(props: {
+  headerActions?: JSX.Element
   actions?: UserActions
   scroll: { overflow: boolean; bottom: boolean; jump: boolean }
   onResumeScroll: () => void
@@ -284,12 +287,8 @@ export function MessageTimeline(props: {
   const projectedMessages = createMemo(() => {
     const id = sessionID()
     if (!id) return []
-    const visible = new Set(props.userMessages.map((message) => message.id))
-    const boundary = sessionMessages().find((message) => message.role === "user" && !visible.has(message.id))?.id
     const messages = sync().data.session_message[id] ?? []
-    if (!boundary) return messages
-    const index = messages.findIndex((message) => message.id === boundary)
-    return index < 0 ? messages : messages.slice(0, index)
+    return visibleTurns(messages, sessionMessages().filter(message => message.role === "user"), props.userMessages)
   })
   const info = createMemo(() => {
     const id = sessionID()
@@ -1173,6 +1172,9 @@ export function MessageTimeline(props: {
                 aria-hidden={workingTurn(assistantPartRow().userMessageID)}
               >
                 {renderAssistantPartGroup(assistantPartRow, onSizeChange)}
+                <Show when={lastAssistantGroupKey().get(assistantPartRow().userMessageID) === assistantPartRow().group.key}>
+                  <ArtifactCards sessionID={sessionID()!} messageIDs={(assistantMessagesByParent().get(assistantPartRow().userMessageID) ?? emptyAssistantMessages).map(message => message.id)} />
+                </Show>
               </div>
             </div>
           </TimelineRowFrame>
@@ -1478,6 +1480,7 @@ export function MessageTimeline(props: {
                       placement="bottom"
                       buttonAppearance={settings.general.newLayoutDesigns() ? "v2" : "default"}
                     />
+                    {props.headerActions}
                     <Show when={!parentID()}>
                       <Show
                         when={settings.general.newLayoutDesigns()}

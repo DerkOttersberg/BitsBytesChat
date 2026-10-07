@@ -1,0 +1,219 @@
+/* Brand accents stay on controls and selection; document and chat surfaces remain neutral. */
+.bb-shell {
+  --bb-blue: #2596be;
+  --bb-orange: #f2880f;
+  --bb-accent-ink: #17637d;
+  --bb-primary-ink: #08222e;
+  --bb-bg: var(--background-base, #f7f8fa);
+  --bb-surface: var(--surface-raised-base, #fff);
+  --bb-soft: var(--surface-base, #f2f4f6);
+  --bb-border: var(--border-base, #dce1e5);
+  --bb-text: var(--text-strong, #252c32);
+  --bb-muted: var(--text-base, #626d75);
+  --bb-tint: color-mix(in srgb, var(--bb-blue) 10%, var(--bb-bg));
+  --bb-error-ink: #aa302c;
+  --bb-error-bg: color-mix(in srgb, #d34c45 8%, var(--bb-bg));
+  display: flex;
+  height: 100dvh;
+  width: 100%;
+  padding-top: 40px;
+  overflow: hidden;
+  background: var(--bb-bg);
+  color: var(--bb-text);
+  font-family: Inter, "Segoe UI", sans-serif;
+  font-size: 13px;
+}
+:root[data-color-scheme="dark"] .bb-shell {
+  --bb-accent-ink: #79c9e5;
+  --bb-error-ink: #ffaaa2;
+}
+.bb-shell::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 40px;
+  width: calc(100% - 140px);
+  -webkit-app-region: drag;
+}
+.bb-shell * { box-sizing: border-box; }
+
+/* Never style the retained chat's buttons here: compact SVG controls need their native padding. */
+.bb-shell :is(.bb-nav, .bb-page, .bb-preview-wrap, .bb-modal) :is(button, select, input, textarea) {
+  font: inherit;
+  color: inherit;
+}
+.bb-shell :is(.bb-nav, .bb-page, .bb-preview-wrap, .bb-modal) button {
+  cursor: pointer;
+  border: 1px solid var(--bb-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: var(--bb-surface);
+  transition: background .15s;
+}
+.bb-shell :is(.bb-nav, .bb-page, .bb-preview-wrap, .bb-modal) button:hover:not(:disabled) {
+  background: var(--bb-soft);
+}
+.bb-shell :is(.bb-nav, .bb-page, .bb-preview-wrap, .bb-modal) button:disabled {
+  opacity: .5;
+  cursor: default;
+}
+.bb-shell :is(.bb-nav, .bb-page, .bb-preview-wrap, .bb-modal) button.bb-primary {
+  background: var(--bb-blue);
+  border-color: var(--bb-blue);
+  color: var(--bb-primary-ink);
+  font-weight: 650;
+}
+.bb-shell :is(.bb-nav, .bb-page, .bb-preview-wrap, .bb-modal) button.bb-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bb-blue) 88%, #fff);
+}
+.bb-shell :is(.bb-nav, .bb-page, .bb-preview-wrap, .bb-modal) :is(button, select, input, textarea):focus-visible {
+  outline: 2px solid var(--bb-blue);
+  outline-offset: 2px;
+}
+.bb-shell :is(.bb-page, .bb-preview-wrap) :is(select, input, textarea) {
+  border: 1px solid var(--bb-border);
+  border-radius: 7px;
+  background: var(--bb-surface);
+  padding: 8px 10px;
+}
+.bb-shell input[type="checkbox"] { accent-color: var(--bb-blue); }
+
+/* Limit chat accents to interactive states, keeping text, code and icons neutral. */
+.bb-chat {
+  --icon-base: var(--text-base, #626d75);
+  --icon-weak-base: var(--text-base, #626d75);
+  --border-focus: var(--bb-blue);
+  --border-interactive-base: var(--bb-blue);
+  --text-interactive-base: var(--bb-accent-ink);
+  --icon-interactive-base: var(--bb-accent-ink);
+  --surface-interactive-weak: var(--bb-tint);
+  --v2-border-border-focus: var(--bb-blue);
+  --v2-background-bg-accent: var(--bb-blue);
+  --v2-text-text-accent: var(--bb-accent-ink);
+  --v2-text-text-accent-hover: var(--bb-accent-ink);
+}
+.bb-chat [data-component="icon-button-v2"][data-variant="ghost-muted"]:not(:disabled) {
+  color: var(--v2-text-text-base, var(--bb-muted));
+}
+.bb-nav {
+  width: 108px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--bb-border);
+  padding: 18px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bb-soft);
+}
+.bb-shell .bb-nav button { border: 0; background: transparent; text-align: left; padding: 11px 9px; }
+.bb-shell .bb-nav button.selected {
+  background: var(--bb-tint);
+  color: var(--bb-accent-ink);
+  box-shadow: inset 3px 0 var(--bb-blue);
+  font-weight: 650;
+}
+.bb-logo {
+  display: block;
+  width: 88px;
+  max-width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  object-fit: contain;
+  margin: 0 auto 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.bb-main { min-width: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.bb-composer-audio { display: flex; align-items: center; gap: 8px; margin-right: 5px; min-width: 0; }
+.bb-composer-audio.bb-audio-active { flex: 1; width: 100%; margin: 0; }
+.bb-audio-button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; padding: 6px; border: 0; border-radius: 50%; background: transparent; color: var(--bb-text); cursor: pointer; }
+.bb-audio-button:hover:not(:disabled) { background: var(--bb-soft); }
+.bb-audio-button:disabled { opacity: .4; cursor: default; }
+.bb-audio-button:focus-visible { outline: 2px solid var(--bb-blue); outline-offset: 2px; }
+.bb-audio-button svg { width: 20px; height: 20px; }
+.bb-audio-stop { background: var(--bb-soft); }
+.bb-audio-time { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--bb-muted); }
+.bb-audio-wave { display: flex; align-items: center; justify-content: space-between; gap: 3px; height: 28px; flex: 1; min-width: 30px; overflow: hidden; }
+.bb-audio-wave i { display: block; width: 3px; min-width: 2px; border-radius: 3px; background: var(--bb-muted); transition: height .15s ease; }
+.bb-audio-progress { flex: 1; font-size: 12px; color: var(--bb-muted); }
+.bb-audio-error { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--bb-error-ink); font-size: 11px; }
+/* Recording occupies the same footer as the idle mic and Send controls. */
+[data-component="prompt-input-v2"]:has(.bb-audio-active) > .h-11 > :first-child,
+[data-component="prompt-input-v2"]:has(.bb-audio-active) [data-action="prompt-submit"] { display: none; }
+form:has(.bb-audio-active) .absolute.bottom-2.left-2 { display: none; }
+form:has(.bb-audio-active) > .absolute.bottom-2.right-2 { left: 8px; }
+form:has(.bb-audio-active) > .absolute.bottom-2.right-2 > .pointer-events-auto { flex: 1; }
+form:has(.bb-audio-active) [data-action="prompt-submit"] { display: none; }
+.bb-content { display: flex; flex: 1; min-height: 0; min-width: 0; position: relative; }
+.bb-chat { flex: 1; min-width: 0; height: 100%; overflow: hidden; display: flex; flex-direction: column; }
+.bb-chat .w-screen { width: 100%; }
+.bb-chat .h-dvh { height: 100%; }
+.bb-hidden { display: none !important; }
+.bb-banner { padding: 10px 20px; background: var(--bb-tint); border-bottom: 1px solid var(--bb-border); }
+.bb-error { color: var(--bb-error-ink) !important; }
+.bb-banner.bb-error { background: var(--bb-error-bg); }
+.bb-page { padding: 30px; overflow: auto; flex: 1; min-width: 0; }
+.bb-page h1 { font-size: 26px; font-weight: 650; margin: 0 0 8px; letter-spacing: -.6px; }
+.bb-page h2 { font-size: 16px; font-weight: 600; margin: 0 0 10px; }
+.bb-subtle { color: var(--bb-muted); line-height: 1.6; margin: 8px 0 18px; }
+.bb-card { border: 1px solid var(--bb-border); border-radius: 12px; background: var(--bb-surface); padding: 22px; margin: 16px 0; }
+.bb-empty { border: 1px dashed var(--bb-border); border-radius: 14px; padding: 50px 32px; margin: 28px 0; color: var(--bb-muted); max-width: 800px; }
+.bb-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.bb-badge { font-size: 11px; padding: 4px 8px; border-radius: 5px; background: var(--bb-tint); color: var(--bb-accent-ink); }
+.bb-settings { max-width: 1000px; }
+.bb-page label { display: flex; flex-direction: column; gap: 6px; margin: 16px 0; font-weight: 500; }
+.bb-page label input, .bb-page label textarea, .bb-page label select { font-weight: 400; width: 100%; }
+.bb-page label.bb-check { flex-direction: row; align-items: center; }
+.bb-check input { width: 16px !important; }
+.bb-skills { display: flex; gap: 30px; padding: 24px; }
+.bb-skill-list { width: 230px; flex-shrink: 0; display: flex; flex-direction: column; gap: 10px; }
+.bb-skill-list button { text-align: left; }
+.bb-skill-list small { display: block; color: var(--bb-muted); margin-top: 5px; }
+.bb-shell .bb-skill-list button.selected { border-color: var(--bb-blue); background: var(--bb-tint); color: var(--bb-accent-ink); }
+.bb-skill-editor { flex: 1; min-width: 0; max-width: 940px; }
+.bb-code { font-family: "Cascadia Code", Consolas, monospace !important; font-size: 12px !important; line-height: 1.6; resize: vertical; }
+.bb-test-result { white-space: pre-wrap; padding: 16px; background: var(--bb-soft); border-radius: 8px; margin-top: 12px; }
+.bb-job h2 { margin-bottom: 4px; }
+.bb-job .bb-subtle { margin: 5px 0 15px; }
+.bb-preview-wrap { width: 420px; min-width: 260px; max-width: 65vw; resize: horizontal; overflow: auto; flex-shrink: 0; border-left: 1px solid var(--bb-border); background: var(--bb-soft); display: flex; flex-direction: column; }
+.bb-preview { height: 100%; display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.bb-preview header, .bb-modal header { display: flex; align-items: center; justify-content: space-between; padding: 13px 16px; border-bottom: 1px solid var(--bb-border); }
+.bb-preview-controls { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:4px; padding:6px 10px; border-bottom:1px solid var(--border-weak-base); }
+.bb-preview-control-group { display:flex; align-items:center; gap:2px; }
+.bb-preview-page { font-size:12px; color:var(--text-weak); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.bb-preview-updating { margin-left:auto; display:flex; align-items:center; gap:7px; font-size:12px; color:var(--text-weak); }
+.bb-preview-spinner { display:inline-block; width:12px; height:12px; border:1.5px solid var(--border-weak-base); border-top-color:var(--text-weak); border-radius:50%; animation:bb-preview-spin 1s linear infinite; flex-shrink:0; }
+.bb-preview-error { display:flex; align-items:center; gap:8px; padding:8px 12px; font-size:12px; color:var(--text-weak); }
+.bb-preview-error p { flex:1; }
+@keyframes bb-preview-spin { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion:reduce) { .bb-preview-spinner { animation:none; } }
+.bb-preview-file-actions { display: flex; gap: 5px; padding: 10px 12px; }
+.bb-paper { overflow: auto; flex: 1; padding: 16px; text-align: center; }
+.bb-paper canvas { background: white; box-shadow: 0 3px 14px #16232c1c; display: inline-block; }
+.bb-modal { position: fixed; inset: 0; background: #14212c66; display: flex; align-items: center; justify-content: center; z-index: 999; }
+.bb-modal-card { background: var(--bb-bg); border-radius: 12px; width: min(850px, 85vw); max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; }
+.bb-modal-card pre { white-space: pre-wrap; overflow: auto; padding: 22px; line-height: 1.7; }
+.bb-modal-card h2 { font-size: 16px; }
+@media (max-width: 1050px) {
+  .bb-nav { width: 92px; }
+  .bb-nav button { font-size: 12px; }
+  .bb-skills { gap: 16px; }
+  .bb-skill-list { width: 170px; }
+  .bb-preview-wrap { width: 330px; }
+}
+.bb-nav { width: 52px !important; flex: 0 0 52px !important; padding: 12px 6px !important; gap: 8px !important; }
+.bb-nav > button { width: 40px; height: 40px; padding: 0 !important; display: grid; place-items: center; border-radius: 10px; }
+.bb-nav > .bb-nav-settings { margin-top: auto; }
+.bb-nav > button:focus-visible { outline: 2px solid var(--icon-interactive-base, #78a6ff); outline-offset: 2px; }
+.bb-settings-panel .settings-v2-tab-body { display: flex; flex-direction: column; gap: 16px; }
+.bb-settings-panel label { display: flex; flex-direction: column; gap: 7px; font-size: 13px; }
+.bb-settings-panel label.bb-check { flex-direction: row; align-items: center; }
+.bb-settings-panel input:not([type=checkbox]), .bb-settings-panel select { background: var(--surface-raised-base, #24262c); border: 1px solid var(--border-base, #46484e); border-radius: 8px; padding: 8px 10px; color: inherit; }
+.bb-settings-panel .bb-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+.bb-document-panel,.bb-browser-panel{display:flex;flex:1;min-height:0;height:100%;flex-direction:column}.bb-document-toolbar,.bb-browser-toolbar{display:flex;align-items:center;gap:6px;padding:8px;border-bottom:1px solid var(--border-weak-base)}.bb-browser-toolbar button{padding:5px 8px;border-radius:5px;font-size:12px}.bb-browser-toolbar input{flex:1;min-width:0;padding:5px 9px;border:1px solid var(--border-weak-base);border-radius:6px;font-size:12px}.bb-browser-host{flex:1;min-height:0}.bb-preview-status{padding:28px 20px;text-align:center;color:var(--text-weak)}.bb-document-panel .bb-preview{width:100%;min-width:0;border:0;flex:1;min-height:0}.bb-preview-status button{padding:8px 14px;border:1px solid var(--border-weak-base);border-radius:7px;margin-top:12px}
+.bb-run-panel{display:flex;flex-direction:column;height:100%;min-height:0;font-size:13px}.bb-run-panel-body{flex:1;overflow:auto;padding:20px}.bb-run-panel textarea{flex:1;min-height:160px;margin:12px;border:1px solid var(--border-weak-base);border-radius:8px;padding:14px;background:var(--background-base);resize:none;line-height:1.6}.bb-run-panel label{margin:12px;display:flex;gap:8px;align-items:center}.bb-run-panel input,.bb-document-toolbar select{border:1px solid var(--border-weak-base);border-radius:6px;padding:4px 7px;background:var(--background-base)}.bb-document-toolbar{flex-wrap:wrap}.bb-sheet-panel{display:flex;flex:1;min-height:0;flex-direction:column}.bb-sheet-scroll{flex:1;overflow:auto}.bb-sheet-scroll table{border-collapse:collapse;font-size:12px;white-space:pre-wrap}.bb-sheet-scroll td,.bb-sheet-scroll th{border:1px solid var(--border-weak-base);padding:6px 10px;min-width:80px;max-width:340px;overflow-wrap:anywhere}.bb-sheet-scroll th{min-width:40px;position:sticky;left:0;background:var(--background-base);color:var(--text-weak)}.bb-sheet-scroll tr:first-child td{font-weight:600;background:var(--background-strong)}.bb-html-preview{flex:1;width:100%;border:0;background:white}.bb-artifact-source{flex:1;overflow:auto;padding:18px;white-space:pre;font-family:var(--font-family-mono);font-size:12px}.bb-artifact-image{flex:1;overflow:auto;padding:16px}.bb-artifact-image img{max-width:100%;height:auto}

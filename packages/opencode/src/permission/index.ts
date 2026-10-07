@@ -6,6 +6,7 @@ import { Deferred, Effect, Layer, Context } from "effect"
 import os from "os"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { EventV2Bridge } from "@/event-v2-bridge"
+import { DesktopBridge } from "@opencode-ai/core/desktop-bridge"
 
 export const Event = PermissionV1.Event
 
@@ -68,9 +69,11 @@ const layer = Layer.effect(
       const { approved, pending } = yield* InstanceState.get(state)
       const { ruleset, ...request } = input
       let needsAsk = false
+      const desktop = yield* Effect.promise(() => DesktopBridge.permission(request.sessionID, request.permission))
 
       for (const pattern of request.patterns) {
-        const rule = evaluate(request.permission, pattern, ruleset, approved)
+        const configured = evaluate(request.permission, pattern, ruleset)
+        const rule = configured.action === "deny" ? configured : desktop ? { ...configured, action: desktop } : evaluate(request.permission, pattern, ruleset, approved)
         yield* Effect.logInfo("evaluated", { permission: request.permission, pattern, action: rule })
         if (rule.action === "deny") {
           return yield* new PermissionV1.DeniedError({
@@ -140,7 +143,7 @@ const layer = Layer.effect(
       }
 
       yield* Deferred.succeed(existing.deferred, undefined)
-      if (input.reply === "once") return
+      if (input.reply === "once" || DesktopBridge.enabled()) return
 
       for (const pattern of existing.info.always) {
         approved.push({

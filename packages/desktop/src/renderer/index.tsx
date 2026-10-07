@@ -1,3 +1,7 @@
+import { DocumentPanel, BrowserPanel } from "./bitsbytes/panels"
+import { RunPanel } from "./bitsbytes/run-panel"
+import { MobileSettings } from "./bitsbytes/mobile-settings"
+import { mobileCopy } from "../bitsbytes/mobile-copy"
 // @refresh reload
 
 import {
@@ -18,19 +22,22 @@ import {
 import type { UpdaterState } from "@opencode-ai/app/updater"
 import * as Sentry from "@sentry/solid"
 import type { AsyncStorage } from "@solid-primitives/storage"
-import { createMemoryHistory, MemoryRouter, type BaseRouterProps } from "@solidjs/router"
-import { createEffect, createMemo, createResource, createSignal, onCleanup, Show } from "solid-js"
+import { createMemoryHistory, MemoryRouter, useNavigate, useLocation, type BaseRouterProps } from "@solidjs/router"
+import { createEffect, createMemo, createResource, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { render } from "solid-js/web"
 import pkg from "../../package.json"
 import { t } from "./i18n"
 import { initializationData } from "./initialization"
-import { DesktopFirstLaunchOnboarding } from "./onboarding"
 import { resetZoom, setPinchZoomEnabled, webviewZoom, zoomIn, zoomOut } from "./webview-zoom"
 import { windowFullscreen } from "./window-fullscreen"
 import { availableStartupServer, readyWslConnections } from "./wsl/connections"
 import "./styles.css"
 import { Splash } from "@opencode-ai/ui/logo"
 import { useTheme } from "@opencode-ai/ui/theme/context"
+import { BitsBytesSettings } from "./bitsbytes/settings"
+import { bbt } from "../bitsbytes/copy"
+import { BitsBytesShell } from "./bitsbytes/shell"
+import { createComposerAudio } from "./bitsbytes/composer-audio"
 
 const root = document.getElementById("root")
 if (import.meta.env.DEV && !(root instanceof HTMLElement)) {
@@ -333,6 +340,20 @@ function LoadingSplash() {
 
 function DesktopRoot(props: { windowState: DesktopWindowState }) {
   const platform = createPlatform(props.windowState)
+  const audio = createComposerAudio()
+  platform.composerAudio = audio.Control
+  platform.recordingActive = audio.active
+  platform.documentPanel = DocumentPanel
+  platform.runPanel = RunPanel
+  platform.browserPanel = BrowserPanel
+  platform.applicationName = bbt("brand")
+  platform.bitsbytes = window.api.bitsbytes
+  platform.settingsPanels = [
+    { id: "audio", title: bbt("audioPage"), component: () => <BitsBytesSettings page="audio" /> },
+    { id: "tools", title: bbt("toolsPage"), component: () => <BitsBytesSettings page="tools" /> },
+    { id: "mobile", title: mobileCopy.title, component: MobileSettings },
+  ]
+  platform.providerSettings = () => <BitsBytesSettings page="chatgpt" />
   const loadLocale = async () => {
     const current = await platform.storage?.("opencode.global.dat").getItem("language")
     const legacy = current ? undefined : await platform.storage?.().getItem("language.v1")
@@ -356,7 +377,25 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
   const onboarding = Promise.withResolvers<void>()
 
   function Inner() {
+    const navigate = useNavigate()
+    const location = useLocation()
+    const encodedDirectory = (value: string) => btoa(unescape(encodeURIComponent(value))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+    const openBitsSession = (event: Event) => {
+      const detail = (event as CustomEvent<{ directory: string; sessionID: string }>).detail
+      if (!detail?.directory || !detail.sessionID) return
+      const directory = encodedDirectory(detail.directory)
+      navigate(`/${directory}/session/${detail.sessionID}`)
+    }
+    window.addEventListener("bitsbytes:session", openBitsSession)
+    onCleanup(() => window.removeEventListener("bitsbytes:session", openBitsSession))
+    onMount(() => {
+      if (location.pathname !== "/") return
+      void window.api.bitsbytes.call<{ root: string }>("state").then((state) => navigate(`/${encodedDirectory(state.root + "\\workspace")}/session`, { replace: true }))
+    })
     const cmd = useCommand()
+    const openSettings = () => cmd.trigger("settings.open")
+    window.addEventListener("bitsbytes:open-settings", openSettings)
+    onCleanup(() => window.removeEventListener("bitsbytes:open-settings", openSettings))
     menuTrigger = (id) => cmd.trigger(id)
 
     const theme = useTheme()
@@ -374,6 +413,7 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
   }
 
   function App() {
+    onMount(() => { void window.api.finishFirstLaunchOnboarding(false).then(() => onboarding.resolve()) })
     const wslServers = useWslServers()
     const language = useLanguage()
     const ready = createMemo(
@@ -409,12 +449,6 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
               servers={servers()}
               router={router}
               startup={onboarding.promise}
-              serverScoped={
-                <DesktopFirstLaunchOnboarding
-                  initialUrl={getLastActiveUrl(platform.windowID ?? "browser")}
-                  onLoaded={onboarding.resolve}
-                />
-              }
             >
               <Inner />
             </AppInterface>
@@ -430,7 +464,7 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
         locale={locale.latest}
         onNativeTranslations={(bundle) => void window.api.setNativeTranslations(bundle).catch(() => undefined)}
       >
-        <Show when={true}>{(_) => <App />}</Show>
+        <BitsBytesShell audio={audio}><Show when={true}>{(_) => <App />}</Show></BitsBytesShell>
       </AppBaseProviders>
     </PlatformProvider>
   )

@@ -10,7 +10,7 @@ import {
 import { SessionMessage } from "../message"
 import type { FileAttachment } from "../prompt"
 
-const media = (file: FileAttachment): ContentPart => ({
+const media = (file: FileAttachment): ContentPart => file.uri.startsWith("bitsbytes://") ? { type: "text", text: file.description ?? file.name ?? file.uri } : ({
   type: "media",
   mediaType: file.mime,
   data: file.uri,

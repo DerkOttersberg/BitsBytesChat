@@ -1,11 +1,9 @@
 #!/usr/bin/env bun
 import { $ } from "bun"
 
-import { downloadCliToResources, resolveChannel } from "./utils"
+import { cp } from "node:fs/promises"
 
-const channel = resolveChannel()
-await $`bun ./scripts/copy-icons.ts ${channel}`
-await $`bun ./scripts/copy-metainfo.ts ${channel}`
+await cp("icons/bitsbytes", "resources/icons", { recursive: true })
 
-await $`cd ../opencode && bun script/build-node.ts`
-if (channel === "dev") await downloadCliToResources()
+await $`cd ../opencode && bun script/build-node.ts`.env({ ...process.env, OPENCODE_VERSION: "1.18.34", OPENCODE_CHANNEL: "latest" })
+// BitsBytes uses the embedded OpenCode server and does not need the upstream preview CLI.

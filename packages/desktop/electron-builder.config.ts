@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process"
+import { readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
@@ -7,6 +8,7 @@ import type { Configuration } from "electron-builder"
 
 const execFileAsync = promisify(execFile)
 const packageDir = path.dirname(fileURLToPath(import.meta.url))
+const appVersion = JSON.parse(readFileSync(path.join(packageDir, "package.json"), "utf8")).version as string
 const rootDir = path.resolve(packageDir, "../..")
 const signScript = path.join(rootDir, "script", "sign-windows.ps1")
 // The Electron 42 packaging update briefly installed Linux launchers/icons under
@@ -42,9 +44,11 @@ const APP_IDS = {
 } as const
 
 const getBase = (appId: string): Configuration => ({
-  artifactName: "opencode-desktop-${os}-${arch}.${ext}",
+  // Windows dependencies ship N-API/prebuilt binaries; no Visual Studio toolchain is required.
+  npmRebuild: false,
+  artifactName: "BitsBytesChat-${os}-${arch}.${ext}",
   directories: {
-    output: "dist",
+    output: path.join("dist", appVersion),
     buildResources: "resources",
   },
   // Linux launchers are .desktop files, so this is the desktop file name,
@@ -57,6 +61,8 @@ const getBase = (appId: string): Configuration => ({
   },
   files: ["out/**/*", "resources/**/*", "!resources/opencode-cli*"],
   extraResources: [
+    { from: "icons/bitsbytes", to: "icons", filter: ["icon.ico", "icon.png"] },
+    { from: "resources/bitsbytes", to: "bitsbytes", filter: ["**/*", "!**/__pycache__/**"] },
     ...(channel === "dev"
       ? [
           {
@@ -119,6 +125,8 @@ const getBase = (appId: string): Configuration => ({
 })
 
 function getConfig() {
+  return { ...getBase("nl.bitsbytes.chat"), appId: "nl.bitsbytes.chat", productName: "BitsBytesChat", protocols: { name: "BitsBytesChat", schemes: ["bitsbytes-chat"] }, publish: null }
+  /* Upstream packaging variants are retained for reference.
   const appId = APP_IDS[channel]
   const base = getBase(appId)
 
@@ -155,6 +163,7 @@ function getConfig() {
       }
     }
   }
+  */
 }
 
 export default getConfig()

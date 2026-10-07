@@ -1,3 +1,4 @@
+import { usePlatform } from "../context/platform"
 import { Popover as Kobalte } from "@kobalte/core/popover"
 import { Component, ComponentProps, createEffect, createMemo, For, JSX, Show } from "solid-js"
 import { createStore } from "solid-js/store"
@@ -5,6 +6,7 @@ import { useLocal } from "@/context/local"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { popularProviders } from "@/hooks/use-providers"
 import { Button } from "@opencode-ai/ui/button"
+import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { ScrollView } from "@opencode-ai/ui/scroll-view"
 import { Tag } from "@opencode-ai/ui/tag"
@@ -53,6 +55,7 @@ const ModelList: Component<{
 }> = (props) => {
   const model = props.model ?? useLocal().model
   const language = useLanguage()
+  void usePlatform().bitsbytes?.call("models.list", { force: false }).catch(() => undefined)
 
   const models = createMemo(() =>
     model
@@ -152,6 +155,7 @@ export function ModelSelectorPopover(props: {
     })
   }
   const language = useLanguage()
+  void usePlatform().bitsbytes?.call("models.list", { force: false }).catch(() => undefined)
 
   return (
     <Kobalte
@@ -301,7 +305,7 @@ function ModelSelectorPopoverV2View(props: {
   onClose: () => void
 }) {
   const language = useLanguage()
-  const [store, setStore] = createStore({ open: false, search: "", active: "" })
+  const [store, setStore] = createStore({ open: false, search: "", active: "", catalogError: "", catalogLoading: false, missingSol: false, account: false })
   let searchRef: HTMLInputElement | undefined
   let contentRef: HTMLDivElement | undefined
   const dismiss = createMenuDismissController(() => contentRef)
@@ -317,8 +321,22 @@ function ModelSelectorPopoverV2View(props: {
   }
   const activeItem = () =>
     store.active ? contentRef?.querySelector<HTMLElement>(`[data-option-key="${CSS.escape(store.active)}"]`) : undefined
+  const bridge = usePlatform().bitsbytes
+  async function refreshCatalog(force = false) {
+    if (!bridge || store.catalogLoading) return
+    setStore("catalogLoading", true)
+    try {
+      const state = await bridge.call<{ account: string }>("state")
+      setStore("account", !!state.account)
+      if (!state.account) return
+      const models = await bridge.call<{ id: string }[]>("models.list", { provider: "chatgpt", force })
+      setStore({ catalogError: "", missingSol: !models.some(model => model.id === "gpt-6.1-sol") })
+    } catch (error) { setStore({ catalogError: String(error), missingSol: false }) }
+    finally { setStore("catalogLoading", false) }
+  }
   const setOpen = (open: boolean) => {
     if (open) {
+      void refreshCatalog()
       dismiss.allowTriggerRestore()
       setStore({ open: true, active: initialActive() })
       setTimeout(() =>
@@ -437,6 +455,9 @@ function ModelSelectorPopoverV2View(props: {
             </div>
           </div>
           <div class="h-px bg-v2-border-border-muted" />
+          <Show when={store.catalogError}><p class="px-3 py-2 text-12-regular text-text-weak" title={store.catalogError}>{language.t("bitsbytes.cached")}</p></Show>
+          <Show when={store.missingSol}><p class="px-3 pt-2 text-12-regular text-text-weak">{language.t("bitsbytes.modelUnavailable")}</p></Show>
+          <Show when={store.account}><div class="px-2 py-1"><ButtonV2 variant="ghost-muted" size="normal" disabled={store.catalogLoading} onClick={() => void refreshCatalog(true)}>{language.t(store.catalogLoading ? "bitsbytes.refreshingModels" : "bitsbytes.refreshModels")}</ButtonV2></div></Show>
           <ScrollView data-slot="model-selector-scroll" class="max-h-[220px] min-h-0">
             <div class="flex flex-col p-0.5 pt-0">
               <Show
@@ -524,6 +545,7 @@ function ModelSelectorPopoverV2View(props: {
 export const DialogSelectModel: Component<{ provider?: string; model?: ModelState }> = (props) => {
   const dialog = useDialog()
   const language = useLanguage()
+  void usePlatform().bitsbytes?.call("models.list", { force: false }).catch(() => undefined)
   const local = useLocal()
   const directory = () => decode64(local.slug())
 

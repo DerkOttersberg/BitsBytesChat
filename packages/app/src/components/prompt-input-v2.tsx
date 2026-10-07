@@ -1,8 +1,11 @@
+import { ChatAccess } from "./chat-access"
+import { ChatRuns, ModeIcon, useChatRun } from "./chat-runs"
+import { useSettings } from "../context/settings"
 import { ImagePreview } from "@opencode-ai/ui/image-preview"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
-import { Icon } from "@opencode-ai/ui/v2/icon"
+import { Icon } from "@opencode-ai/ui/icon"
 import { KeybindV2 } from "@opencode-ai/ui/v2/keybind-v2"
 import { TooltipV2 } from "@opencode-ai/ui/v2/tooltip-v2"
 import type { ReferenceInfo } from "@opencode-ai/sdk/v2/client"
@@ -14,6 +17,7 @@ import { normalizePromptHistoryEntry, promptLength, type PromptHistoryComment } 
 import { createPersistedPromptInputHistory } from "@/components/prompt-input/history-store"
 import { promptDesignPlaceholder, promptPlaceholder } from "@/components/prompt-input/placeholder"
 import { createPromptSubmit } from "@/components/prompt-input/submit"
+import { captureTranscriptDraft } from "@/components/prompt-input/transcript"
 import { selectionFromLines, type SelectedLineRange, useFile } from "@/context/file"
 import { useComments } from "@/context/comments"
 import { useCommand } from "@/context/command"
@@ -42,36 +46,52 @@ export type PromptInputV2ComposerProps = {
 export type PromptInputV2ControllerProps = Omit<PromptInputProps, "class" | "submission">
 export type PromptInputV2ComposerController = PromptInputV2Interaction & {
   readonly model: PromptInputProps["controls"]["model"]
+  captureTranscript: () => ReturnType<typeof captureTranscriptDraft>
+  recordingIdentity: () => unknown
+  submitDelivery: (delivery: "queue" | "steer") => void
 }
 
 export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
   const dialog = useDialog()
   const command = useCommand()
   const language = useLanguage()
+  const platform = usePlatform()
+  const settings = useSettings()
+  const working = () => props.controller.view.submit.working?.() ?? false
+  const sendLabel = () => language.t(working() ? settings.general.followup() === "queue" ? "bitsbytes.queue" : "bitsbytes.steer" : "bitsbytes.send")
 
   return (
     <div class="flex flex-col gap-3">
+      <ChatRuns />
       <PromptInputV2
         controller={props.controller}
         borderUnderlay={props.borderUnderlay}
         class={props.class}
         variantControlVisible={!props.controller.model.loading}
+        submitControl={platform.bitsbytes && <div class="bb-send-controls">
+          <Show when={working()}><button type="button" class="bb-send-alt" title={language.t(settings.general.followup() === "queue" ? "bitsbytes.steer" : "bitsbytes.queue")} aria-label={language.t(settings.general.followup() === "queue" ? "bitsbytes.steer" : "bitsbytes.queue")} disabled={!props.controller.canSubmit()} onClick={() => props.controller.submitDelivery(settings.general.followup() === "queue" ? "steer" : "queue")}><ModeIcon kind="steer" /></button><button type="button" class="bb-send-stop" title={language.t("bitsbytes.stop")} aria-label={language.t("bitsbytes.stop")} onClick={() => props.controller.stop()}><span /></button></Show>
+          <Show when={!working() || props.controller.canSubmit()}><button type="button" class="bb-send-primary" data-action="prompt-submit" title={sendLabel()} aria-label={sendLabel()} disabled={!props.controller.canSubmit()} onClick={() => props.controller.submitDelivery(settings.general.followup())}><Icon name="arrow-up" /></button></Show>
+        </div>}
         attachKeybind={command.keybindParts("file.attach")}
         attachShortcut={command.keybind("file.attach")}
+        accessControl={<ChatAccess />}
+        audioControl={platform.composerAudio?.({ capture: props.controller.captureTranscript, identity: props.controller.recordingIdentity })}
         modelControl={
-          <PromptInputV2ModelControl
-            loading={props.controller.model.loading}
-            paid={props.controller.model.paid}
-            title={language.t("command.model.choose")}
-            keybind={command.keybindParts("model.choose")}
-            model={props.controller.model.selection}
-            providerID={props.controller.model.selection.current()?.provider?.id}
-            modelName={props.controller.model.selection.current()?.name ?? language.t("dialog.model.select.title")}
-            onClose={props.controller.restoreFocus}
-            onUnpaidClick={() =>
-              dialog.show(() => <DialogSelectModelUnpaidV2 model={props.controller.model.selection} />)
-            }
-          />
+          <div class="flex min-w-0 flex-wrap items-center gap-1">
+            <PromptInputV2ModelControl
+              loading={props.controller.model.loading}
+              paid={props.controller.model.paid}
+              title={language.t("command.model.choose")}
+              keybind={command.keybindParts("model.choose")}
+              model={props.controller.model.selection}
+              providerID={props.controller.model.selection.current()?.provider?.id}
+              modelName={props.controller.model.selection.current()?.name ?? language.t("dialog.model.select.title")}
+              onClose={props.controller.restoreFocus}
+              onUnpaidClick={() =>
+                dialog.show(() => <DialogSelectModelUnpaidV2 model={props.controller.model.selection} />)
+              }
+            />
+          </div>
         }
       />
     </div>
@@ -89,6 +109,8 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
   const permission = usePermission()
   const language = useLanguage()
   const platform = usePlatform()
+  const settings = useSettings(), run = useChatRun()
+  const delivery = { value: undefined as "queue" | "steer" | undefined }
   const prompt = props.state ?? usePrompt()
   let editor: HTMLDivElement | undefined
 
@@ -153,12 +175,13 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
         (item.selection
           ? ({ start: item.selection.startLine, end: item.selection.endLine } satisfies SelectedLineRange)
           : undefined)
-      if (!nextSelection) return []
+      if (!nextSelection && !item.attachment) return []
       return [
         {
           id: item.commentID ?? item.key,
           path: item.path,
-          selection: { ...nextSelection },
+          selection: nextSelection ?? { start: 1, end: 1 },
+          attachment: item.attachment,
           comment,
           time: item.commentID ? (byID.get(`${item.path}\n${item.commentID}`)?.time ?? Date.now()) : Date.now(),
           origin: item.commentOrigin,
@@ -186,6 +209,7 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
         commentID: item.id,
         commentOrigin: item.origin,
         preview: item.preview,
+        attachment: item.attachment,
       })),
     )
   }
@@ -295,7 +319,7 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
       trigger: item.name,
       title: item.name,
       description: item.description,
-      type: "custom" as const,
+      type: "source" in item && item.source === "skill" ? "skill" as const : "custom" as const,
     })),
     ...command.options
       .filter((item) => !item.disabled && !item.id.startsWith("suggested.") && item.slash)
@@ -350,6 +374,10 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
       dialog.show(() => <ImagePreview src={attachment.blob.url} alt={attachment.filename} />),
     openContext(key) {
       const item = controller.contextItem(key)
+      if (item?.attachment) {
+        window.dispatchEvent(new CustomEvent("bitsbytes:attachment", { detail: { sessionID: props.controls.session.id, ...item } }))
+        return
+      }
       if (item) openComment(item, props, sync, layout, files, comments)
     },
     onEditor(element) {
@@ -360,6 +388,15 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
       if (item.kind !== "command") return
       const selected = slashCommands().find((entry) => entry.id === item.id)
       if (!selected || selected.type === "custom") return
+      if (selected.type === "skill" && platform.bitsbytes) {
+        const target = prompt.capture()
+        const before = target.current().map(part => ({ ...part }))
+        return () => {
+          const preserved = before.map(part => part.type === "text" ? { ...part, content: part.content.replace(/^\/\S*\s*/, "") } : part)
+          target.set(preserved)
+          void platform.bitsbytes!.call<{ id: string; name: string; revision: number; path: string }>("skill.reference", { name: selected.trigger }).then(skill => target.context.add({ type: "file", path: skill.path, comment: skill.name, attachment: { kind: "skill", id: skill.id, name: skill.name, revision: skill.revision } })).catch(error => showToast({ variant: "error", title: language.t("common.requestFailed"), description: String(error) }))
+        }
+      }
       return () => command.trigger(selected.id, "slash")
     },
     attachments: {
@@ -383,7 +420,8 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
       store: platform.draftStore?.putBlob,
     },
     view: {
-      placeholder: designPlaceholder,
+      placeholder: () => run.store.value?.mode === "plan" ? language.t("bitsbytes.planPlaceholder") : run.store.value?.goalDraft ? language.t("bitsbytes.goalPlaceholder") : designPlaceholder(),
+      onKeyDown: event => { if (event.key === "Enter" && event.ctrlKey && !event.shiftKey && !event.isComposing) { event.preventDefault(); delivery.value = settings.general.followup() === "queue" ? "steer" : "queue"; controller.submit() } },
       get agent() {
         return props.controls.agents.visible && props.controls.agents.options.length > 0
           ? {
@@ -403,12 +441,23 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
       submit: {
         stopping,
         working,
-        onSubmit: () => void submission.handleSubmit(new Event("submit")),
+          onSubmit: () => { const selected = delivery.value ?? settings.general.followup(); delivery.value = undefined; if (!platform.recordingActive?.(prompt.capture())) void submission.handleSubmit(new CustomEvent("submit", { detail: { delivery: selected } })) },
         onStop: () => void submission.abort(),
       },
     },
   })
   Object.defineProperty(controller, "model", { get: () => props.controls.model })
+  Object.defineProperty(controller, "submitDelivery", { value: (value: "queue" | "steer") => { delivery.value = value; controller.submit() } })
+  Object.defineProperty(controller, "recordingIdentity", { value: () => prompt.capture() })
+  Object.defineProperty(controller, "captureTranscript", { value: () => {
+    controller.dispatch({ type: "mode.normal" })
+    const target = prompt.capture()
+    const append = captureTranscriptDraft(target, id => language.t("prompt.recording.source", { id }))
+    return (value: Parameters<typeof append>[0]) => {
+      append(value)
+      if (target === prompt.capture()) controller.restoreFocus()
+    }
+  } })
 
   command.register("prompt-input", () => [
     {

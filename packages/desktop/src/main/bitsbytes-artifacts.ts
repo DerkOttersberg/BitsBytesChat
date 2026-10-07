@@ -1,0 +1,121 @@
+import { createHash } from "node:crypto"
+import { basename, extname, join } from "node:path"
+import { copyFile, mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises"
+import { existsSync } from "node:fs"
+import type { DocumentArtifact, ArtifactVersion } from "../bitsbytes/types"
+import { BBArtifactRuntime } from "./bitsbytes-artifact-runtime"
+
+export class BBArtifacts {
+  items: DocumentArtifact[] = []
+  private queue = Promise.resolve()
+  private saving = Promise.resolve()
+  private pending = new Set<string>()
+  private focused = new Set<string>()
+  runtime: BBArtifactRuntime
+  constructor(private root: string, _python: string, private assets: string, private changed: (artifact: DocumentArtifact, published?: boolean) => void) { this.runtime = new BBArtifactRuntime(root, assets) }
+  async start() {
+    this.items = JSON.parse(await readFile(join(this.root, "artifacts.json"), "utf8").catch(() => "[]"))
+    for (const item of this.items) {
+      item.kind ??= "document"; item.mime ??= "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      item.source ??= join(this.root, "previews/sources", item.hash + ".docx")
+      item.history ??= [{ revision: item.revision, hash: item.hash, source: item.source, pdf: item.pdf, updated: item.updated }]
+      if (item.status === "queued" || item.status === "exporting") this.enqueue(item)
+    }
+  }
+  private persist() {
+    this.saving = this.saving.catch(() => undefined).then(async () => {
+      await writeFile(join(this.root, "artifacts.json.tmp"), JSON.stringify(this.items))
+      await rename(join(this.root, "artifacts.json.tmp"), join(this.root, "artifacts.json"))
+    })
+    return this.saving
+  }
+  async publish(path: string, sessionID: string, sourceID?: string, turnID?: string) {
+    const actual = await realpath(path)
+    const checked = await this.runtime.call<{ hash: string; kind: DocumentArtifact["kind"]; mime: string }>("validate", { path: actual })
+    const hash = checked.hash
+    const id = createHash("sha256").update(`${sessionID}\0${sourceID ?? actual.toLowerCase()}`).digest("hex").slice(0, 24)
+    const old = this.items.find(item => item.id === id)
+    const focusKey = `${sessionID}:${turnID ?? "manual:" + id}`
+    const focus = !this.focused.has(focusKey)
+    this.focused.add(focusKey)
+    if (old?.hash === hash) {
+      if (turnID) { old.turnID = turnID; old.turnIDs = [...new Set([...(old.turnIDs ?? []), turnID])] }
+      if (old.path !== actual) { old.path = actual; old.filename = basename(actual); await this.persist() }
+      else if (turnID) await this.persist()
+      this.changed(old, focus); return old
+    }
+    const source = join(this.root, "previews/sources", hash + extname(actual).toLowerCase())
+    const item: DocumentArtifact = { id, sessionID, turnID, turnIDs: [...new Set([...(old?.turnIDs ?? (old?.turnID ? [old.turnID] : [])), ...(turnID ? [turnID] : [])])], path: actual, filename: basename(actual), revision: (old?.revision ?? 0) + 1, hash, kind: checked.kind, mime: checked.mime, source, history: [...(old?.history ?? [])], status: "queued", updated: Date.now(), pdf: "", error: "" }
+    await mkdir(join(this.root, "previews/sources"), { recursive: true })
+    await copyFile(actual, source)
+    if (createHash("sha256").update(await readFile(source)).digest("hex") !== hash) throw new Error("bb.error.invalidDocument")
+    item.history!.push({ revision: item.revision, hash, source, pdf: "", updated: item.updated, turnID })
+    this.items = [...this.items.filter(row => row.id !== id), item]
+    await this.persist(); this.changed(item, focus); this.enqueue(item)
+    return item
+  }
+  retry(id: string) {
+    const item = this.items.find(row => row.id === id)
+    if (!item) throw new Error("bb.error.invalidDocument")
+    item.status = "queued"; item.error = ""; this.changed(item); this.enqueue(item)
+    return item
+  }
+  private version(id: string, revision?: number) {
+    const item = this.items.find(row => row.id === id)
+    if (!item) throw new Error("bb.error.invalidDocument")
+    const version = revision ? item.history?.find(row => row.revision === revision) : undefined
+    return { item, source: version?.source ?? item.source!, pdf: version?.pdf ?? item.pdf }
+  }
+  async read(id: string, revision?: number) {
+    const selected = this.version(id, revision)
+    return selected.pdf ? new Uint8Array(await readFile(selected.pdf)) : null
+  }
+  async content(id: string, args: Record<string, unknown> = {}) {
+    const selected = this.version(id, Number(args.revision) || undefined)
+    if (selected.item.kind === "spreadsheet") { const cached = join(this.root, "previews/pdf", basename(selected.source)); return this.runtime.call("grid", { path: existsSync(cached) ? cached : selected.source, sheet: args.sheet, offset: args.offset, limit: args.limit }) }
+    if (selected.item.kind === "image") return { data: new Uint8Array(await readFile(selected.source)), mime: selected.item.mime }
+    if (selected.item.kind === "html" || selected.item.kind === "code") {
+      const text = await readFile(selected.source, "utf8")
+      if (text.length > 8e6) throw new Error("bb.error.fileTooLarge")
+      return { text, mime: selected.item.mime }
+    }
+    return { text: "" }
+  }
+  async pages(id: string, start = 0) {
+    const selected = this.version(id)
+    if (!selected.pdf) throw new Error("bb.error.previewPending")
+    const result = await this.runtime.call<{ pages: number; images: string[]; next: number | null }>("pages", { path: selected.pdf, folder: join(this.root, "previews/pages", selected.item.hash), start })
+    return { content: [{ type: "text", text: JSON.stringify({ pages: result.pages, next: result.next }) }, ...await Promise.all(result.images.map(async path => ({ type: "image", data: (await readFile(path)).toString("base64"), mimeType: "image/png" })))] }
+  }
+  async saveCopy(id: string, target: string, revision?: number) {
+    const selected = this.version(id, revision)
+    await copyFile(selected.source, target)
+    const verified = await this.runtime.call<{ hash: string }>("validate", { path: target })
+    if (verified.hash !== createHash("sha256").update(await readFile(selected.source)).digest("hex")) throw new Error("bb.error.invalidDocument")
+    return { path: target, verified: true }
+  }
+  private enqueue(item: DocumentArtifact) {
+    if (["html", "code", "image", "pdf"].includes(item.kind ?? "")) {
+      item.status = "ready"
+      if (item.kind === "pdf") { item.pdf = item.source ?? item.path; const version = item.history?.find(row => row.revision === item.revision); if (version) version.pdf = item.pdf }
+      void this.persist().then(() => this.changed(item))
+      return
+    }
+    const key = `${item.id}:${item.revision}`
+    if (this.pending.has(key)) return
+    this.pending.add(key)
+    this.queue = this.queue.catch(() => undefined).then(async () => {
+      if (this.items.find(row => row.id === item.id) !== item) { this.pending.delete(key); return }
+      item.status = "exporting"; this.changed(item); await this.persist()
+      try {
+        const output = await this.runtime.call<{ pdf: string; formulaErrors?: unknown[] }>("render", { path: item.source, folder: join(this.root, "previews/pdf") })
+        if (output.pdf && !(await readFile(output.pdf)).subarray(0, 5).equals(Buffer.from("%PDF-"))) throw new Error("bb.error.invalidDocument")
+        item.pdf = output.pdf; item.status = "ready"
+        const version = item.history?.find(row => row.revision === item.revision)
+        if (version) version.pdf = output.pdf
+        if (output.formulaErrors?.length) item.error = "bb.error.formulaErrors"
+      } catch (error) { item.status = "error"; item.error = String((error as Error).message ?? error) }
+      finally { this.pending.delete(key); await this.persist(); if (this.items.find(row => row.id === item.id) === item) this.changed(item) }
+    })
+  }
+}

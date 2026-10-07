@@ -70,6 +70,7 @@ const soundSettings = {
 } as const
 
 const PermissionScopeSetting: Component<{ controller: PermissionScopeController }> = (props) => {
+  if (usePlatform().bitsbytes) return null
   const language = useLanguage()
   return (
     <SettingsRowV2

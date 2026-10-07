@@ -24,6 +24,7 @@ import type { UpdaterController } from "./updater-controller"
 import { createUpdaterSubscriptions } from "./updater-subscriptions"
 import { createDesktopDraftStore } from "./draft-store"
 import { nativeT } from "./native-translations"
+import type { BitsBytes } from "./bitsbytes"
 
 const pickerFilters = (ext?: string[]) => {
   if (!ext || ext.length === 0) return undefined
@@ -33,6 +34,7 @@ const pickerFilters = (ext?: string[]) => {
 const pickedFiles = createPickedFileAuthorizations()
 
 type Deps = {
+  bitsbytes: BitsBytes
   killSidecar: () => Promise<void> | void
   relaunch: () => void
   awaitInitialization: () => Promise<ServerReadyData>
@@ -55,6 +57,10 @@ type Deps = {
 }
 
 export function registerIpcHandlers(deps: Deps) {
+  ipcMain.handle("bitsbytes:call", (event, method: string, args: Record<string, unknown>) => {
+    if (event.senderFrame !== event.sender.mainFrame || !BrowserWindow.fromWebContents(event.sender)) throw new Error("Invalid desktop sender")
+    return deps.bitsbytes.call(method, method.startsWith("browser.") ? { ...args, windowID: BrowserWindow.fromWebContents(event.sender)!.id } : args)
+  })
   const drafts = createDesktopDraftStore(join(app.getPath("userData"), "drafts.sqlite"))
   const updaterSubscriptions = createUpdaterSubscriptions()
   app.once("will-quit", updaterSubscriptions.clear)

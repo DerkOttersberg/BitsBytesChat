@@ -1,4 +1,4 @@
-import { Component, createMemo, createSignal, startTransition } from "solid-js"
+import { Component, createMemo, createSignal, startTransition, For } from "solid-js"
 import { Dialog } from "@opencode-ai/ui/v2/dialog-v2"
 import { TabsV2 } from "@opencode-ai/ui/v2/tabs-v2"
 import { Icon } from "@opencode-ai/ui/icon"
@@ -65,6 +65,7 @@ export const DialogSettings: Component<{
                       <Icon name="keyboard" />
                       {language.t("settings.tab.shortcuts")}
                     </TabsV2.Trigger>
+                    <For each={platform.settingsPanels}>{(panel) => <TabsV2.Trigger value={panel.id}><Icon name="sliders" />{panel.title}</TabsV2.Trigger>}</For>
                   </div>
                 </div>
 
@@ -88,7 +89,7 @@ export const DialogSettings: Component<{
               </div>
             </div>
             <div class="settings-v2-nav-footer">
-              <span>{language.t("app.name.desktop")}</span>
+              <span>{platform.applicationName ?? language.t("app.name.desktop")}</span>
               <span>v{platform.version}</span>
             </div>
           </div>
@@ -103,8 +104,10 @@ export const DialogSettings: Component<{
           <SettingsServersV2 />
         </TabsV2.Content>
         <TabsV2.Content value="providers" class="settings-v2-panel">
+          {platform.providerSettings?.({})}
           <SettingsProvidersV2 directory={directory} onBack={showProviders} />
         </TabsV2.Content>
+        <For each={platform.settingsPanels}>{(panel) => <TabsV2.Content value={panel.id} class="settings-v2-panel"><panel.component /></TabsV2.Content>}</For>
         <TabsV2.Content value="models" class="settings-v2-panel">
           <SettingsModelsV2 />
         </TabsV2.Content>

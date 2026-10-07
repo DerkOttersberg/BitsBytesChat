@@ -1,3 +1,7 @@
+import { ChatWorkspace } from "./session/chat-workspace"
+import { sideChatContextBoundary } from "./session/side-chat-context"
+import { CommandProvider } from "../context/command"
+import { MemoryRouter, createMemoryHistory, Route } from "@solidjs/router"
 import type { FilePart, Project, UserMessage, VcsFileDiff } from "@opencode-ai/sdk/v2"
 import { getFilename } from "@opencode-ai/core/util/path"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
@@ -17,6 +21,7 @@ import {
   on,
   onMount,
   type ParentProps,
+  type JSX,
   untrack,
 } from "solid-js"
 import { makeEventListener } from "@solid-primitives/event-listener"
@@ -144,10 +149,10 @@ async function runPromptRollbackMutation<T, R>(input: {
     })
 }
 
-export function SessionPage() {
+export function SessionPage(props: { embedded?: boolean } = {}) {
   return (
     <SessionProviders>
-      <Page />
+      <Page embedded={props.embedded} />
     </SessionProviders>
   )
 }
@@ -350,7 +355,7 @@ function SessionPanelFrame(props: ParentProps<{ newLayout: boolean; raised?: boo
   )
 }
 
-export default function Page() {
+export default function Page(props: { embedded?: boolean } = {}) {
   const serverSync = useServerSync()
   const layout = useLayout()
   const local = useLocal()
@@ -545,7 +550,8 @@ export default function Page() {
   const activeTab = tabState.activeTab
   const activeFileTab = tabState.activeFileTab
   const revertMessageID = createMemo(() => info()?.revert?.messageID)
-  const timeline = createTimelineModel({ sessionID: () => params.id, revertMessageID })
+  const timeline = createTimelineModel({ sessionID: () => params.id, revertMessageID,
+    hideBefore: createMemo(() => platform.bitsbytes ? sideChatContextBoundary(sdk().directory, params.id) : undefined) })
   const historyLoading = timeline.history.loading
   const historyMore = timeline.history.more
   const lastUserMessage = timeline.lastUserMessage
@@ -1044,6 +1050,7 @@ export default function Page() {
   }
 
   const handleKeyDown = (event: KeyboardEvent) => {
+    if (Boolean((event.target as HTMLElement)?.closest?.(".bb-embedded-chat")) !== Boolean(props.embedded)) return
     const path = event.composedPath()
     const target = path.find((item): item is HTMLElement => item instanceof HTMLElement)
     const activeElement = deepActiveElement()
@@ -1930,6 +1937,7 @@ export default function Page() {
     if (!sessionID) return
 
     const item = queuedFollowups()[0]
+    if (platform.bitsbytes) return
     if (!item) return
     if (followupBusy(sessionID)) return
     if (followup.failed[sessionID] === item.id) return
@@ -2058,11 +2066,16 @@ export default function Page() {
     return <SessionErrorFallback error={error} sessionID={params.id} />
   }
 
-  const sessionPanelContent = () => (
+  const sessionPanelContent = (headerActions?: JSX.Element) => (
     <>
       {sessionSync() ?? ""}
       <Show when={!isDesktop() && !!params.id && settings.general.newLayoutDesigns() && !mobileTabsBottom()}>
         {mobileTabs(true)}
+      </Show>
+      <Show when={headerActions && (!params.id || !messagesReady())}>
+        <div class="h-12 shrink-0 flex items-center justify-end px-3" data-bb-draft-header>
+          {headerActions}
+        </div>
       </Show>
       <div class="flex-1 min-h-0 overflow-hidden">
         <Switch>
@@ -2084,6 +2097,7 @@ export default function Page() {
             <Show when={messagesReady() ? params.id : undefined} keyed>
               {(_id) => (
                 <MessageTimeline
+                  headerActions={headerActions}
                   actions={actions}
                   scroll={ui.scroll}
                   onResumeScroll={resumeScroll}
@@ -2246,6 +2260,9 @@ export default function Page() {
     </>
   )
 
+  if (props.embedded) return <div class="size-full min-h-0 flex flex-col" data-bb-chat={params.id}><SessionPanelFrame newLayout raised><ErrorBoundary fallback={sessionErrorFallback}>{sessionPanelContent()}</ErrorBoundary></SessionPanelFrame></div>
+  if (platform.bitsbytes) return <SessionRouteFrame><SessionHeader /><ChatWorkspace sessionID={params.id} review={newSessionDesign() ? reviewPanelV2 : reviewPanel} sideChat={id => <EmbeddedSession sessionID={id} directory={sdk().directory} />} chat={headerActions => <SessionPanelFrame newLayout raised={!!params.id}><ErrorBoundary fallback={sessionErrorFallback}>{sessionPanelContent(headerActions)}</ErrorBoundary></SessionPanelFrame>} /></SessionRouteFrame>
+
   return (
     <SessionRouteFrame>
       <SessionHeader />
@@ -2388,4 +2405,11 @@ export default function Page() {
       </Show>
     </SessionRouteFrame>
   )
+}
+
+// Explicit identity with an independent router, draft, model selection and command scope.
+function EmbeddedSession(props: { sessionID: string; directory: string }) {
+  const history = createMemoryHistory()
+  history.set({ value: `/${base64Encode(props.directory)}/session/${props.sessionID}`, replace: true })
+  return <div class="bb-embedded-chat" data-bb-chat={props.sessionID}><MemoryRouter history={history}><Route path="/:dir/session/:id" component={() => <CommandProvider scopeID={props.sessionID}><ModelsProvider directory={() => props.directory}><SDKProvider directory={() => props.directory}><DirectoryDataProvider directory={() => props.directory}><SessionPage embedded /></DirectoryDataProvider></SDKProvider></ModelsProvider></CommandProvider>} /></MemoryRouter></div>
 }
