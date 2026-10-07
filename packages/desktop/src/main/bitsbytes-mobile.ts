@@ -8,6 +8,7 @@ import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { createRequire } from "node:module"
 import { dirname } from "node:path"
+import { pipeline } from "node:stream/promises"
 import type { BitsBytes } from "./bitsbytes"
 import type { Job } from "../bitsbytes/types"
 import { mobileCopy } from "../bitsbytes/mobile-copy"
@@ -654,15 +655,23 @@ export class BBMobile {
     if (!version) throw new Error(mobileCopy.missing)
     const preview = url.searchParams.get("preview") === "1",
       image = item.kind === "image" && url.searchParams.get("inline") === "1"
-    const bytes = preview ? await this.host.artifacts.read(item.id, revision) : await readFile(version.source)
-    if (!bytes) throw new Error(mobileCopy.preparing)
-    response.setHeader("cache-control", "no-store")
-    response.setHeader("content-type", preview ? "application/pdf" : (item.mime ?? "application/octet-stream"))
-    response.setHeader(
-      "content-disposition",
-      `${preview || image ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(preview ? item.filename + ".pdf" : item.filename)}`,
-    )
-    response.end(Buffer.from(bytes))
+    const path = preview ? await this.host.artifacts.previewPath(item.id, revision) : version.source
+    if (!path) throw new Error(mobileCopy.preparing)
+    const file = await open(path, "r")
+    try {
+      const info = await file.stat()
+      if (!info.isFile()) throw new Error(mobileCopy.missing)
+      response.setHeader("cache-control", "no-store")
+      response.setHeader("content-type", preview ? "application/pdf" : (item.mime ?? "application/octet-stream"))
+      response.setHeader("content-length", String(info.size))
+      response.setHeader(
+        "content-disposition",
+        `${preview || image ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(preview ? item.filename + ".pdf" : item.filename)}`,
+      )
+      await pipeline(file.createReadStream({ autoClose: false }), response)
+    } finally {
+      await file.close()
+    }
   }
   private async upload(
     request: IncomingMessage,

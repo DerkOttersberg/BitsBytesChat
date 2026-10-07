@@ -92,6 +92,10 @@ export class BBArtifacts {
     return { item, source: version?.source ?? item.source!, pdf: version?.pdf ?? item.pdf }
   }
   async read(id: string, revision?: number) {
+    const pdf = await this.previewPath(id, revision)
+    return pdf ? new Uint8Array(await readFile(pdf)) : null
+  }
+  async previewPath(id: string, revision?: number) {
     const selected = this.version(id, revision)
     let pdf = selected.pdf
     if (!pdf && revision !== undefined && ["document", "presentation"].includes(selected.item.kind ?? "document")) {
@@ -114,7 +118,7 @@ export class BBArtifacts {
       }
       pdf = await pending
     }
-    return pdf ? new Uint8Array(await readFile(pdf)) : null
+    return pdf || null
   }
   async content(id: string, args: Record<string, unknown> = {}) {
     const selected = this.version(id, args.revision === undefined ? undefined : Number(args.revision))

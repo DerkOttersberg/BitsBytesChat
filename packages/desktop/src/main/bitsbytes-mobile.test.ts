@@ -2,11 +2,12 @@ import { after, before, test } from "node:test"
 import assert from "node:assert/strict"
 import { createServer } from "node:net"
 import { request } from "node:https"
-import { mkdtemp, readFile, appendFile, rm } from "node:fs/promises"
+import { mkdtemp, readFile, appendFile, writeFile, rm } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { tmpdir } from "node:os"
 import { BBMobile } from "./bitsbytes-mobile"
 import { bbt } from "../bitsbytes/copy"
+import type { DocumentArtifact } from "../bitsbytes/types"
 
 const calls: { method: string; args: Record<string, unknown>; directory?: string }[] = []
 let mobile: BBMobile,
@@ -32,7 +33,16 @@ const host = {
   assets: resolve("resources/bitsbytes"),
   settings: { engine: "parakeet" },
   runs: { get: () => savedRun },
-  artifacts: { items: [], content: async () => ({ text: "" }) },
+  artifacts: {
+    items: [] as DocumentArtifact[],
+    content: async () => ({ text: "" }),
+    previewPath: async (id: string, revision?: number) => {
+      const item = host.artifacts.items.find((item) => item.id === id)
+      return (
+        (revision === undefined ? item?.pdf : item?.history?.find((item) => item.revision === revision)?.pdf) || null
+      )
+    },
+  },
   skills: async () => [],
   engineFetch: async <T>(path: string, options: RequestInit = {}, directory?: string): Promise<T> => {
     calls.push({ method: path, args: options, directory })
@@ -74,7 +84,10 @@ const host = {
         },
       ] as T
     if (path === "/session/ses_shared") {
-      if (sessionRead.held) { sessionRead.entered.resolve(); await sessionRead.release.promise }
+      if (sessionRead.held) {
+        sessionRead.entered.resolve()
+        await sessionRead.release.promise
+      }
       return sessions[0] as T
     }
     if (path.endsWith("/abort")) return true as T
@@ -230,18 +243,29 @@ test("HTTPS queue status resolves recovery copy while preserving the host error 
     assert.equal(response.status, 200)
     assert.equal(JSON.parse(response.body).run.error, bbt("bb.error.deliveryUnknown"))
     assert.equal(savedRun.error, "bb.error.deliveryUnknown")
-  } finally { savedRun.error = "" }
+  } finally {
+    savedRun.error = ""
+  }
 })
 
 test("phone Stop pauses the host before waiting for engine session metadata", { timeout: 5000 }, async () => {
-  savedRun.paused = false; sessionRead.held = true
-  const offset = calls.length, stopping = api("stop", { sessionID: "ses_shared" })
+  savedRun.paused = false
+  sessionRead.held = true
+  const offset = calls.length,
+    stopping = api("stop", { sessionID: "ses_shared" })
   try {
     await sessionRead.entered.promise
     assert.equal(savedRun.paused, true)
-    assert.ok(calls.slice(offset).some(row => row.method === "runs.stop"))
-    assert.equal(calls.slice(offset).some(row => row.method.endsWith("/abort")), false)
-  } finally { sessionRead.held = false; sessionRead.release.resolve(); await stopping }
+    assert.ok(calls.slice(offset).some((row) => row.method === "runs.stop"))
+    assert.equal(
+      calls.slice(offset).some((row) => row.method.endsWith("/abort")),
+      false,
+    )
+  } finally {
+    sessionRead.held = false
+    sessionRead.release.resolve()
+    await stopping
+  }
 })
 
 test("phone Stop uses a known host directory without another metadata read", async () => {
@@ -250,9 +274,14 @@ test("phone Stop uses a known host directory without another metadata read", asy
   try {
     const response = await api("stop", { sessionID: "ses_shared" })
     assert.equal(response.status, 200)
-    assert.equal(calls.slice(offset).some(row => row.method === "/session/ses_shared"), false)
-    assert.equal(calls.findLast(row => row.method === "/session/ses_shared/abort")?.directory, sessions[0].directory)
-  } finally { savedRun.last.directory = undefined }
+    assert.equal(
+      calls.slice(offset).some((row) => row.method === "/session/ses_shared"),
+      false,
+    )
+    assert.equal(calls.findLast((row) => row.method === "/session/ses_shared/abort")?.directory, sessions[0].directory)
+  } finally {
+    savedRun.last.directory = undefined
+  }
 })
 
 for (const known of [false, true]) {
@@ -282,6 +311,69 @@ for (const known of [false, true]) {
     }
   })
 }
+
+test("paired downloads preserve historical bytes, PDF selection and Unicode filenames", async () => {
+  const source = join(root, "latest.txt"),
+    previous = join(root, "previous.txt"),
+    pdf = join(root, "previous.pdf"),
+    original = "Earlier saved revision 🌿\r\n".repeat(7000),
+    filename = "Bijlage 🌿 résumé.txt"
+  await writeFile(source, "Latest saved revision")
+  await writeFile(previous, original)
+  await writeFile(pdf, "%PDF-1.7\nHistorical fixture\n%%EOF")
+  host.artifacts.items.push({
+    id: "download_revision",
+    sessionID: "ses_shared",
+    filename,
+    path: source,
+    source,
+    revision: 2,
+    hash: "latest",
+    kind: "code",
+    mime: "text/plain",
+    status: "ready",
+    updated: 2,
+    pdf: "",
+    error: "",
+    history: [
+      { revision: 1, hash: "previous", source: previous, pdf, updated: 1 },
+      { revision: 2, hash: "latest", source, pdf: "", updated: 2 },
+    ],
+  })
+  try {
+    const revision = await http("/file/download_revision?revision=1")
+    assert.equal(revision.status, 200)
+    assert.equal(revision.body, original)
+    assert.equal(Number(revision.headers["content-length"]), Buffer.byteLength(original))
+    assert.equal(revision.headers["cache-control"], "no-store")
+    assert.equal(revision.headers["content-type"], "text/plain")
+    assert.equal(
+      revision.headers["content-disposition"],
+      `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    )
+    const preview = await http("/file/download_revision?revision=1&preview=1")
+    assert.equal(preview.status, 200)
+    assert.equal(preview.body, await readFile(pdf, "utf8"))
+    assert.equal(preview.headers["content-type"], "application/pdf")
+    assert.equal(
+      preview.headers["content-disposition"],
+      `inline; filename*=UTF-8''${encodeURIComponent(filename + ".pdf")}`,
+    )
+    assert.equal((await http("/file/download_revision?revision=99")).status, 400)
+    assert.equal((await http("/file/download_revision?preview=1")).status, 400)
+    host.artifacts.items[0].history!.push(
+      { revision: 3, hash: "missing", source: join(root, "missing.txt"), pdf: "", updated: 3 },
+      { revision: 4, hash: "directory", source: root, pdf: "", updated: 4 },
+    )
+    assert.equal((await http("/file/download_revision?revision=3")).status, 400)
+    assert.equal((await http("/file/download_revision?revision=4")).status, 400)
+    assert.equal((await http("/file/download_revision", "GET", undefined, { cookie: "" })).status, 401)
+    assert.equal((await http("/file/download_revision")).body, "Latest saved revision")
+    assert.equal(await readFile(source, "utf8"), "Latest saved revision")
+  } finally {
+    host.artifacts.items.length = 0
+  }
+})
 
 test("resumable upload journal, exact retries, interruption tail and device revocation", async () => {
   const result = await http("/upload", "POST", {

@@ -128,6 +128,8 @@ integration("an earlier Word revision without a PDF recovers its own preview wit
   expect(f.artifacts.items[0].pdf).toBe(rendered.pdf)
   expect(f.artifacts.items[0].history?.[0].pdf).toBeTruthy()
   expect(f.artifacts.items[0].history?.[0].pdf).not.toBe(rendered.pdf)
+  expect(await f.artifacts.previewPath("history", 1)).toBe(f.artifacts.items[0].history![0].pdf)
+  expect(new Uint8Array(await readFile((await f.artifacts.previewPath("history", 1))!))).toEqual(previews[0]!)
   const oldContent = await f.artifacts.runtime.call("inspect", { path: f.artifacts.items[0].history![0].pdf })
   expect(JSON.stringify(oldContent)).toContain("Original revision")
   expect(JSON.stringify(oldContent)).not.toContain("Latest revision")
