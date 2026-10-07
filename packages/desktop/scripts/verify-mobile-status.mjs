@@ -12,6 +12,9 @@ const profile = join(root, ".tools/qa/mobile-status-" + randomUUID()),
   data = join(profile, "BitsBytesChat")
 const storageDevice = process.env.BB_STOP_STORAGE_FAILURE,
   observing = process.env.BB_STOP_STORAGE_OBSERVE === "1"
+const backgroundStorage = process.env.BB_RUN_STORAGE_FAILURE === "1",
+  observeBackground = process.env.BB_RUN_STORAGE_OBSERVE === "1"
+assert.ok(!(storageDevice && backgroundStorage), "Run one owned storage fault at a time")
 const report = { checks: [], errors: [], responseBytes: [], providerRequests: 0, frozenSourceReachedProvider: false }
 const slow = {
   entered: Promise.withResolvers(),
@@ -32,6 +35,7 @@ async function bounded(promise, label) {
   }
 }
 const source = "FROZEN-SOURCE-SENTINEL\n" + "Nederlandse bron 🌿 ".repeat(6000)
+const storageSource = "QUEUE-STORAGE-RECOVERY\n" + source
 const fixture = createServer(async (request, response) => {
   const bytes = []
   for await (const chunk of request) bytes.push(chunk)
@@ -44,6 +48,13 @@ const fixture = createServer(async (request, response) => {
       : (message.content ?? []).filter((part) => part.type === "text").map((part) => part.text)
     ).some((text) => text.includes(source)),
   )
+  if (backgroundStorage)
+    report.storageSourceReachedProvider ||= (input.messages ?? []).some((message) =>
+      (typeof message.content === "string"
+        ? [message.content]
+        : (message.content ?? []).filter((part) => part.type === "text").map((part) => part.text)
+      ).some((text) => text.includes(storageSource)),
+    )
   if (body.includes("slow-stop-marker")) {
     response.on("close", () => slow.disconnected.resolve())
     slow.entered.resolve()
@@ -307,80 +318,144 @@ try {
     const active = await call("runs.get", { sessionID: stopID })
     assert.equal(active.queue.length, 0)
     assert.equal(active.awaiting, true)
-    const temporary = join(data, "chat-runs.json.tmp")
-    if (storageDevice) {
-      assert.ok(resolve(temporary).startsWith(resolve(profile) + sep))
-      for (let index = 0; index < 100; index++) {
-        const saved = JSON.parse(await readFile(join(data, "chat-runs.json"), "utf8"))[stopID]
-        if (saved && !saved.queue.length) break
-        await new Promise((resolve) => setTimeout(resolve, 10))
-      }
-      await mkdir(temporary)
-    }
-    if (storageDevice === "desktop") {
-      await desktop.evaluate((detail) => window.dispatchEvent(new CustomEvent("bitsbytes:session", { detail })), {
-        directory: active.last.directory,
+    if (backgroundStorage) {
+      const queued = {
+        ...prompt,
         sessionID: stopID,
-      })
-      await desktop
-        .locator(`.bb-workspace-chat[data-bb-chat="${stopID}"]`)
-        .getByRole("button", { name: "Stop", exact: true })
-        .click()
-      if (!observing) await desktop.getByText("Request failed", { exact: true }).waitFor({ timeout: 15000 })
-    } else {
-      const stopResponse = phone.waitForResponse(
-        (response) => response.url().endsWith("/api") && response.request().postDataJSON()?.method === "stop",
-      )
-      await phone.locator("#stop").click()
-      const acknowledgement = await stopResponse,
-        stopBody = await acknowledgement.text()
-      assert.equal(acknowledgement.ok(), !storageDevice)
-      report.stopResponse = { status: acknowledgement.status(), bytes: Buffer.byteLength(stopBody) }
-      assert.doesNotThrow(() => JSON.parse(stopBody))
-    }
-    if (storageDevice && observing) {
-      const disconnected = await Promise.race([
-        slow.disconnected.promise.then(() => true),
-        new Promise((resolve) => setTimeout(() => resolve(false), 1000)),
-      ])
-      const stopped = await chat("stop-storage-observation", stopID)
-      report.stopStorage = {
-        device: storageDevice,
-        disconnected,
-        paused: stopped.run.paused,
-        awaiting: stopped.run.awaiting,
-        busy: Boolean(stopped.status && stopped.status.type !== "idle"),
+        id: prompt.id.slice(0, -1) + "c",
+        text: storageSource,
+        legacyParts: [
+          { type: "text", text: "Recover the saved queued source" },
+          { type: "text", text: storageSource, synthetic: true },
+        ],
       }
-      console.log("OBSERVATION", JSON.stringify(report.stopStorage))
-      await rmdir(temporary)
-    } else {
-      await bounded(slow.disconnected.promise, "Stop did not disconnect its stalled provider request")
-      const stopped = await chat("stopped", stopID)
-      report.stopHost = {
-        paused: stopped.run.paused,
-        awaiting: stopped.run.awaiting,
-        queued: stopped.run.queue.length,
-        busy: Boolean(stopped.status && stopped.status.type !== "idle"),
+      await call("runs.admit", { prompt: queued })
+      const temporary = join(data, "chat-runs.json.tmp")
+      assert.ok(resolve(temporary).startsWith(resolve(profile) + sep))
+      await mkdir(temporary)
+      slow.release.resolve()
+      for (let index = 0; index < 200; index++) {
+        const value = await call("runs.get", { sessionID: stopID })
+        if (value.error) break
+        await new Promise((resolve) => setTimeout(resolve, 50))
       }
-      assert.equal(stopped.run.paused, true)
-      assert.equal(stopped.run.awaiting, false)
-      assert.equal(report.stopHost.busy, false)
-      await phone.locator("#stop").waitFor({ state: "hidden", timeout: 15000 })
-      if (storageDevice) {
-        await rmdir(temporary)
-        await call("runs.stop", { sessionID: stopID })
-        assert.equal(JSON.parse(await readFile(join(data, "chat-runs.json"), "utf8"))[stopID].paused, true)
-        if (storageDevice === "phone") assert.equal(await phone.locator("#notice").isVisible(), true)
-      } else assert.equal(await phone.locator("#notice").isVisible(), false)
+      const value = await call("runs.get", { sessionID: stopID })
+      report.backgroundStorage = {
+        paused: value.paused,
+        awaiting: value.awaiting,
+        status: value.queue[0]?.status,
+        sentAt: value.queue[0]?.sentAt,
+        error: value.error,
+        appExit: app.process().exitCode,
+      }
       assert.equal(report.providerRequests, 2)
-      check(
-        storageDevice
-          ? "Stop interrupts its active provider despite a journal failure, exposes the save error and recovers persistence"
-          : "Phone Stop aborts its active provider, clears host waiting after acknowledgement and restores the idle composer",
-      )
+      assert.equal(value.queue[0].prompt.legacyParts[1].text, storageSource)
+      assert.equal(value.error.includes("chat-runs.json.tmp"), true)
+      if (!observeBackground) {
+        assert.equal(value.paused, true)
+        assert.equal(value.awaiting, false)
+        assert.ok(["pending", "failed"].includes(value.queue[0].status))
+        assert.equal(value.queue[0].sentAt, undefined)
+        assert.equal(app.process().exitCode, null)
+        await phone.locator("#queue-status").filter({ hasText: "chat-runs.json.tmp" }).waitFor({ timeout: 15000 })
+      }
+      await rmdir(temporary)
+      if (!observeBackground) {
+        await call("runs.resume", { sessionID: stopID })
+        for (let index = 0; index < 200; index++) {
+          const current = await call("runs.get", { sessionID: stopID })
+          if (!current.queue.length && !current.awaiting) break
+          await new Promise((resolve) => setTimeout(resolve, 50))
+        }
+        const recovered = await call("runs.get", { sessionID: stopID })
+        assert.equal(recovered.queue.length, 0)
+        assert.equal(recovered.awaiting, false)
+        assert.equal(report.storageSourceReachedProvider, true)
+        assert.equal(report.providerRequests, 3)
+        assert.equal(
+          JSON.parse(await readFile(join(data, "chat-runs.json"), "utf8"))[stopID].last.legacyParts[1].text,
+          storageSource,
+        )
+        check(
+          "Background journal failure pauses visibly before dispatch; explicit Resume delivers the exact saved source once",
+        )
+      }
+    } else {
+      const temporary = join(data, "chat-runs.json.tmp")
+      if (storageDevice) {
+        assert.ok(resolve(temporary).startsWith(resolve(profile) + sep))
+        for (let index = 0; index < 100; index++) {
+          const saved = JSON.parse(await readFile(join(data, "chat-runs.json"), "utf8"))[stopID]
+          if (saved && !saved.queue.length) break
+          await new Promise((resolve) => setTimeout(resolve, 10))
+        }
+        await mkdir(temporary)
+      }
+      if (storageDevice === "desktop") {
+        await desktop.evaluate((detail) => window.dispatchEvent(new CustomEvent("bitsbytes:session", { detail })), {
+          directory: active.last.directory,
+          sessionID: stopID,
+        })
+        await desktop
+          .locator(`.bb-workspace-chat[data-bb-chat="${stopID}"]`)
+          .getByRole("button", { name: "Stop", exact: true })
+          .click()
+        if (!observing) await desktop.getByText("Request failed", { exact: true }).waitFor({ timeout: 15000 })
+      } else {
+        const stopResponse = phone.waitForResponse(
+          (response) => response.url().endsWith("/api") && response.request().postDataJSON()?.method === "stop",
+        )
+        await phone.locator("#stop").click()
+        const acknowledgement = await stopResponse,
+          stopBody = await acknowledgement.text()
+        assert.equal(acknowledgement.ok(), !storageDevice)
+        report.stopResponse = { status: acknowledgement.status(), bytes: Buffer.byteLength(stopBody) }
+        assert.doesNotThrow(() => JSON.parse(stopBody))
+      }
+      if (storageDevice && observing) {
+        const disconnected = await Promise.race([
+          slow.disconnected.promise.then(() => true),
+          new Promise((resolve) => setTimeout(() => resolve(false), 1000)),
+        ])
+        const stopped = await chat("stop-storage-observation", stopID)
+        report.stopStorage = {
+          device: storageDevice,
+          disconnected,
+          paused: stopped.run.paused,
+          awaiting: stopped.run.awaiting,
+          busy: Boolean(stopped.status && stopped.status.type !== "idle"),
+        }
+        console.log("OBSERVATION", JSON.stringify(report.stopStorage))
+        await rmdir(temporary)
+      } else {
+        await bounded(slow.disconnected.promise, "Stop did not disconnect its stalled provider request")
+        const stopped = await chat("stopped", stopID)
+        report.stopHost = {
+          paused: stopped.run.paused,
+          awaiting: stopped.run.awaiting,
+          queued: stopped.run.queue.length,
+          busy: Boolean(stopped.status && stopped.status.type !== "idle"),
+        }
+        assert.equal(stopped.run.paused, true)
+        assert.equal(stopped.run.awaiting, false)
+        assert.equal(report.stopHost.busy, false)
+        await phone.locator("#stop").waitFor({ state: "hidden", timeout: 15000 })
+        if (storageDevice) {
+          await rmdir(temporary)
+          await call("runs.stop", { sessionID: stopID })
+          assert.equal(JSON.parse(await readFile(join(data, "chat-runs.json"), "utf8"))[stopID].paused, true)
+          if (storageDevice === "phone") assert.equal(await phone.locator("#notice").isVisible(), true)
+        } else assert.equal(await phone.locator("#notice").isVisible(), false)
+        assert.equal(report.providerRequests, 2)
+        check(
+          storageDevice
+            ? "Stop interrupts its active provider despite a journal failure, exposes the save error and recovers persistence"
+            : "Phone Stop aborts its active provider, clears host waiting after acknowledgement and restores the idle composer",
+        )
+      }
     }
   }
-  if (!observing) {
+  if (!observing && !observeBackground) {
     assert.deepEqual(report.errors, [])
     check("Phone timeline stays compact with no renderer errors")
   }

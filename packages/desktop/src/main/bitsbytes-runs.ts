@@ -167,6 +167,8 @@ export class BBRuns {
     if (chat.paused || (!chat.queue.length && !chat.awaiting && chat.goal?.status !== "active")) return
     this.active.add(id)
     let priorSentAt: number | undefined
+    let attempt: QueuedInput | undefined
+    let dispatchStarted = false
     try {
       const candidate = chat.queue.find(item => item.delivery === "steer" && !item.editing) ?? chat.queue[0]
       const reference = candidate?.prompt ?? chat.last
@@ -215,6 +217,7 @@ export class BBRuns {
       }
       if (candidate.editing || ["failed", "uncertain", "sending"].includes(candidate.status)) return
       priorSentAt = candidate.sentAt
+      attempt = candidate
       candidate.status = "sending"; candidate.sentAt = Date.now(); chat.last = candidate.prompt; chat.awaiting = true; chat.error = ""; candidate.prompt.delivery = candidate.delivery
       await this.save(chat)
       if (chat.paused) {
@@ -223,6 +226,7 @@ export class BBRuns {
       }
       const admission = new AbortController()
       this.admissions.set(id, admission)
+      dispatchStarted = true
       if (await this.dispatch(candidate.prompt, admission.signal) === "not-sent") {
         this.unsent(chat, candidate, priorSentAt)
         await this.save(chat); return
@@ -233,13 +237,22 @@ export class BBRuns {
       const failure = this.admissions.get(id)?.signal.aborted ? "bb.error.deliveryUnknown" : String(error)
       const item = chat.queue.find(row => row.status === "sending")
       if (item) {
-        item.status = error instanceof UnsentError && priorSentAt === undefined ? "failed" : "uncertain"
-        if (error instanceof UnsentError) item.sentAt = priorSentAt
+        const unsent = error instanceof UnsentError || (item === attempt && !dispatchStarted)
+        item.status = unsent && priorSentAt === undefined ? "failed" : "uncertain"
+        if (unsent) item.sentAt = priorSentAt
         item.error = failure; chat.awaiting = false
       }
       chat.error = failure
       if (chat.goal?.status === "active" && /429|quota|rate.?limit/i.test(chat.error)) { chat.goal.status = "usageLimited"; chat.goal.reason = chat.error }
-      await this.save(chat)
+      await this.save(chat).catch(saveError => {
+        // Background work cannot acknowledge this state as durable. Pause in
+        // memory, notify the UI and leave the previous journal intact for recovery.
+        chat.paused = true; chat.awaiting = false; chat.error = String(saveError)
+        if (chat.goal?.status === "active") {
+          chat.goal.status = "paused"; chat.goal.reason = chat.error; chat.goal.elapsed = Date.now() - chat.goal.started
+        }
+        this.changed(chat.sessionID)
+      })
     } finally { this.admissions.delete(id); this.active.delete(id) }
   }
   private unsent(chat: ChatRun, item: QueuedInput, priorSentAt: number | undefined) {

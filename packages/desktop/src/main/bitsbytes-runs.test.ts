@@ -439,3 +439,84 @@ test("only an idle-waiting queue uses busy summaries; steer, acknowledgement and
   expect(f.inspections[baseline]).toBeUndefined()
   expect(f.runs.get("ses_test").goal?.objective).toBe("Account for all prior tokens")
 })
+
+test.each(["before", "after", "goal"])("journal failure %s dispatch pauses background work without losing delivery history", async phase => {
+  const folder = await mkdtemp(join(tmpdir(), "bb-runs-test-"))
+  const state: Inspection = { busy: false, messages: [] }
+  const sent: RunPrompt[] = []
+  const changed: string[] = []
+  let inspections = 0
+  let durable = ""
+  const temporary = join(folder, "chat-runs.json.tmp")
+  const runs = new BBRuns(folder, async () => { inspections++; return structuredClone(state) }, async prompt => {
+    sent.push(structuredClone(prompt))
+    state.messages.push({ id: prompt.id, text: prompt.text, tokens: 0, tools: 0 })
+    if (phase === "after" && sent.length === 1) {
+      durable = await readFile(join(folder, "chat-runs.json"), "utf8")
+      await mkdir(temporary)
+    }
+  }, id => changed.push(id))
+  fixtures.push({ runs, folder })
+  await runs.start(); runs.close()
+  runs.get("ses_storage").paused = true
+  const prompt: RunPrompt = { sessionID: "ses_storage", directory: folder, id: "msg_saved", text: "Retain the exact saved source 🌿", files: [{ uri: "bitsbytes://transcript/frozen?revision=2" }], goal: phase === "goal" }
+  await runs.call("admit", { prompt })
+  durable = await readFile(join(folder, "chat-runs.json"), "utf8")
+  runs.get(prompt.sessionID).paused = false
+  if (phase !== "after") await mkdir(temporary)
+  await runs.pump(prompt.sessionID)
+  const chat = runs.get(prompt.sessionID)
+  expect(chat.paused).toBe(true)
+  expect(chat.awaiting).toBe(false)
+  expect(chat.error).toContain("chat-runs.json.tmp")
+  expect(chat.queue[0].status).toBe(phase === "after" ? "uncertain" : "failed")
+  expect(typeof chat.queue[0].sentAt).toBe(phase === "after" ? "number" : "undefined")
+  expect(chat.queue[0].prompt).toMatchObject(JSON.parse(durable).ses_storage.queue[0].prompt)
+  expect(changed).toHaveLength(phase === "after" ? 3 : 2)
+  expect(await readFile(join(folder, "chat-runs.json"), "utf8")).toBe(durable)
+  if (phase === "goal") {
+    expect(chat.goal?.status).toBe("paused")
+    expect(chat.goal?.objective).toBe(prompt.text)
+    expect(chat.goal?.reason).toContain("chat-runs.json.tmp")
+  }
+  const inspected = inspections
+  await runs.pump(prompt.sessionID)
+  expect(inspections).toBe(inspected)
+  expect(sent).toHaveLength(phase === "after" ? 1 : 0)
+  await rmdir(temporary)
+  await runs.call("resume", { sessionID: prompt.sessionID })
+  for (let index = 0; index < 100; index++) {
+    await new Promise(resolve => setTimeout(resolve, 5))
+    await runs.pump(prompt.sessionID)
+    if (!chat.queue.length) break
+  }
+  expect(sent).toHaveLength(1)
+  expect(sent[0]).toMatchObject({ id: prompt.id, files: prompt.files })
+  expect(chat.queue).toHaveLength(0)
+  if (phase !== "goal") expect(sent[0].text).toBe(prompt.text)
+  else expect(chat.goal?.status).toBe("paused")
+})
+
+test("a failed retry journal preserves an earlier uncertain attempt and reconciles its late acknowledgement", async () => {
+  const f = await fixture()
+  f.runs.close()
+  f.runs.get("ses_test").paused = true
+  await f.runs.call("admit", { prompt: f.prompt("msg_prior_storage") })
+  const chat = f.runs.get("ses_test"), item = chat.queue[0]
+  item.sentAt = 42
+  await f.runs.call("mode", { sessionID: chat.sessionID, mode: "normal" })
+  const temporary = join(f.folder, "chat-runs.json.tmp")
+  await mkdir(temporary)
+  chat.paused = false; f.state.busy = false
+  await f.runs.pump(chat.sessionID)
+  expect(chat.paused).toBe(true)
+  expect(item.status).toBe("uncertain")
+  expect(item.sentAt).toBe(42)
+  expect(f.sent).toHaveLength(0)
+  await rmdir(temporary)
+  f.state.messages.push({ id: item.id, text: "Original request acknowledged", tools: 0, tokens: 0 })
+  await f.runs.call("resume", { sessionID: chat.sessionID })
+  await f.settle()
+  expect(chat.queue).toHaveLength(0)
+  expect(f.sent).toHaveLength(0)
+})

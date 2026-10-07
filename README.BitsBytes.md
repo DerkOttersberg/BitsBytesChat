@@ -20,6 +20,8 @@ Spreadsheet preview pages also respect a byte budget. Long displayed values/form
 
 Stop attempts to interrupt an active model request even when saving the queue pause fails. Both devices still show the storage error. Desktop notifications follow the displayed layout after navigation.
 
+A background queue write failure pauses automatic work and shows its error without an unhandled rejection. Recovery retains the saved source and earlier admission history.
+
 ## New in 0.3.4
 
 - Unconfirmed engine admission now becomes a visible recoverable request after its timeout, without an endless busy state or automatic duplicate. A late acknowledgement reconciles the original message.
