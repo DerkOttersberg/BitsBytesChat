@@ -12,33 +12,17 @@ If a Python environment points at an absent installation, startup repairs its ho
 
 ## Unreleased follow-up
 
-Plan tabs retain a selected historical revision through background updates. Revert restores that selected source; Save creates a new revision. Failed or delayed panel reads preserve the current content. Plan/Goal panel refreshes omit unrelated frozen request copies while full queue editing and recovery remain available.
+The verified changes on `chat-reliability` are available in [draft PR #1](https://github.com/DerkOttersberg/BitsBytesChat/pull/1). The published installer remains `v0.3.4`. [VERIFICATION.md](VERIFICATION.md) records the reproduced failures, checks, measurements and remaining limits.
 
-Reliability changes on `chat-reliability` preserve queue controls during slow engine reads, recover temporary phone polling failures and damaged chat journals, and release closed browser resources. Stop also cancels prompt preparation and admission transport for that chat. An unsent request stays available for Resume; an admission already attempted is reconciled before retry. Stopping or failing a later preparation cannot erase uncertainty from an earlier attempt. Proven unsent failures retain their recovery error without repeatedly reading history. Busy queue polling avoids repeatedly downloading the full history, and phone status polling omits unused frozen prompt/draft copies. Phone updates retain unchanged message nodes and their selection/focus. CSV preview paging and file checks retain less temporary data; wide CSV previews now show the existing 100-column notice.
+Queue controls remain responsive during slow engine reads. Stop cancels that chat's preparation and admission transport, and still attempts interruption if saving the pause fails. Unsent work stays available for Resume; attempted admission is reconciled before retry. A later stopped preparation cannot erase earlier delivery uncertainty. Failed durable writes pause automatic work, retain the error and require explicit Resume after storage returns. Busy polling avoids repeatedly downloading full history when only status is needed.
 
-Large document inspections use saved numbered source parts, so the agent can read a complete source in bounded responses. Subsequent parts keep the inspected version even if its original file changes; a fresh inspection reads the latest file. Small Office/PDF/text inspections keep their structured results. These changes are verified source work; the published installer remains `v0.3.4`. See `VERIFICATION.md` for evidence and limits.
+Desktop controls apply the latest read for their current chat, show temporary read errors until a successful refresh and ignore late responses after closure. Plan tabs retain the selected historical revision through background updates; Revert restores it and Save creates a new revision. Plan/Goal panels omit unrelated frozen request copies while complete queue editing and recovery remain available. Closed document/browser panels ignore late reads, a replacement PDF clears an earlier preview error, and delayed browser metadata cannot overwrite a newer address. Closed browser resources are released.
 
-Spreadsheet preview pages also respect a byte budget. Long displayed values/formulas carry a shortening notice; saved files stay complete. Navigation follows actual page sizes on both devices.
+Large document inspections return numbered parts from a saved snapshot. Later parts keep that inspected version; a fresh inspection reads the latest source. File checks, CSV paging and text previews retain less temporary data. Spreadsheet pages respect a byte budget and follow their actual row count on both devices. Shortened values/formulas and previews limited to 100 columns carry visible notices; saved files remain complete. Phone downloads stream the exact selected saved revision, including recovered PDF previews.
 
-Stop attempts to interrupt an active model request even when saving the queue pause fails. Both devices still show the storage error. Desktop notifications follow the displayed layout after navigation.
+Phone status polling omits unused frozen prompts and drafts. Updates retain unchanged message nodes, selection and focus, and temporary polling failures can recover. The complete source stays in the host journal and reaches the engine through Resume. Stop clears waiting after confirmed admission and restores idle controls. Storage and missing-source errors remain visible on both devices.
 
-A background queue write failure pauses automatic work and shows its error without an unhandled rejection. Recovery retains the saved source and earlier admission history.
-
-Damaged saved panel layouts retain usable neighboring tabs instead of preventing a chat from opening. The original layout remains available in a local recovery copy.
-
-A temporary startup journal-write failure preserves saved work and opens chats paused. Unreadable journals remain protected. Development and isolated QA launches leave the installed Windows URL handler alone.
-
-A rejected admission or Resume stays paused after storage returns; explicit Resume is required before automatic work can continue.
-
-Damaged queued editing metadata cannot block the composer. Queued images keep separate identities and sources, including identical filenames, historical drafts and Side chat transfers.
-
-Phone downloads stream the selected saved revision, including recovered PDF previews. Readable damaged document registries keep valid neighbors and exact recovery copies; unreadable registries fail visibly while preserving their saved history.
-
-Document publication retries wait for their saved registry entry. Preview-save failures retain an error and can recover through Retry after storage returns, keeping original sources and revision numbers.
-
-Desktop chat controls ignore older refresh responses. Temporary read errors remain visible until a successful read, and closed chats ignore late responses.
-
-Closed document and browser panels ignore late reads. A valid replacement PDF clears an earlier preview error, and a delayed browser snapshot cannot overwrite a newer address.
+Damaged readable chat journals, document registries and saved layouts retain usable neighbors and recovery copies. Unreadable journals/registries stay protected and fail visibly. Temporary startup write failures preserve saved work and open chats paused. Damaged queued editing metadata cannot block the composer. Queued images retain separate identities and sources, including identical filenames, historical drafts and Side chat transfers. Document publication retries wait for a saved registry entry; preview-save errors can recover through Retry without adding a revision or changing the source. Development and isolated QA launches leave installed Windows URL registration alone.
 
 ## New in 0.3.4
 
