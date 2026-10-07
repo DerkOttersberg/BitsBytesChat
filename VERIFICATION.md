@@ -18,6 +18,8 @@ The installer and checksum are published in the private [v0.3.4 release](https:/
 
 The final real-provider suite on packaged 0.3.4 passed **four checks** with **GPT-5.6 Luna**: streamed completion, follow-up context, inherited context in an independently rendered side chat, and tool execution with file read-back. It ran at the connection's natural refresh threshold. Automatic refresh extended the token expiry from 10:54:49 to 11:54:04 Amsterdam, and the updated encrypted credentials were preserved with the original-file conflict check. No credential conflict, preservation error or renderer error occurred. `live-refresh-034-final.json` records these results and expiry timestamps without tokens. Stronger models were not needed for any morning live test.
 
+A final audit of all six successful saved live runs confirms that the engine-recorded assistant model IDs are exclusively `gpt-5.6-luna`, matching the selected cheap test model; no stronger model was used implicitly. `live-model-audit-final.json` records model IDs, check counts and error counts without conversation text or credentials.
+
 ## 0.3.3 morning verification — 7 October 2026
 
 The Windows build and both CMD launchers target **0.3.3**. Source is backed up with the complete upstream history in the private `DerkOttersberg/BitsBytesChat` repository. Generated packages, private test data, audio, models and encrypted credentials remain outside Git. The new scripts make the checks reproducible; older results below remain historical evidence.
