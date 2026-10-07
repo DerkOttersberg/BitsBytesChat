@@ -62,6 +62,7 @@ import LegacyLayout from "@/pages/layout"
 import NewLayout from "@/pages/layout-new"
 import { ErrorPage } from "./pages/error"
 import { useCheckServerHealth } from "./utils/server-health"
+import { setV2Toast } from "./utils/toast"
 import { legacySessionHref, legacySessionServer, requireServerKey, sessionHref } from "./utils/session-route"
 import { createSessionLineage } from "@/pages/session/session-lineage"
 
@@ -298,6 +299,7 @@ function BodyDesignClass() {
     if (typeof document === "undefined") return
 
     const enabled = settings.general.newLayoutDesigns()
+    setV2Toast(enabled)
     document.body.toggleAttribute("data-new-layout", enabled)
     document.body.classList.toggle("text-12-regular", !enabled)
     document.body.classList.toggle("font-(family-name:--font-family-text)", enabled)

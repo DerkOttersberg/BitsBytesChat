@@ -1,16 +1,14 @@
-import { createEffect, Suspense, type ParentProps } from "solid-js"
+import { Suspense, type ParentProps } from "solid-js"
 import { createStore } from "solid-js/store"
 import { DebugBar } from "@/components/debug-bar"
 import { TabsInfoPopup } from "@/components/help-button"
 import { Titlebar, type TitlebarUpdate } from "@/components/titlebar"
 import { usePlatform } from "@/context/platform"
-import { setV2Toast, ToastRegion } from "@/utils/toast"
+import { ToastRegion } from "@/utils/toast"
 
 export default function NewLayout(props: ParentProps) {
   const platform = usePlatform()
   const [state, setState] = createStore({ debugTools: true })
-
-  createEffect(() => setV2Toast(true))
 
   const update: TitlebarUpdate = {
     version: () => {

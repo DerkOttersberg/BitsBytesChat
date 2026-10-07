@@ -288,7 +288,10 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     serverSync().session.set("todo", sessionID, [])
 
     input.onAbort?.()
-    await platform.bitsbytes?.call("runs.stop", { sessionID })
+    // A storage failure must remain visible without preventing interruption.
+    await platform.bitsbytes?.call("runs.stop", { sessionID }).catch((error) => {
+      showToast({ variant: "error", title: language.t("common.requestFailed"), description: errorMessage(error) })
+    })
 
     const key = pendingKey(sessionID)
     const queued = pending.get(key)

@@ -16,6 +16,7 @@ let mobile: BBMobile,
 const sessions = [{ id: "ses_shared", title: "Laptop conversation", directory: "C:/mobile-test/shared-project" }]
 const frozenSource = "SAVED-QUEUE-CONTEXT 🌿 ".repeat(6000)
 const sessionRead = { held: false, entered: Promise.withResolvers<void>(), release: Promise.withResolvers<void>() }
+const journalFailure = { enabled: false }
 const savedRun = {
   sessionID: "ses_shared",
   queue: [{ id: "msg_pending", status: "pending", delivery: "queue", prompt: { text: frozenSource } }],
@@ -82,7 +83,10 @@ const host = {
   },
   call: async (method: string, args: Record<string, unknown>) => {
     calls.push({ method, args })
-    if (method === "runs.stop") savedRun.paused = true
+    if (method === "runs.stop") {
+      savedRun.paused = true
+      if (journalFailure.enabled) throw Error("Journal storage unavailable")
+    }
     return method === "access.get" ? { mode: "ask" } : { ok: true }
   },
   rpc: async (method: string) => {
@@ -250,6 +254,34 @@ test("phone Stop uses a known host directory without another metadata read", asy
     assert.equal(calls.findLast(row => row.method === "/session/ses_shared/abort")?.directory, sessions[0].directory)
   } finally { savedRun.last.directory = undefined }
 })
+
+for (const known of [false, true]) {
+  test(`phone Stop interrupts after a journal failure with a ${known ? "known" : "fallback"} directory`, async () => {
+    savedRun.last.directory = known ? sessions[0].directory : undefined
+    savedRun.paused = false
+    journalFailure.enabled = true
+    const offset = calls.length
+    try {
+      const response = await api("stop", { sessionID: "ses_shared" })
+      assert.equal(response.status, 400)
+      assert.equal(JSON.parse(response.body).error, "Journal storage unavailable")
+      assert.equal(savedRun.paused, true)
+      assert.deepEqual(
+        calls.slice(offset).map((row) => row.method),
+        known
+          ? ["runs.stop", "/session/ses_shared/abort"]
+          : ["runs.stop", "/session/ses_shared", "/session/ses_shared/abort"],
+      )
+      assert.equal(
+        calls.findLast((row) => row.method === "/session/ses_shared/abort")?.directory,
+        sessions[0].directory,
+      )
+    } finally {
+      savedRun.last.directory = undefined
+      journalFailure.enabled = false
+    }
+  })
+}
 
 test("resumable upload journal, exact retries, interruption tail and device revocation", async () => {
   const result = await http("/upload", "POST", {

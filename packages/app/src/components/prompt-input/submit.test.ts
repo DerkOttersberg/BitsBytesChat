@@ -40,6 +40,10 @@ let selected = "/repo/worktree-a"
 let variant: string | undefined
 let permissionServer = "server-a"
 let createSessionGate: Promise<void> | undefined
+let desktopStop = false
+let stopStorageError: Error | undefined
+const stopCalls: string[] = []
+const stopToasts: unknown[] = []
 
 let promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
 const [promptStore, setPromptStore] = createStore<PromptStore>({
@@ -75,6 +79,9 @@ const clientFor = (directory: string) => {
   return {
     api: {
       session: {
+        interrupt: async (input: { sessionID: string }) => {
+          stopCalls.push(`interrupt:${input.sessionID}`)
+        },
         create: async (input: (typeof sessionCreateInputs)[number]) => {
           await createSessionGate
           const location = input.location?.directory ?? directory
@@ -132,13 +139,15 @@ beforeAll(async () => {
     },
   }))
 
-  mock.module("@opencode-ai/ui/toast", () => ({
-    Toast: { Region: () => null },
-    showToast: () => 0,
+  mock.module("@/utils/toast", () => ({
+    showToast: (value: unknown) => {
+      stopToasts.push(value)
+      return 0
+    },
   }))
 
-  mock.module("@opencode-ai/core/util/encode", () => ({
-    base64Encode: (value: string) => value,
+  mock.module("@/context/settings", () => ({
+    useSettings: () => ({ general: { followup: () => "queue" } }),
   }))
 
   mock.module("@/context/local", () => ({
@@ -265,6 +274,14 @@ beforeAll(async () => {
   mock.module("@/context/platform", () => ({
     usePlatform: () => ({
       fetch: fetch,
+      bitsbytes: desktopStop
+        ? {
+            call: async (method: string, args: { sessionID: string }) => {
+              stopCalls.push(`${method}:${args.sessionID}`)
+              if (stopStorageError) throw stopStorageError
+            },
+          }
+        : undefined,
     }),
   }))
 
@@ -300,8 +317,59 @@ beforeEach(() => {
   variant = undefined
   permissionServer = "server-a"
   createSessionGate = undefined
+  desktopStop = false
+  stopStorageError = undefined
+  stopCalls.length = 0
+  stopToasts.length = 0
   serverSessionSyncs = 0
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
+})
+
+describe("prompt Stop", () => {
+  function submission() {
+    return createPromptSubmit({
+      prompt,
+      info: () => undefined,
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => true,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: () => 0,
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+    })
+  }
+
+  test("interrupts after persisting the desktop queue pause", async () => {
+    params.id = "active-session"
+    desktopStop = true
+    await submission().abort()
+    expect(stopCalls).toEqual(["runs.stop:active-session", "interrupt:active-session"])
+    expect(stopToasts).toEqual([])
+  })
+
+  test("shows the storage error and still interrupts the active session", async () => {
+    params.id = "active-session"
+    desktopStop = true
+    stopStorageError = new Error("Journal storage is unavailable")
+    await submission().abort()
+    expect(stopCalls).toEqual(["runs.stop:active-session", "interrupt:active-session"])
+    expect(stopToasts).toEqual([
+      { variant: "error", title: "common.requestFailed", description: "Journal storage is unavailable" },
+    ])
+  })
+
+  test("interrupts when there is no desktop bridge", async () => {
+    params.id = "active-session"
+    await submission().abort()
+    expect(stopCalls).toEqual(["interrupt:active-session"])
+    expect(stopToasts).toEqual([])
+  })
 })
 
 describe("prompt submit worktree selection", () => {

@@ -33,7 +33,7 @@ import { createStore, produce, reconcile } from "solid-js/store"
 import { DragDropProvider, DragDropSensors, DragOverlay, SortableProvider, closestCenter } from "@thisbeyond/solid-dnd"
 import type { DragEvent } from "@thisbeyond/solid-dnd"
 import { useProviders } from "@/hooks/use-providers"
-import { dismissToast, setV2Toast, showToast, ToastRegion } from "@/utils/toast"
+import { dismissToast, showToast, ToastRegion } from "@/utils/toast"
 import { useServerSDK } from "@/context/server-sdk"
 import { normalizeProjectInfo } from "@/context/global-sync/utils"
 import { clearWorkspaceTerminals } from "@/context/terminal"
@@ -121,7 +121,6 @@ export default function LegacyLayout(props: ParentProps) {
   const command = useCommand()
   const theme = useTheme()
   const language = useLanguage()
-  createEffect(() => setV2Toast(false))
   const initialDirectory = decode64(params.dir)
   const route = createMemo(() => {
     const slug = params.dir

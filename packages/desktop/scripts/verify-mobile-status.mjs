@@ -1,8 +1,8 @@
 import assert from "node:assert/strict"
 import { createRequire } from "node:module"
 import { createServer } from "node:http"
-import { mkdir, readFile, writeFile, symlink } from "node:fs/promises"
-import { join, resolve } from "node:path"
+import { mkdir, readFile, rmdir, writeFile, symlink } from "node:fs/promises"
+import { join, resolve, sep } from "node:path"
 import { randomUUID } from "node:crypto"
 import { bbt } from "../src/bitsbytes/copy.ts"
 
@@ -10,6 +10,8 @@ const root = resolve("../..")
 const { _electron, chromium } = createRequire(join(root, ".tools/qa/package.json"))("playwright")
 const profile = join(root, ".tools/qa/mobile-status-" + randomUUID()),
   data = join(profile, "BitsBytesChat")
+const storageDevice = process.env.BB_STOP_STORAGE_FAILURE,
+  observing = process.env.BB_STOP_STORAGE_OBSERVE === "1"
 const report = { checks: [], errors: [], responseBytes: [], providerRequests: 0, frozenSourceReachedProvider: false }
 const slow = {
   entered: Promise.withResolvers(),
@@ -305,35 +307,83 @@ try {
     const active = await call("runs.get", { sessionID: stopID })
     assert.equal(active.queue.length, 0)
     assert.equal(active.awaiting, true)
-    const stopResponse = phone.waitForResponse(
-      (response) => response.url().endsWith("/api") && response.request().postDataJSON()?.method === "stop",
-    )
-    await phone.locator("#stop").click()
-    const acknowledgement = await stopResponse
-    assert.ok(acknowledgement.ok())
-    const stopBody = await acknowledgement.text()
-    report.stopResponse = { status: acknowledgement.status(), bytes: Buffer.byteLength(stopBody) }
-    assert.doesNotThrow(() => JSON.parse(stopBody))
-    await bounded(slow.disconnected.promise, "Stop did not disconnect its stalled provider request")
-    const stopped = await chat("stopped", stopID)
-    report.stopHost = {
-      paused: stopped.run.paused,
-      awaiting: stopped.run.awaiting,
-      queued: stopped.run.queue.length,
-      busy: Boolean(stopped.status && stopped.status.type !== "idle"),
+    const temporary = join(data, "chat-runs.json.tmp")
+    if (storageDevice) {
+      assert.ok(resolve(temporary).startsWith(resolve(profile) + sep))
+      for (let index = 0; index < 100; index++) {
+        const saved = JSON.parse(await readFile(join(data, "chat-runs.json"), "utf8"))[stopID]
+        if (saved && !saved.queue.length) break
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      await mkdir(temporary)
     }
-    assert.equal(stopped.run.paused, true)
-    assert.equal(stopped.run.awaiting, false)
-    assert.equal(report.stopHost.busy, false)
-    await phone.locator("#stop").waitFor({ state: "hidden", timeout: 15000 })
-    assert.equal(await phone.locator("#notice").isVisible(), false)
-    assert.equal(report.providerRequests, 2)
-    check(
-      "Phone Stop aborts its active provider, clears host waiting after acknowledgement and restores the idle composer",
-    )
+    if (storageDevice === "desktop") {
+      await desktop.evaluate((detail) => window.dispatchEvent(new CustomEvent("bitsbytes:session", { detail })), {
+        directory: active.last.directory,
+        sessionID: stopID,
+      })
+      await desktop
+        .locator(`.bb-workspace-chat[data-bb-chat="${stopID}"]`)
+        .getByRole("button", { name: "Stop", exact: true })
+        .click()
+      if (!observing) await desktop.getByText("Request failed", { exact: true }).waitFor({ timeout: 15000 })
+    } else {
+      const stopResponse = phone.waitForResponse(
+        (response) => response.url().endsWith("/api") && response.request().postDataJSON()?.method === "stop",
+      )
+      await phone.locator("#stop").click()
+      const acknowledgement = await stopResponse,
+        stopBody = await acknowledgement.text()
+      assert.equal(acknowledgement.ok(), !storageDevice)
+      report.stopResponse = { status: acknowledgement.status(), bytes: Buffer.byteLength(stopBody) }
+      assert.doesNotThrow(() => JSON.parse(stopBody))
+    }
+    if (storageDevice && observing) {
+      const disconnected = await Promise.race([
+        slow.disconnected.promise.then(() => true),
+        new Promise((resolve) => setTimeout(() => resolve(false), 1000)),
+      ])
+      const stopped = await chat("stop-storage-observation", stopID)
+      report.stopStorage = {
+        device: storageDevice,
+        disconnected,
+        paused: stopped.run.paused,
+        awaiting: stopped.run.awaiting,
+        busy: Boolean(stopped.status && stopped.status.type !== "idle"),
+      }
+      console.log("OBSERVATION", JSON.stringify(report.stopStorage))
+      await rmdir(temporary)
+    } else {
+      await bounded(slow.disconnected.promise, "Stop did not disconnect its stalled provider request")
+      const stopped = await chat("stopped", stopID)
+      report.stopHost = {
+        paused: stopped.run.paused,
+        awaiting: stopped.run.awaiting,
+        queued: stopped.run.queue.length,
+        busy: Boolean(stopped.status && stopped.status.type !== "idle"),
+      }
+      assert.equal(stopped.run.paused, true)
+      assert.equal(stopped.run.awaiting, false)
+      assert.equal(report.stopHost.busy, false)
+      await phone.locator("#stop").waitFor({ state: "hidden", timeout: 15000 })
+      if (storageDevice) {
+        await rmdir(temporary)
+        await call("runs.stop", { sessionID: stopID })
+        assert.equal(JSON.parse(await readFile(join(data, "chat-runs.json"), "utf8"))[stopID].paused, true)
+        if (storageDevice === "phone") assert.equal(await phone.locator("#notice").isVisible(), true)
+      } else assert.equal(await phone.locator("#notice").isVisible(), false)
+      assert.equal(report.providerRequests, 2)
+      check(
+        storageDevice
+          ? "Stop interrupts its active provider despite a journal failure, exposes the save error and recovers persistence"
+          : "Phone Stop aborts its active provider, clears host waiting after acknowledgement and restores the idle composer",
+      )
+    }
   }
-  assert.deepEqual(report.errors, [])
-  check("Phone timeline stays compact with no renderer errors")
+  if (!observing) {
+    assert.deepEqual(report.errors, [])
+    check("Phone timeline stays compact with no renderer errors")
+  }
 } catch (error) {
   report.failure = String(error)
   console.error(error)

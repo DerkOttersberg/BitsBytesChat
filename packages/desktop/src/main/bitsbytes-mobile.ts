@@ -557,11 +557,18 @@ export class BBMobile {
     if (method === "preview-retry") return this.host.artifacts.retry(safeID(args.id))
     if (method === "access") return this.host.call("access.set", { sessionID: id, mode: args.mode })
     if (method === "stop") {
-      await this.host.call("runs.stop", { sessionID: id })
+      const saved = await this.host.call("runs.stop", { sessionID: id }).then(
+        () => ({ ok: true }) as const,
+        (error) => ({ ok: false, error }) as const,
+      )
       const run = this.host.runs.get(id)
-      const directory = run.last?.directory ?? run.queue[0]?.prompt.directory
-        ?? (await this.host.engineFetch<{ directory: string }>(`/session/${id}`)).directory
-      return this.host.engineFetch(`/session/${id}/abort`, { method: "POST" }, directory)
+      const directory =
+        run.last?.directory ??
+        run.queue[0]?.prompt.directory ??
+        (await this.host.engineFetch<{ directory: string }>(`/session/${id}`)).directory
+      const interrupted = await this.host.engineFetch(`/session/${id}/abort`, { method: "POST" }, directory)
+      if (!saved.ok) throw saved.error
+      return interrupted
     }
     if (method === "resume") return this.host.call("runs.resume", { sessionID: id })
     if (method === "permission" || method === "question") {
