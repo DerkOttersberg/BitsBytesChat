@@ -15,6 +15,7 @@ const profile = root + '/.tools/qa/release-03-' + Date.now()
 const data = profile + '/BitsBytesChat'
 const report = { checks: [], errors: [], requests: [] }
 const requests = []
+const firstSlow = { entered: false, active: true, release: Promise.withResolvers() }
 let qaDocument = ''
 const check = label => { report.checks.push(label); console.log('PASS', label) }
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -28,7 +29,10 @@ const fixture = createServer(async (req, res) => {
   const named = suffix => input.tools?.find(tool => tool.function?.name.endsWith(suffix))?.function.name
   const calls = []
   let text = 'Completed this request.'
-  if (latest.includes('slow-first') && !hasTool) await wait(6000)
+  if (latest.includes('slow-first') && !hasTool) {
+    if (firstSlow.active) { firstSlow.active = false; firstSlow.entered = true; await firstSlow.release.promise }
+    else await wait(6000)
+  }
   if (latest.includes('plan-probe')) {
     if (!hasTool && named('bash')) calls.push({ name: named('bash'), args: { command: `echo forbidden > "${data}\\plan-forbidden.txt"`, description: 'Read-only Plan boundary probe' } })
     else text = '<proposed_plan>\n# Verification plan\n\n1. Inspect sources.\n2. Create the agreed output.\n3. Verify the saved file.\n</proposed_plan>'
@@ -80,11 +84,13 @@ try {
   await editor.fill('ordinary request'); assert.equal(await page.locator('input[type=range]').count(),0); await main.getByRole('button', { name:'Send message', exact:true }).waitFor()
   check('Composer has circular send controls, standard reasoning options and no slider')
 
-  await editor.fill('slow-first'); await editor.press('Enter'); await wait(1500)
+  await editor.fill('slow-first'); await editor.press('Enter')
+  for (let index=0; index<150 && !firstSlow.entered; index++) await wait(300)
+  assert.equal(firstSlow.entered,true,'Initial provider request did not reach its held fixture')
   await editor.fill('queued follow-up'); await editor.press('Enter'); await page.locator('[data-component=durable-queue]').waitFor(); assert.ok((await call('runs.get',{sessionID:chat.id})).queue.length)
   await page.locator('.bb-queue-row').filter({hasText:'queued follow-up'}).getByRole('button',{name:'Queued message actions'}).click(); await page.getByRole('menuitem',{name:'Edit',exact:true}).click(); await page.waitForFunction(()=>document.querySelector('.bb-workspace-chat [contenteditable=true]')?.textContent==='queued follow-up'); assert.ok((await call('runs.get',{sessionID:chat.id})).queue.some(item=>item.editing))
   await editor.fill('edited queued follow-up'); await editor.press('Enter')
-  const other = await create('QA background chat'); await open(other); await idle(chat)
+  const other = await create('QA background chat'); await open(other); firstSlow.release.resolve(); await idle(chat)
   assert.ok(requests.some(request=>JSON.stringify(request.messages).includes('edited queued follow-up')))
   assert.ok(!requests.some(request=>JSON.stringify(request.messages).includes('"queued follow-up"')))
   check('Queue edits retain original until Send; saved follow-up runs while another chat is visible')
@@ -159,4 +165,4 @@ try {
   await page.screenshot({path:root+'/.tools/qa/results/'+tag+'.png'})
   assert.equal(report.errors.length,0,report.errors.join('\n'))
 } catch(error) { report.failure=String(error);console.error('FAIL',String(error));if(page){console.log((await page.locator('body').innerText()).slice(0,1800));await page.screenshot({path:root+'/.tools/qa/results/'+tag+'-failure.png'})}process.exitCode=1 }
-finally { report.requests=requests.map(request=>({model:request.model,tools:request.tools?.map(tool=>tool.function?.name),messages:request.messages?.length}));await writeFile(root+'/.tools/qa/results/'+tag+'.json',JSON.stringify(report,null,2));await app.close();fixture.close() }
+finally { firstSlow.release.resolve(); report.requests=requests.map(request=>({model:request.model,tools:request.tools?.map(tool=>tool.function?.name),messages:request.messages?.length}));await writeFile(root+'/.tools/qa/results/'+tag+'.json',JSON.stringify(report,null,2));await app.close();fixture.close() }

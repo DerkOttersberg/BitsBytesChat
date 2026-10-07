@@ -11,7 +11,7 @@ import { usePrompt } from "../context/prompt"
 import { useLocal } from "../context/local"
 import { draftAccessKey } from "./chat-access"
 import type { FollowupDraft } from "./prompt-input/submit"
-import { createLegacyBlobReference } from "../utils/draft-store"
+import { readQueuedDraft, restoreQueuedDraft } from "./chat-run-draft"
 import "./chat-runs.css"
 
 export type RunState = {
@@ -56,23 +56,19 @@ export function ChatRuns() {
   onCleanup(() => clearInterval(timer))
   const action = (name: string, args: Record<string, unknown> = {}) => void run.call(name, args).catch(() => undefined)
   const open = (kind: "plan" | "goal") => window.dispatchEvent(new CustomEvent("bitsbytes:run-panel", { detail: { kind, sessionID: run.identity() } }))
-  const title = (item: RunState["queue"][number]) => item.prompt.draft?.prompt.map(part => "content" in part ? part.content : `[${part.filename}]`).join("").trim() || item.prompt.text
+  const title = (item: RunState["queue"][number]) => readQueuedDraft(item.prompt.draft)?.prompt.map(part => "content" in part ? part.content : `[${part.filename}]`).join("").trim() || item.prompt.text
   async function edit(item: RunState["queue"][number]) {
-    if (!item.prompt.draft) return
+    const draft = readQueuedDraft(item.prompt.draft)
+    if (!draft) return
     await run.call("edit", { id: item.id })
     const model = local.model.current()
     setStore({ editing: item.id, prior: model ? structuredClone(unwrap({ sessionID: run.identity(), sessionDirectory: sdk().directory, prompt: prompt.current(), context: prompt.context.items(), agent: local.agent.current()?.name ?? "build", model: { providerID: model.provider.id, modelID: model.id }, variant: local.model.variant.current() })) : undefined })
-    const parts = await Promise.all(item.prompt.draft.prompt.map(async part => {
-      if (part.type !== "image") return part
-      const image = part as typeof part & { dataUrl?: string }
-      return { ...part, blob: image.dataUrl ? createLegacyBlobReference(image.dataUrl) : part.blob }
-    }))
-    prompt.set(parts)
+    prompt.set(restoreQueuedDraft(draft).prompt)
     for (const context of prompt.context.items()) prompt.context.remove(context.key)
-    for (const context of item.prompt.draft.context) prompt.context.add(context)
-    local.agent.set(item.prompt.draft.agent)
-    local.model.set({ providerID: item.prompt.draft.model.providerID, modelID: item.prompt.draft.model.modelID })
-    local.model.variant.set(item.prompt.draft.variant)
+    for (const context of draft.context) prompt.context.add(context)
+    local.agent.set(draft.agent)
+    local.model.set({ providerID: draft.model.providerID, modelID: draft.model.modelID })
+    local.model.variant.set(draft.variant)
   }
   createEffect(() => { if (store.editing && !run.store.value?.queue.some(item => item.id === store.editing && item.editing)) setStore({ editing: "", prior: undefined }) })
   const goalRequest = (event: Event) => { if ((event as CustomEvent).detail.sessionID !== run.identity()) return; if (run.store.value?.goal && run.store.value.goal.status !== "complete") setStore("confirmGoal", true); else action("goal-draft", { enabled: true }) }
@@ -89,10 +85,10 @@ export function ChatRuns() {
           <Show when={item.error}><span class="bb-queue-error" title={item.error}>{language.t("bitsbytes.deliveryUncertain")}</span></Show>
           <button disabled={item.status === "sending"} title={language.t(item.error ? "bitsbytes.retry" : "bitsbytes.steer")} aria-label={language.t(item.error ? "bitsbytes.retry" : "bitsbytes.steer")} onClick={() => action(item.error ? "retry" : "steer", { id: item.id })}><ModeIcon kind="steer" /></button>
           <MenuV2 placement="top-end"><MenuV2.Trigger as={ButtonV2} size="normal" variant="ghost-muted" aria-label={language.t("bitsbytes.queueActions")} disabled={item.status === "sending"}><span aria-hidden="true">⋯</span></MenuV2.Trigger><MenuV2.Portal><MenuV2.Content>
-            <MenuV2.Item onSelect={() => void edit(item)}>{language.t("bitsbytes.edit")}</MenuV2.Item>
+            <MenuV2.Item disabled={!readQueuedDraft(item.prompt.draft)} onSelect={() => void edit(item)}>{language.t("bitsbytes.edit")}</MenuV2.Item>
             <MenuV2.Item disabled={!index()} onSelect={() => { const ids = run.store.value!.queue.map(row => row.id); [ids[index() - 1], ids[index()]] = [ids[index()], ids[index() - 1]]; action("reorder", { ids }) }}>{language.t("bitsbytes.moveUp")}</MenuV2.Item>
             <MenuV2.Item disabled={index() === (run.store.value?.queue.length ?? 0) - 1} onSelect={() => { const ids = run.store.value!.queue.map(row => row.id); [ids[index() + 1], ids[index()]] = [ids[index()], ids[index() + 1]]; action("reorder", { ids }) }}>{language.t("bitsbytes.moveDown")}</MenuV2.Item>
-            <MenuV2.Item onSelect={() => window.dispatchEvent(new CustomEvent("bitsbytes:side-chat", { detail: { source: run.identity(), directory: sdk().directory, draft: item.prompt.draft, variant: local.model.variant.current() ?? null } }))}>{language.t("bitsbytes.sideChat")}</MenuV2.Item>
+            <MenuV2.Item onSelect={() => { const draft = readQueuedDraft(item.prompt.draft); window.dispatchEvent(new CustomEvent("bitsbytes:side-chat", { detail: { source: run.identity(), directory: sdk().directory, draft: draft ? restoreQueuedDraft(draft) : undefined, variant: local.model.variant.current() ?? null } })) }}>{language.t("bitsbytes.sideChat")}</MenuV2.Item>
           </MenuV2.Content></MenuV2.Portal></MenuV2>
           <button disabled={item.status === "sending"} title={language.t("bitsbytes.delete")} aria-label={language.t("bitsbytes.delete")} onClick={() => action("delete", { id: item.id })}><Icon name="close-small" /></button>
         </div>}</For>

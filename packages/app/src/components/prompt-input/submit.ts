@@ -145,7 +145,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       legacyParts: requestParts, text: requestParts.flatMap(part => part.type === "text" ? [part.text] : []).join("\n"),
       files: requestParts.flatMap(part => part.type === "file" ? [{ uri: part.url, name: part.filename }] : []),
       agents: requestParts.flatMap(part => part.type === "agent" ? [{ name: part.name }] : []),
-      draft: { ...input.draft, prompt: input.draft.prompt.map(part => part.type === "image" ? { type: "image", mime: part.mime, filename: part.filename, dataUrl: encodedImages.find(image => image.filename === part.filename)?.dataUrl } : part) },
+      draft: { ...input.draft, prompt: input.draft.prompt.map(part => part.type === "image" ? { type: "image", id: part.id, mime: part.mime, filename: part.filename, dataUrl: encodedImages.find(image => image.id === part.id)?.dataUrl } : part) },
     } }))
     return true
   }

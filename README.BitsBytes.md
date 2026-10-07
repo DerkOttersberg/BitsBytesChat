@@ -28,6 +28,8 @@ A temporary startup journal-write failure preserves saved work and opens chats p
 
 A rejected admission or Resume stays paused after storage returns; explicit Resume is required before automatic work can continue.
 
+Damaged queued editing metadata cannot block the composer. Queued images keep separate identities and sources, including identical filenames, historical drafts and Side chat transfers.
+
 ## New in 0.3.4
 
 - Unconfirmed engine admission now becomes a visible recoverable request after its timeout, without an endless busy state or automatic duplicate. A late acknowledgement reconciles the original message.
