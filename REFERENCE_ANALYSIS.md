@@ -39,6 +39,8 @@ The Electron host, rather than the mounted composer, owns a persisted per-chat j
 
 Journal acknowledgement waits for the snapshot containing a request, including repeated admission IDs after a write failure. Overlapping queue changes can share one write; changes arriving while it is in flight wait for the next snapshot. This keeps earlier acknowledgements independent of later traffic while retaining the restart pause.
 
+Delivery history belongs to the saved request across retries. If a new preparation is stopped or fails before its POST, an earlier possibly admitted attempt remains uncertain and still requires reconciliation. Only the admission boundary can classify a first preparation failure as proven unsent. This distinction keeps source recovery available without letting Resume silently replay uncertain work.
+
 OpenCode V2 admits Steer at its next safe provider-turn boundary. It cannot rewrite a tool action already executing. Legacy sessions use the retained legacy admission path. OpenAI's documented Responses steering has transport-specific behavior; this app's subscription adapter uses streaming HTTP, so these controls do not claim to expose every native OpenAI WebSocket steering behavior.
 
 Sources: [Prompting](https://learn.chatgpt.com/docs/prompting), [Responses steering](https://developers.openai.com/api/docs/guides/steering), and the installed desktop interface, inspected read-only.

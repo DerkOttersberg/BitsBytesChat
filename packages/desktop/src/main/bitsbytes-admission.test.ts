@@ -13,16 +13,24 @@ async function fixture(protocol: "v1" | "v2") {
     release = Promise.withResolvers<void>()
   const state = {
     hold: "",
+    hideHistory: false,
+    rejectSelection: false,
+    histories: 0,
     requests: [] as { path: string; body: Record<string, unknown> }[],
     prompts: [] as { id: string; text: string }[],
   }
   const http = createServer(async (request, response) => {
-    let source = ""
-    for await (const chunk of request) source += chunk
+    const bytes: Buffer[] = []
+    for await (const chunk of request) bytes.push(chunk)
+    const source = Buffer.concat(bytes).toString("utf8")
     const body = JSON.parse(source || "{}") as Record<string, unknown>
     const path = request.url ?? ""
     if (request.method === "POST") {
       state.requests.push({ path, body })
+      if (state.rejectSelection && path.endsWith("/model")) {
+        response.writeHead(400).end("Unavailable fixture model")
+        return
+      }
       if (path.endsWith("/prompt_async") || path.endsWith("/prompt"))
         state.prompts.push({ id: String(body.messageID ?? body.id), text: "Accepted source" })
       if (state.hold && path.endsWith(state.hold)) {
@@ -32,7 +40,8 @@ async function fixture(protocol: "v1" | "v2") {
       if (!response.destroyed) response.writeHead(204).end()
       return
     }
-    const rows = state.prompts.flatMap((prompt) => [
+    if (path.endsWith("/message") || path.endsWith("/context")) state.histories++
+    const rows = (state.hideHistory ? [] : state.prompts).flatMap((prompt) => [
       { id: prompt.id, type: "user", text: prompt.text },
       { id: "msg_z" + prompt.id, type: "assistant", text: "Completed" },
     ])
@@ -291,4 +300,226 @@ test("synthetic context IDs cannot write outside their context folder", async ()
   ).rejects.toThrow("bb.error.invalidRequest")
   expect(await readdir(f.root)).toEqual([])
   expect(f.state.prompts).toEqual([])
+})
+
+test.each(["v1", "v2"] as const)(
+  "%s a proven source preparation failure stays unsent and retries only after recovery",
+  async (protocol) => {
+    const f = await fixture(protocol),
+      protocols = new Map<string, "v1" | "v2">(),
+      settled = Promise.withResolvers<void>()
+    const source = { available: false }
+    const runs = new BBRuns(
+      f.root,
+      (prompt, options) => inspectEngine(f.server, prompt, protocols, options),
+      (prompt, signal) =>
+        dispatchEngine(f.server, prompt, {
+          protocol,
+          signal,
+          contextRoot: join(f.root, "context"),
+          resolveAttachment: async () => {
+            if (!source.available) throw new Error("bb.error.attachmentMissing")
+          },
+        }),
+      (id) => {
+        if (source.available && !runs.get(id).queue.length) settled.resolve()
+      },
+    )
+    await runs.start()
+    runs.close()
+    runs.get("ses_test").paused = true
+    await runs.call("admit", { prompt: { ...f.prompt, files: [{ uri: "bitsbytes://transcript/source?revision=3" }] } })
+    runs.get("ses_test").paused = false
+    await runs.pump("ses_test")
+    expect(f.state.prompts).toEqual([])
+    expect(runs.get("ses_test")).toMatchObject({
+      awaiting: false,
+      error: "Error: bb.error.attachmentMissing",
+      queue: [{ status: "failed" }],
+    })
+    expect(runs.get("ses_test").queue[0].sentAt).toBeUndefined()
+    const histories = f.state.histories
+    for (let index = 0; index < 3; index++) await runs.pump("ses_test")
+    expect(f.state.histories).toBe(histories)
+    expect(f.state.prompts).toEqual([])
+    expect(JSON.parse(await readFile(join(f.root, "chat-runs.json"), "utf8")).ses_test.queue[0].status).toBe("failed")
+    source.available = true
+    await runs.call("retry", { sessionID: "ses_test", id: "msg_test" })
+    for (let index = 0; index < 100 && runs.get("ses_test").queue.length; index++) {
+      await Bun.sleep(5)
+      await runs.pump("ses_test")
+    }
+    expect(f.state.prompts.map((row) => row.id)).toEqual(["msg_test"])
+    expect(runs.get("ses_test").queue).toHaveLength(0)
+    await settled.promise
+  },
+)
+
+test.each(["v1", "v2"] as const)(
+  "%s Stop during retry preparation preserves the earlier possible admission",
+  async (protocol) => {
+    const f = await fixture(protocol),
+      protocols = new Map<string, "v1" | "v2">(),
+      entered = Promise.withResolvers<void>(),
+      release = Promise.withResolvers<void>(),
+      settled = Promise.withResolvers<void>()
+    const preparation = { calls: 0 }
+    const runs = new BBRuns(
+      f.root,
+      (prompt, options) => inspectEngine(f.server, prompt, protocols, options),
+      (prompt, signal) =>
+        dispatchEngine(f.server, prompt, {
+          protocol,
+          signal,
+          contextRoot: join(f.root, "context"),
+          resolveAttachment: async () => {
+            if (++preparation.calls !== 2) return
+            entered.resolve()
+            await release.promise
+          },
+        }),
+      (id) => {
+        if (preparation.calls === 2 && runs.get(id).paused && runs.get(id).queue[0]?.status === "uncertain")
+          settled.resolve()
+      },
+    )
+    await runs.start()
+    runs.close()
+    runs.get("ses_test").paused = true
+    f.state.hold = protocol === "v1" ? "/prompt_async" : "/prompt"
+    await runs.call("admit", { prompt: { ...f.prompt, files: [{ uri: "bitsbytes://transcript/source?revision=3" }] } })
+    runs.get("ses_test").paused = false
+    const first = runs.pump("ses_test")
+    try {
+      await f.entered.promise
+      await runs.call("stop", { sessionID: "ses_test" })
+      await first
+      const sentAt = runs.get("ses_test").queue[0].sentAt
+      expect(sentAt).toBeDefined()
+      f.state.hideHistory = true
+      f.state.hold = ""
+      await Bun.sleep(5)
+      await runs.call("retry", { sessionID: "ses_test", id: "msg_test" })
+      await entered.promise
+      await runs.call("stop", { sessionID: "ses_test" })
+      release.resolve()
+      await settled.promise
+      expect(runs.get("ses_test")).toMatchObject({
+        paused: true,
+        awaiting: false,
+        queue: [{ status: "uncertain", error: "bb.error.deliveryUnknown", sentAt }],
+      })
+      await runs.call("resume", { sessionID: "ses_test" })
+      for (let index = 0; index < 10; index++) {
+        await Bun.sleep(5)
+        await runs.pump("ses_test")
+      }
+      expect(preparation.calls).toBe(2)
+      expect(f.state.prompts).toHaveLength(1)
+      expect(JSON.parse(await readFile(join(f.root, "chat-runs.json"), "utf8")).ses_test.queue[0].sentAt).toBe(sentAt)
+      f.state.hideHistory = false
+      await runs.pump("ses_test")
+      expect(runs.get("ses_test").queue).toHaveLength(0)
+      expect(f.state.prompts).toHaveLength(1)
+    } finally {
+      release.resolve()
+      f.release.resolve()
+      await first
+      runs.close()
+      for (let index = 0; index < 100 && runs.get("ses_test").queue[0]?.status === "sending"; index++)
+        await Bun.sleep(5)
+    }
+  },
+)
+
+test.each(["v1", "v2"] as const)(
+  "%s failed retry preparation cannot erase a previous possible admission",
+  async (protocol) => {
+    const f = await fixture(protocol),
+      protocols = new Map<string, "v1" | "v2">(),
+      settled = Promise.withResolvers<void>()
+    const preparation = { calls: 0 }
+    const runs = new BBRuns(
+      f.root,
+      (prompt, options) => inspectEngine(f.server, prompt, protocols, options),
+      (prompt, signal) =>
+        dispatchEngine(f.server, prompt, {
+          protocol,
+          signal,
+          contextRoot: join(f.root, "context"),
+          resolveAttachment: async () => {
+            if (++preparation.calls > 1) throw new Error("bb.error.attachmentMissing")
+          },
+        }),
+      (id) => {
+        if (preparation.calls === 2 && runs.get(id).queue[0]?.status !== "sending") settled.resolve()
+      },
+    )
+    await runs.start()
+    runs.close()
+    runs.get("ses_test").paused = true
+    f.state.hold = protocol === "v1" ? "/prompt_async" : "/prompt"
+    await runs.call("admit", { prompt: { ...f.prompt, files: [{ uri: "bitsbytes://transcript/source?revision=3" }] } })
+    runs.get("ses_test").paused = false
+    const first = runs.pump("ses_test")
+    try {
+      await f.entered.promise
+      await runs.call("stop", { sessionID: "ses_test" })
+      await first
+      const sentAt = runs.get("ses_test").queue[0].sentAt
+      expect(sentAt).toBeDefined()
+      f.state.hideHistory = true
+      f.state.hold = ""
+      await Bun.sleep(5)
+      await runs.call("retry", { sessionID: "ses_test", id: "msg_test" })
+      await settled.promise
+      expect(runs.get("ses_test")).toMatchObject({
+        awaiting: false,
+        queue: [{ status: "uncertain", error: "Error: bb.error.attachmentMissing", sentAt }],
+      })
+      await runs.call("resume", { sessionID: "ses_test" })
+      for (let index = 0; index < 10; index++) {
+        await Bun.sleep(5)
+        await runs.pump("ses_test")
+      }
+      expect(preparation.calls).toBe(2)
+      expect(f.state.prompts).toHaveLength(1)
+      f.state.hideHistory = false
+      await runs.pump("ses_test")
+      expect(runs.get("ses_test").queue).toHaveLength(0)
+      expect(f.state.prompts).toHaveLength(1)
+    } finally {
+      f.release.resolve()
+      await first
+      runs.close()
+    }
+  },
+)
+
+test("V2 model selection failure does not claim that its prompt may have been sent", async () => {
+  const f = await fixture("v2"),
+    protocols = new Map<string, "v1" | "v2">()
+  f.state.rejectSelection = true
+  const runs = new BBRuns(
+    f.root,
+    (prompt, options) => inspectEngine(f.server, prompt, protocols, options),
+    (prompt, signal) =>
+      dispatchEngine(f.server, prompt, {
+        protocol: "v2",
+        signal,
+        contextRoot: join(f.root, "context"),
+        resolveAttachment: async () => undefined,
+      }),
+    () => undefined,
+  )
+  await runs.start()
+  runs.close()
+  runs.get("ses_test").paused = true
+  await runs.call("admit", { prompt: { ...f.prompt, model: { providerID: "fixture", modelID: "missing" } } })
+  runs.get("ses_test").paused = false
+  await runs.pump("ses_test")
+  expect(f.state.prompts).toEqual([])
+  expect(runs.get("ses_test").queue[0].status).toBe("failed")
+  expect(runs.get("ses_test").queue[0].sentAt).toBeUndefined()
+  expect(runs.get("ses_test").error).toContain("Unavailable fixture model")
 })

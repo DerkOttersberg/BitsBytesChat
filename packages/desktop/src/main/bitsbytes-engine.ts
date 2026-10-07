@@ -2,7 +2,13 @@ import { createHash } from "node:crypto"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { bbt } from "../bitsbytes/copy"
-import type { DispatchResult, Inspection, InspectionOptions, RunPrompt } from "./bitsbytes-runs"
+import {
+  UnsentError,
+  type DispatchResult,
+  type Inspection,
+  type InspectionOptions,
+  type RunPrompt,
+} from "./bitsbytes-runs"
 import type { ServerReadyData } from "../preload/types"
 
 // Metadata is safe to poll again after a stalled read. Mutations can already
@@ -271,6 +277,7 @@ export async function dispatchEngine(
     )
   } catch (error) {
     if (options.signal?.aborted && !attempted) return "not-sent"
+    if (!attempted) throw new UnsentError(error)
     throw error
   }
 }

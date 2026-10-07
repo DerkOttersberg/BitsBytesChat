@@ -19,6 +19,14 @@ export type Inspection = { busy: boolean; messages: { id: string; text: string; 
 export type InspectionOptions = { readBusyMessages?: boolean }
 export type DispatchResult = void | "not-sent"
 
+// Only the admission boundary can prove a prompt was not posted. Other
+// failures stay uncertain so reconciliation can find a late acknowledgement.
+export class UnsentError extends Error {
+  constructor(error: unknown) {
+    super(error instanceof Error ? error.message : String(error), { cause: error })
+  }
+}
+
 // The Electron engine host owns this journal, independently of renderer lifetime.
 export class BBRuns {
   chats: Record<string, ChatRun> = Object.create(null)
@@ -158,10 +166,12 @@ export class BBRuns {
     const chat = this.get(id)
     if (chat.paused || (!chat.queue.length && !chat.awaiting && chat.goal?.status !== "active")) return
     this.active.add(id)
+    let priorSentAt: number | undefined
     try {
       const candidate = chat.queue.find(item => item.delivery === "steer" && !item.editing) ?? chat.queue[0]
       const reference = candidate?.prompt ?? chat.last
       if (!reference) return
+      if (candidate?.status === "failed" && candidate.sentAt === undefined) return
       // Acknowledgement reconciliation and steering need current history. Idle
       // waiting needs only busy status until the engine can accept another input.
       const state = await this.inspect(reference, { readBusyMessages: Boolean(candidate && (candidate.delivery === "steer" || candidate.status !== "pending" || candidate.sentAt !== undefined)) })
@@ -204,16 +214,17 @@ export class BBRuns {
         return
       }
       if (candidate.editing || ["failed", "uncertain", "sending"].includes(candidate.status)) return
+      priorSentAt = candidate.sentAt
       candidate.status = "sending"; candidate.sentAt = Date.now(); chat.last = candidate.prompt; chat.awaiting = true; chat.error = ""; candidate.prompt.delivery = candidate.delivery
       await this.save(chat)
       if (chat.paused) {
-        candidate.status = "pending"; candidate.sentAt = undefined; chat.awaiting = false
+        this.unsent(chat, candidate, priorSentAt)
         await this.save(chat); return
       }
       const admission = new AbortController()
       this.admissions.set(id, admission)
       if (await this.dispatch(candidate.prompt, admission.signal) === "not-sent") {
-        candidate.status = "pending"; candidate.sentAt = undefined; chat.awaiting = false
+        this.unsent(chat, candidate, priorSentAt)
         await this.save(chat); return
       }
       // Keep the durable row until the engine exposes its stable message ID.
@@ -221,11 +232,21 @@ export class BBRuns {
     } catch (error) {
       const failure = this.admissions.get(id)?.signal.aborted ? "bb.error.deliveryUnknown" : String(error)
       const item = chat.queue.find(row => row.status === "sending")
-      if (item) { item.status = "uncertain"; item.error = failure; chat.awaiting = false }
+      if (item) {
+        item.status = error instanceof UnsentError && priorSentAt === undefined ? "failed" : "uncertain"
+        if (error instanceof UnsentError) item.sentAt = priorSentAt
+        item.error = failure; chat.awaiting = false
+      }
       chat.error = failure
       if (chat.goal?.status === "active" && /429|quota|rate.?limit/i.test(chat.error)) { chat.goal.status = "usageLimited"; chat.goal.reason = chat.error }
       await this.save(chat)
     } finally { this.admissions.delete(id); this.active.delete(id) }
+  }
+  private unsent(chat: ChatRun, item: QueuedInput, priorSentAt: number | undefined) {
+    item.status = priorSentAt === undefined ? "pending" : "uncertain"
+    item.sentAt = priorSentAt
+    item.error = priorSentAt === undefined ? "" : "bb.error.deliveryUnknown"
+    chat.error = item.error; chat.awaiting = false
   }
 }
 

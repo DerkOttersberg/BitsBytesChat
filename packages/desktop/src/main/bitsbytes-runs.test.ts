@@ -122,7 +122,7 @@ test("Delete during engine inspection cannot dispatch the removed request", asyn
   expect(JSON.parse(await readFile(join(folder, "chat-runs.json"), "utf8")).ses_test.queue).toEqual([])
 })
 
-test("Stop while admission is being journalled prevents dispatch and clears awaiting", async () => {
+test.each(["first", "retry"])("Stop while %s admission is being journalled preserves its delivery history", async attempt => {
   const folder = await mkdtemp(join(tmpdir(), "bb-runs-test-"))
   const entered = Promise.withResolvers<void>()
   const inspection = Promise.withResolvers<Inspection>()
@@ -131,6 +131,7 @@ test("Stop while admission is being journalled prevents dispatch and clears awai
   fixtures.push({ runs, folder }); await runs.start()
   runs.get("ses_test").paused = true
   await runs.call("admit", { prompt: { sessionID: "ses_test", directory: folder, id: "msg_journalled", text: "Keep this unsent" } })
+  if (attempt === "retry") { runs.get("ses_test").queue[0].sentAt = 12345; runs.get("ses_test").queue[0].error = "bb.error.deliveryUnknown" }
   runs.get("ses_test").paused = false
   const pumping = runs.pump("ses_test")
   await entered.promise
@@ -141,10 +142,26 @@ test("Stop while admission is being journalled prevents dispatch and clears awai
   await pumping
   expect(sent).toEqual([])
   expect(runs.get("ses_test").awaiting).toBe(false)
-  expect(runs.get("ses_test").queue[0].status).toBe("pending")
+  expect(runs.get("ses_test").queue[0].status).toBe(attempt === "retry" ? "uncertain" : "pending")
+  expect(runs.get("ses_test").queue[0].sentAt).toBe(attempt === "retry" ? 12345 : undefined)
   const saved = JSON.parse(await readFile(join(folder, "chat-runs.json"), "utf8")).ses_test
   expect(saved.paused).toBe(true)
-  expect(saved.queue[0].status).toBe("pending")
+  expect(saved.queue[0].status).toBe(attempt === "retry" ? "uncertain" : "pending")
+  expect(saved.queue[0].sentAt).toBe(attempt === "retry" ? 12345 : undefined)
+})
+
+test("historical failed requests with a send timestamp still reconcile against engine history", async () => {
+  const f = await fixture()
+  f.runs.close(); f.runs.get("ses_test").paused = true
+  await f.runs.call("admit", { prompt: f.prompt("msg_old_failed") })
+  const item = f.runs.get("ses_test").queue[0]
+  item.status = "failed"; item.sentAt = 12345
+  f.state.messages.push({ id: item.id, text: item.prompt.text, tokens: 0, tools: 0 })
+  f.runs.get("ses_test").paused = false
+  await f.runs.pump("ses_test")
+  expect(f.runs.get("ses_test").queue).toHaveLength(0)
+  expect(f.inspections.at(-1)?.readBusyMessages).toBe(true)
+  expect(f.sent).toEqual([])
 })
 
 test("Stop cancels only its chat's in-progress prompt preparation", async () => {

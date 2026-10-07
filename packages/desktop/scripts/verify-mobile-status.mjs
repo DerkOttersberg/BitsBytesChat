@@ -230,15 +230,16 @@ try {
     }
     const error = await chat("missing-source-error")
     assert.equal(error.run.error, bbt("bb.error.invalidRequest"))
-    assert.match((await call("runs.get", { sessionID: session.id })).error, /bb\.error\.invalidRequest/)
+    const failed = await call("runs.get", { sessionID: session.id })
+    assert.match(failed.error, /bb\.error\.invalidRequest/)
+    assert.equal(failed.queue[0].status, "failed")
+    assert.equal(failed.queue[0].sentAt, undefined)
     await phone
       .locator("#queue-status")
       .getByText(bbt("bb.error.invalidRequest"), { exact: true })
       .waitFor({ timeout: 15000 })
     assert.equal(report.providerRequests, 1)
-    check(
-      "Phone shows the existing recovery copy while the host keeps its error key and does not admit an invalid source",
-    )
+    check("Phone shows recovery copy for a proven unsent failure; the host retains its source and admits no prompt")
   }
   if (process.env.BB_PHONE_STATUS_CHECK !== "copy") {
     await phone.locator("#menu-button").click()
@@ -259,7 +260,9 @@ try {
     const active = await call("runs.get", { sessionID: stopID })
     assert.equal(active.queue.length, 0)
     assert.equal(active.awaiting, true)
-    const stopResponse = phone.waitForResponse(response => response.url().endsWith("/api") && response.request().postDataJSON()?.method === "stop")
+    const stopResponse = phone.waitForResponse(
+      (response) => response.url().endsWith("/api") && response.request().postDataJSON()?.method === "stop",
+    )
     await phone.locator("#stop").click()
     const acknowledgement = await stopResponse
     assert.ok(acknowledgement.ok())

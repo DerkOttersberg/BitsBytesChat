@@ -141,8 +141,8 @@ try {
   const beforeFailure=requests.length
   await call('runs.admit',{prompt:{sessionID:recovery.id,directory:join(data,'workspace'),id:invalidID,text:'Use missing recording',protocol:'v1',agent:'build',model:{providerID:'bitsbytes-qa',modelID:'qa-model'},legacyParts:[{type:'file',mime:'text/plain',filename:'transcript.txt',url:'bitsbytes://transcript/'+'0'.repeat(32)+'?revision=123'}]}})
   let rejected
-  for(let i=0;i<100;i++){rejected=await call('runs.get',{sessionID:recovery.id});if(rejected.queue[0]?.status==='uncertain')break;await wait(100)}
-  assert.equal(rejected.awaiting,false);assert.equal(rejected.queue[0].status,'uncertain');assert.ok(rejected.error);assert.equal(requests.length,beforeFailure)
+  for(let i=0;i<100;i++){rejected=await call('runs.get',{sessionID:recovery.id});if(rejected.queue[0]?.status==='failed')break;await wait(100)}
+  assert.equal(rejected.awaiting,false);assert.equal(rejected.queue[0].status,'failed');assert.equal(rejected.queue[0].sentAt,undefined);assert.ok(rejected.error);assert.equal(requests.length,beforeFailure)
   await call('runs.delete',{sessionID:recovery.id,id:invalidID});assert.equal((await call('runs.get',{sessionID:recovery.id})).error,'')
   await open(recovery);await editor.fill('Recovered request');await editor.press('Enter');await idle(recovery);assert.ok((await engine('/session/'+recovery.id+'/message')).some(row=>row.info.role==='assistant'))
   check('Missing attachment fails before inference, stops waiting, preserves recovery and allows a clean subsequent request')
