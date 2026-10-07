@@ -36,6 +36,20 @@ test("Steer reaches an active engine and exact uncertain admission reconciles wi
   expect(f.sent).toHaveLength(1); expect(f.sent[0].delivery).toBe("steer")
   await f.runs.pump("ses_test")
   expect(f.runs.get("ses_test").queue).toHaveLength(0); expect(f.sent).toHaveLength(1)
+  expect(f.runs.get("ses_test").error).toBe("")
+})
+test("a rejected dispatch stops waiting and retains the request for recovery", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "bb-runs-test-"))
+  const runs = new BBRuns(folder, async () => ({ busy: false, messages: [] }), async () => { throw new Error("Missing transcript revision") }, () => undefined)
+  fixtures.push({ runs, folder }); await runs.start()
+  await runs.call("admit", { prompt: { sessionID: "ses_test", directory: folder, id: "msg_rejected", text: "Use the recording" } })
+  for (let i = 0; i < 20; i++) { await new Promise(resolve => setTimeout(resolve, 5)); if (runs.get("ses_test").queue[0]?.status === "uncertain") break }
+  expect(runs.get("ses_test").awaiting).toBe(false)
+  expect(runs.get("ses_test").queue[0].status).toBe("uncertain")
+  expect(runs.get("ses_test").queue[0].prompt.text).toBe("Use the recording")
+  expect(runs.get("ses_test").error).toContain("Missing transcript revision")
+  await runs.call("delete", { sessionID: "ses_test", id: "msg_rejected" })
+  expect(runs.get("ses_test").error).toBe("")
 })
 test("edit retains original until save and ordering/delete persist", async () => {
   const f = await fixture()

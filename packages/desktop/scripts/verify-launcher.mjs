@@ -29,15 +29,6 @@ const live = before.filter(process => process.command && !process.command.includ
 let fixture
 let launchedID
 try {
-  if (live.length) {
-    const decline = await launch(process.env)
-    assert.equal(decline.code, 0, decline.output)
-    assert.match(decline.output, /already running/)
-    assert.match(decline.output, /left running/)
-    const after = await processes()
-    for (const process of live) assert.ok(after.some(item => item.id === process.id))
-    check('Actual CMD explains the existing-copy conflict; declining keeps user processes alive')
-  }
   await mkdir(join(profile, 'BitsBytesChat'), { recursive: true })
   await symlink(join(process.env.LOCALAPPDATA, 'BitsBytesChat/runtime'), join(profile, 'BitsBytesChat/runtime'), 'junction')
   const env = { ...process.env, LOCALAPPDATA: profile, ELECTRON_RUN_AS_NODE: '1', ELECTRON_NO_ASAR: '1' }
@@ -45,6 +36,14 @@ try {
   fixture = spawn(executable, ['-e', 'setInterval(() => {}, 1000)'], { env, windowsHide: true, stdio: 'ignore' })
   await new Promise(resolve => setTimeout(resolve, 1200))
   assert.equal(fixture.exitCode, null)
+  // Always test decline against our own profile, including when other QA apps
+  // are running. The normal user's LOCALAPPDATA must never be launched here.
+  const decline = await launch(env, 'N')
+  assert.equal(decline.code, 0, decline.output)
+  assert.match(decline.output, /already running/)
+  assert.match(decline.output, /left running/)
+  assert.ok((await processes()).some(item => item.id === fixture.pid))
+  check('Actual CMD explains the existing-copy conflict; declining keeps the disposable helper alive')
   const recovery = await launch(env, 'Y')
   assert.equal(recovery.code, 0, recovery.output)
   assert.match(recovery.output, /no visible window/)

@@ -107,10 +107,10 @@ export class BBRuns {
     const item = chat.queue.find(item => item.id === args.id)
     if (["delete", "edit", "cancel-edit", "steer", "retry"].includes(action)) {
       if (!item || item.status === "sending") throw new Error("bb.error.deliveryConflict")
-      if (action === "delete") chat.queue = chat.queue.filter(row => row !== item)
+      if (action === "delete") { chat.queue = chat.queue.filter(row => row !== item); if (!chat.queue.some(row => row.error)) chat.error = "" }
       if (action === "edit") item.editing = true
       if (action === "cancel-edit") item.editing = false
-      if (action === "steer" || action === "retry") { item.delivery = action === "steer" ? "steer" : item.delivery; item.status = "pending"; item.error = ""; chat.paused = false }
+      if (action === "steer" || action === "retry") { item.delivery = action === "steer" ? "steer" : item.delivery; item.status = "pending"; item.error = ""; chat.error = ""; chat.paused = false }
     }
     if (action === "reorder") {
       const ids = args.ids as string[]
@@ -160,7 +160,7 @@ export class BBRuns {
       if (!reference) return
       const state = await this.inspect(reference)
       // Admission acknowledgements can precede projected history. Hold the next input until reconciled.
-      if (candidate && state.messages.some(row => row.id === candidate.id)) { chat.queue = chat.queue.filter(row => row !== candidate); await this.save(chat); return }
+      if (candidate && state.messages.some(row => row.id === candidate.id)) { chat.queue = chat.queue.filter(row => row !== candidate); chat.error = ""; await this.save(chat); return }
       if (candidate?.status === "sending" && !state.busy && Date.now() - (candidate.sentAt ?? Date.now()) > 30000) { candidate.status = "uncertain"; candidate.error = "bb.error.deliveryUnknown"; await this.save(chat); return }
       if (state.busy && candidate?.delivery !== "steer") return
       const last = state.messages.findLast(row => row.assistant)
@@ -191,14 +191,14 @@ export class BBRuns {
         return
       }
       if (candidate.editing || ["failed", "uncertain", "sending"].includes(candidate.status)) return
-      candidate.status = "sending"; candidate.sentAt = Date.now(); chat.last = candidate.prompt; chat.awaiting = true; candidate.prompt.delivery = candidate.delivery
+      candidate.status = "sending"; candidate.sentAt = Date.now(); chat.last = candidate.prompt; chat.awaiting = true; chat.error = ""; candidate.prompt.delivery = candidate.delivery
       await this.save(chat)
       await this.dispatch(candidate.prompt)
       // Keep the durable row until the engine exposes its stable message ID.
       await this.save(chat)
     } catch (error) {
       const item = chat.queue.find(row => row.status === "sending")
-      if (item) { item.status = "uncertain"; item.error = String(error) }
+      if (item) { item.status = "uncertain"; item.error = String(error); chat.awaiting = false }
       chat.error = String(error)
       if (chat.goal?.status === "active" && /429|quota|rate.?limit/i.test(chat.error)) { chat.goal.status = "usageLimited"; chat.goal.reason = chat.error }
       await this.save(chat)

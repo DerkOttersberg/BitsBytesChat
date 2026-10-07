@@ -796,7 +796,7 @@ export class BBMobile {
       upload.jobID = job.id
       await this.saveUpload(upload)
       await this.host.rpc("job.update", { id: job.id, values: { sessionID: upload.sessionID } })
-      const transcribed = await this.host.call<Job>("transcribe", { id: job.id })
+      const transcribed = await this.host.call("transcribe", { id: job.id }) as Job
       if (!transcribed.transcript?.trim()) throw new Error("bb.error.transcriptEmpty")
       upload.status = "ready"
     } catch (error) {

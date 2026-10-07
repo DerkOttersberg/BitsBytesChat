@@ -133,6 +133,16 @@ try {
 
   const v2=await engine('/api/session','POST',{agent:'build',model:{id:'qa-model',providerID:'bitsbytes-qa'},location:{directory:join(data,'workspace')}}).catch(error=>({error:String(error)}))
   if(v2.data?.id){ report.v2Session=v2.data.id; const prompt={sessionID:v2.data.id,directory:join(data,'workspace'),protocol:'v2',id:'msg_'+((BigInt(Date.now())*4096n)&0xffffffffffffn).toString(16).padStart(12,'0')+'abcdabcdabcdab',text:'V2 durable protocol check',agent:'build',model:{providerID:'bitsbytes-qa',modelID:'qa-model'}};await call('runs.admit',{prompt});await idle(v2.data);report.v2Run=await call('runs.get',{sessionID:v2.data.id});report.v2Messages=(await engine('/api/session/'+v2.data.id+'/context')).data.map(message=>({id:message.id,type:message.type}));assert.ok(report.v2Messages.some(message=>message.type==='user'));assert.ok(report.v2Messages.some(message=>message.type==='assistant'));await call('runs.mode',{sessionID:v2.data.id,mode:'plan'});await call('access.set',{sessionID:v2.data.id,mode:'full'});await call('runs.admit',{prompt:{...prompt,id:'msg_'+((BigInt(Date.now())*4096n)&0xffffffffffffn).toString(16).padStart(12,'0')+'bcdbcbdbcbdbcb',text:'plan-probe',legacyParts:[{type:'text',text:'plan-probe'}]}});await idle(v2.data);assert.equal(await readFile(data+'/plan-forbidden.txt').catch(()=>null),null);assert.ok((await call('runs.get',{sessionID:v2.data.id})).plan?.text.includes('Verification plan'));check('V2 native context, synthetic Plan attachment and Full access read-only guard pass through host integration') } else throw Error(v2.error)
+  const recovery=await create('QA missing attachment recovery')
+  const invalidID='msg_'+((BigInt(Date.now())*4096n)&0xffffffffffffn).toString(16).padStart(12,'0')+'dddddddddddddd'
+  const beforeFailure=requests.length
+  await call('runs.admit',{prompt:{sessionID:recovery.id,directory:join(data,'workspace'),id:invalidID,text:'Use missing recording',protocol:'v1',agent:'build',model:{providerID:'bitsbytes-qa',modelID:'qa-model'},legacyParts:[{type:'file',mime:'text/plain',filename:'transcript.txt',url:'bitsbytes://transcript/'+'0'.repeat(32)+'?revision=123'}]}})
+  let rejected
+  for(let i=0;i<100;i++){rejected=await call('runs.get',{sessionID:recovery.id});if(rejected.queue[0]?.status==='uncertain')break;await wait(100)}
+  assert.equal(rejected.awaiting,false);assert.equal(rejected.queue[0].status,'uncertain');assert.ok(rejected.error);assert.equal(requests.length,beforeFailure)
+  await call('runs.delete',{sessionID:recovery.id,id:invalidID});assert.equal((await call('runs.get',{sessionID:recovery.id})).error,'')
+  await open(recovery);await editor.fill('Recovered request');await editor.press('Enter');await idle(recovery);assert.ok((await engine('/session/'+recovery.id+'/message')).some(row=>row.info.role==='assistant'))
+  check('Missing attachment fails before inference, stops waiting, preserves recovery and allows a clean subsequent request')
   await page.screenshot({path:root+'/.tools/qa/results/'+tag+'.png'})
   assert.equal(report.errors.length,0,report.errors.join('\n'))
 } catch(error) { report.failure=String(error);console.error('FAIL',String(error));if(page){console.log((await page.locator('body').innerText()).slice(0,1800));await page.screenshot({path:root+'/.tools/qa/results/'+tag+'-failure.png'})}process.exitCode=1 }

@@ -12,6 +12,7 @@ export class BBArtifacts {
   private publishing = Promise.resolve()
   private pending = new Set<string>()
   private focused = new Set<string>()
+  private historyPreviews = new Map<string, Promise<string>>()
   runtime: BBArtifactRuntime
   constructor(private root: string, _python: string, private assets: string, private changed: (artifact: DocumentArtifact, published?: boolean) => void) { this.runtime = new BBArtifactRuntime(root, assets) }
   async start() {
@@ -30,7 +31,7 @@ export class BBArtifacts {
       item.kind ??= "document"; item.mime ??= "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       item.source ??= join(this.root, "previews/sources", item.hash + ".docx")
       item.history ??= [{ revision: item.revision, hash: item.hash, source: item.source, pdf: item.pdf, updated: item.updated }]
-      if (item.status === "queued" || item.status === "exporting") this.enqueue(item)
+      if (item.status === "queued" || item.status === "exporting") await this.enqueue(item)
     }
   }
   private persist() {
@@ -67,13 +68,14 @@ export class BBArtifacts {
     if (createHash("sha256").update(await readFile(source)).digest("hex") !== hash) throw new Error("bb.error.invalidDocument")
     item.history!.push({ revision: item.revision, hash, source, pdf: "", updated: item.updated, turnID })
     this.items = [...this.items.filter(row => row.id !== id), item]
-    await this.persist(); this.focused.add(focusKey); this.changed(item, focus); this.enqueue(item)
+    await this.persist(); this.focused.add(focusKey); this.changed(item, focus); await this.enqueue(item)
     return item
   }
-  retry(id: string) {
+  async retry(id: string, revision?: number) {
     const item = this.items.find(row => row.id === id)
     if (!item) throw new Error("bb.error.invalidDocument")
-    item.status = "queued"; item.error = ""; this.changed(item); this.enqueue(item)
+    if (revision !== undefined && revision !== item.revision) { await this.read(id, revision); this.changed(item); return item }
+    item.status = "queued"; item.error = ""; this.changed(item); await this.enqueue(item)
     return item
   }
   private version(id: string, revision?: number) {
@@ -85,7 +87,28 @@ export class BBArtifacts {
   }
   async read(id: string, revision?: number) {
     const selected = this.version(id, revision)
-    return selected.pdf ? new Uint8Array(await readFile(selected.pdf)) : null
+    let pdf = selected.pdf
+    if (!pdf && revision !== undefined && ["document", "presentation"].includes(selected.item.kind ?? "document")) {
+      const key = `${id}:${revision}`
+      let pending = this.historyPreviews.get(key)
+      if (!pending) {
+        const render = this.queue.catch(() => undefined).then(async () => {
+          const current = this.version(id, revision)
+          if (current.pdf) return current.pdf
+          const output = await this.runtime.call<{ pdf: string }>("render", { path: current.source, folder: join(this.root, "previews/pdf") })
+          if (!(await readFile(output.pdf)).subarray(0, 5).equals(Buffer.from("%PDF-"))) throw new Error("bb.error.invalidDocument")
+          const version = current.item.history!.find(row => row.revision === revision)!
+          version.pdf = output.pdf
+          await this.persist()
+          return output.pdf
+        })
+        this.queue = render.then(() => undefined, () => undefined)
+        pending = render.finally(() => this.historyPreviews.delete(key))
+        this.historyPreviews.set(key, pending)
+      }
+      pdf = await pending
+    }
+    return pdf ? new Uint8Array(await readFile(pdf)) : null
   }
   async content(id: string, args: Record<string, unknown> = {}) {
     const selected = this.version(id, args.revision === undefined ? undefined : Number(args.revision))
@@ -115,8 +138,7 @@ export class BBArtifacts {
     if (["html", "code", "image", "pdf"].includes(item.kind ?? "")) {
       item.status = "ready"
       if (item.kind === "pdf") { item.pdf = item.source ?? item.path; const version = item.history?.find(row => row.revision === item.revision); if (version) version.pdf = item.pdf }
-      void this.persist().then(() => this.changed(item))
-      return
+      return this.persist().then(() => this.changed(item))
     }
     const key = `${item.id}:${item.revision}`
     if (this.pending.has(key)) return

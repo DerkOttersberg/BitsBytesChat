@@ -450,6 +450,12 @@ export class BitsBytes {
     return { busy: Boolean(active.data[prompt.sessionID]), messages: context.data.map(row => ({ id: row.id, assistant: row.type === "assistant", text: row.text ?? row.content?.filter(part => part.type === "text").map(part => part.text ?? "").join("\n") ?? "", tokens: (row.tokens?.input ?? 0) + (row.tokens?.output ?? 0), tools: row.content?.filter(part => part.type === "tool").length ?? 0, progress: row.content?.some(part => part.type === "tool") ? createHash("sha256").update(JSON.stringify(row.content.filter(part => part.type === "tool").map(part => ({ tool: part.name, input: part.state?.input, output: part.state?.output, content: part.state?.content })))).digest("hex") : undefined, error: row.error ? JSON.stringify(row.error) : undefined })) }
   }
   private async dispatchRun(prompt: RunPrompt) {
+    // Resolve app-owned sources before the asynchronous engine acknowledgement.
+    // Otherwise a missing revision can fail before any assistant message exists,
+    // leaving the host waiting for a response that will never arrive.
+    const attachments = (prompt.legacyParts ?? []) as { type: string; url?: string }[]
+    const sources = [...attachments.filter(part => part.type === "file").map(part => part.url), ...(prompt.files ?? []).map(file => file.uri)]
+    for (const uri of new Set(sources)) if (uri?.startsWith("bitsbytes://")) await this.resolveAttachment(uri, prompt.sessionID)
     if (this.protocols.get(prompt.sessionID) !== "v2") {
       await this.engineFetch(`/session/${encodeURIComponent(prompt.sessionID)}/prompt_async`, { method: "POST", body: JSON.stringify({ messageID: prompt.id, agent: prompt.agent, model: prompt.model, variant: prompt.variant, parts: prompt.legacyParts ?? [{ type: "text", text: prompt.text }] }) }, prompt.directory)
       return
@@ -679,7 +685,7 @@ export class BitsBytes {
     }
     if (method === "docx.preview" || method === "artifact.publish") return this.artifacts.publish(String(args.path), String(args.sessionID ?? ""))
     if (method === "artifacts.list") return this.artifacts.items
-    if (method === "artifact.read") return this.artifacts.read(String(args.id), Number(args.revision) || undefined)
+    if (method === "artifact.read") return this.artifacts.read(String(args.id), args.revision === undefined ? undefined : Number(args.revision))
     if (method === "artifact.content") return this.artifacts.content(String(args.id), args)
     if (method === "artifact.save-copy") {
       const item = this.artifacts.items.find(item => item.id === args.id)
@@ -688,7 +694,7 @@ export class BitsBytes {
       if (target.canceled || !target.filePath) return null
       return this.artifacts.saveCopy(item.id, target.filePath, Number(args.revision) || undefined)
     }
-    if (method === "artifact.retry") return this.artifacts.retry(String(args.id))
+    if (method === "artifact.retry") return this.artifacts.retry(String(args.id), args.revision === undefined ? undefined : Number(args.revision))
     if (method === "share.test") {
       const paths = intakePaths(this.settings)
       const template = await this.rpc<{ supported: boolean }>("docx.inspect", { path: paths.template })

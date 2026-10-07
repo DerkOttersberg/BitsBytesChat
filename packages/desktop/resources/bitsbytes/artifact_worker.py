@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 import sys
 import zipfile
+import uuid
 
 MIME = {'.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation', '.pdf': 'application/pdf', '.csv': 'text/csv', '.html': 'text/html', '.htm': 'text/html', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml'}
 TEXT = {'.txt', '.md', '.json', '.js', '.ts', '.tsx', '.jsx', '.css', '.py', '.ps1', '.sql', '.xml', '.yaml', '.yml', '.toml', '.ini', '.sh', '.c', '.h', '.cpp', '.cs', '.java', '.rs', '.go', '.html', '.htm', '.csv', '.svg'}
@@ -123,11 +124,28 @@ def render(path, folder):
     if path.suffix.lower() == '.pdf':
         return {'pdf': str(path)}
     if path.suffix.lower() in {'.docx', '.pptx', '.xlsx'}:
+        metadata = output.with_suffix('.render.json')
+        try:
+            from pypdf import PdfReader
+            if output.is_file() and len(PdfReader(output).pages) > 0:
+                if path.suffix.lower() != '.xlsx':
+                    return {'pdf': str(output)}
+                saved = json.loads(metadata.read_text(encoding='utf-8'))
+                if output.with_suffix('.xlsx').is_file() and isinstance(saved.get('formulaErrors'), list):
+                    return {'pdf': str(output), 'formulaErrors': saved['formulaErrors']}
+        except Exception:
+            # A missing or damaged cache is regenerated from the immutable source.
+            pass
         if path.suffix.lower() == '.xlsx':
             cached = output.with_suffix('.xlsx')
             shutil.copyfile(path, cached)
-            return office(cached, output)
-        return office(path, output)
+            result = office(cached, output)
+        else:
+            result = office(path, output)
+        temporary = metadata.with_suffix('.' + uuid.uuid4().hex + '.tmp')
+        temporary.write_text(json.dumps(result), encoding='utf-8')
+        os.replace(temporary, metadata)
+        return result
     return {'pdf': ''}
 
 

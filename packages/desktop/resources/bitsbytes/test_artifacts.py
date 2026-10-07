@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 import artifact_worker as worker
 
 
@@ -33,7 +34,21 @@ class ArtifactTests(unittest.TestCase):
                     self.assertEqual(grid['rows'][1][1], '20')
                     self.assertEqual(grid['rows'][2][1], '96')
                     self.assertEqual(preview['formulaErrors'], [])
+                modified = Path(preview['pdf']).stat().st_mtime_ns
+                with mock.patch.object(worker, 'office', side_effect=AssertionError('Cached preview must not reopen Office')):
+                    again = worker.render(path, self.folder / 'previews')
+                self.assertEqual(again, preview)
+                self.assertEqual(Path(preview['pdf']).stat().st_mtime_ns, modified)
                 self.results.append({'file': result, 'preview': preview, 'images': images})
+
+    def test_damaged_preview_cache_recovers_from_source(self):
+        result = worker.create({'filename': 'Cache recovery.docx', 'blocks': [{'text': 'Verified cache recovery'}]}, self.folder)
+        preview = worker.render(result['path'], self.folder / 'cache-recovery')
+        Path(preview['pdf']).write_bytes(b'Damaged cached PDF')
+        with mock.patch.object(worker, 'office', wraps=worker.office) as export:
+            recovered = worker.render(result['path'], self.folder / 'cache-recovery')
+            self.assertEqual(export.call_count, 1)
+        self.assertEqual(Path(recovered['pdf']).read_bytes()[:5], b'%PDF-')
 
     def test_pdf_csv_html_and_code(self):
         cases = [{'filename': 'Test.pdf', 'title': 'Verified PDF', 'blocks': [{'text': 'Complete, searchable content.'}]}, {'filename': 'Test.csv', 'rows': [['Naam', 'Afspraak'], ['Één deelnemer', 'Comma, quoted']]}, {'filename': 'Test.html', 'text': '<!doctype html><h1>Isolated preview</h1>'}, {'filename': 'Test.py', 'text': 'print("Dutch: één")\n'}]

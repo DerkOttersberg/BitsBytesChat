@@ -1,5 +1,22 @@
 # Interface research and implementation — 0.3.0
 
+## Morning review — 7 October 2026
+
+The comparison uses public behavior and local tests. It does not reproduce private ChatGPT, Codex or Claude internals.
+
+| Area | Reference behavior | Bits & Bytes choice and verification |
+|---|---|---|
+| Follow-ups | Codex separates Queue from Steer. Claude Code can deliver queued messages inside an ongoing turn and offers Send now. | Enter waits for engine idle; Ctrl+Enter steers at the next supported boundary. Stable IDs reconcile uncertain admission. Queue, edit and steer were exercised in the production app. |
+| Stop | Claude Code's Esc interrupts and then sends pending messages. | Stop pauses pending inputs and active goals. Resume is explicit, preventing a canceled operation from immediately continuing through a queued request. |
+| Side questions | Codex offers context-connected side chats. Claude Code's `/btw` is a tool-free overlay that does not enter the main history. | `/side` is a persistent independent conversation with inherited context and an initially empty visible history. A real GPT-5.6 Luna request retrieved the parent's codeword. |
+| Plans and permissions | Planning separates investigation from execution; harness permission modes have different policies. | Plan remains read-only under Full access. The real model produced the plan card without creating its proposed file; deliberate forbidden-command tests checked engine enforcement separately. |
+| Recovery | Claude Code checkpoints editing-tool changes; shell and external changes have limitations, and Git remains useful for durable history. | Artifact snapshots retain explicit revisions; Git backs up the fork. This is not a universal filesystem rewind. Concurrent publications retain both versions, and missing versions are rejected. Damaged optional state preserves original bytes; valid neighboring queues/artifacts remain usable. |
+| Phone | Codex remote access keeps desktop work available through phone controls. | The paired LAN page shares laptop sessions and tools; durable phone recording is original functionality. The laptop owns transcription, credentials and documents. Phone recording is tested with actual browser MediaRecorder, while physical iOS background capture remains unverified. |
+
+Sources: [Codex remote engineering](https://developers.openai.com/blog/mastering-codex-remote-for-engineering), [Claude Code interactive mode](https://code.claude.com/docs/en/interactive-mode), [Claude Code permissions](https://code.claude.com/docs/en/permissions), and [Claude Code checkpoints](https://code.claude.com/docs/en/checkpointing).
+
+For recording, [MDN's MediaRecorder guidance](https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder/dataavailable_event) explains why timeslices are not an elapsed-time clock. The app uses an independent timer and persists encoded chunks. Safari's AAC/MP4 support is documented by [WebKit](https://webkit.org/blog/11353/mediarecorder-api/). Closing a tab can lose unflushed audio; header-only recordings are rejected. No Dutch accuracy percentage is inferred from synthetic microphone tests.
+
 Reference date: 6 October 2026. The reference in this conversation is the Codex desktop chat interface. Consumer ChatGPT has a different set of controls. The file/artifact reference is Claude. This fork implements the useful behavior on its own OpenCode engine; it does not copy private application code or promise identical server internals.
 
 ## Messages during work

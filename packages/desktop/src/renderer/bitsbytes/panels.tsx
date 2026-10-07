@@ -34,7 +34,7 @@ export function DocumentPanel(props: { id: string; revision?: number }) {
       }
       const bytes = await api.call<Uint8Array>("artifact.read", args)
       if (token === generation && bytes) setStore({ bytes, error: "" })
-    } catch (error) { setStore("error", bbError(error)) }
+    } catch (error) { if (token === generation) setStore("error", bbError(error)) }
   }
   onMount(() => {
     const unsubscribe = api.subscribe(event => { if (event.type === "artifact") void update(event.artifact) })
@@ -44,7 +44,7 @@ export function DocumentPanel(props: { id: string; revision?: number }) {
   createEffect(() => {
     const id = props.id, revision = props.revision ?? 0
     if (id !== identity) { identity = id; generation++; untrack(() => { if (store.image) URL.revokeObjectURL(store.image) }); setStore({ artifact: undefined, bytes: undefined, text: "", image: "", error: "", grid: undefined, sheet: "", mode: "preview" }) }
-    setStore({ revision, offset: 0 })
+    setStore({ revision, offset: 0, bytes: undefined, error: "" })
     void api.call<DocumentArtifact[]>("artifacts.list").then(items => { if (props.id !== id) return; const artifact = items.find(item => item.id === id); if (artifact) void update(artifact) }).catch(error => setStore("error", bbError(error)))
   })
   const run = (method: string) => api.call(method, { id: props.id, revision: store.revision || undefined, path: store.artifact?.path }).catch(error => setStore("error", bbError(error)))
@@ -54,7 +54,7 @@ export function DocumentPanel(props: { id: string; revision?: number }) {
       <ButtonV2 variant="ghost-muted" size="normal" onClick={() => void run("file.open")}>{bbt(store.revision && store.revision !== store.artifact?.revision ? store.artifact?.kind === "document" ? "openCurrentWord" : "openCurrentApp" : store.artifact?.kind === "document" ? "openWord" : "openApp")}</ButtonV2>
       <ButtonV2 variant="ghost-muted" size="normal" onClick={() => void run("file.reveal")}>{bbt("showFolder")}</ButtonV2>
       <ButtonV2 variant="ghost-muted" size="normal" onClick={() => void run("artifact.save-copy")}>{bbt("saveCopy")}</ButtonV2>
-      <Show when={(store.artifact?.history?.length ?? 0) > 1}><select aria-label={bbt("versions")} value={store.revision} onChange={event => { setStore("revision", Number(event.currentTarget.value)); refresh() }}><option value="0" selected={!store.revision}>{bbt("latest")}</option><For each={store.artifact?.history}>{version => <option value={version.revision} selected={store.revision === version.revision}>{bbt("revision").replace("{{revision}}", String(version.revision))}</option>}</For></select></Show>
+      <Show when={(store.artifact?.history?.length ?? 0) > 1}><select aria-label={bbt("versions")} value={store.revision} onChange={event => { setStore({ revision: Number(event.currentTarget.value), bytes: undefined, error: "" }); refresh() }}><option value="0" selected={!store.revision}>{bbt("latest")}</option><For each={store.artifact?.history}>{version => <option value={version.revision} selected={store.revision === version.revision}>{bbt("revision").replace("{{revision}}", String(version.revision))}</option>}</For></select></Show>
       <Show when={store.artifact?.kind === "html"}><ButtonV2 variant="ghost-muted" size="normal" onClick={() => setStore("mode", store.mode === "preview" ? "source" : "preview")}>{bbt(store.mode === "preview" ? "source" : "preview")}</ButtonV2></Show>
       <Show when={store.artifact?.status === "queued" || store.artifact?.status === "exporting"}><span class="bb-preview-updating" role="status"><i class="bb-preview-spinner" aria-hidden="true" />{bbt("previewUpdating")}</span></Show>
     </div>

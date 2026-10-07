@@ -284,25 +284,49 @@ try {
   assert.ok(requests.some((request) => JSON.stringify(request.messages).includes("Selected skill")))
   check("Skill-only messages clear draft chips and deliver frozen skill context to the model")
   if (process.env.BB_MOBILE_AUDIO === "1") {
-    await context.grantPermissions(["microphone"], { origin: new URL(phone.url()).origin })
     const beforeMessages = (await engine(`/session/${session.id}/message`)).length
-    await phone.locator("#record-button").click()
-    await phone.getByText("Recording", { exact: true }).waitFor()
-    await wait(6400)
-    await phone.getByRole("button", { name: "Finish and attach transcript", exact: true }).click()
-    const uploaded = await phone.waitForFunction(async () => {
-      const response = await fetch("/uploads"), rows = await response.json()
-      return rows.find(row => row.status === "ready" || row.status === "error")
-    }, undefined, { timeout: 90000 }).then(handle => handle.jsonValue())
-    assert.equal(uploaded.status, "error", "Synthetic microphone tone must not become a speech transcript")
-    assert.equal(uploaded.error, copy["bb.error.transcriptEmpty"])
-    await phone.locator("#menu-button").click()
+    const speech = process.env.BB_MOBILE_SPEECH === "1"
+    if (speech) await phone.locator("#prompt").fill("Keep this unsent audio draft")
+    await call("settings.save", { acceleration: "cpu" })
+    if (process.env.BB_MOBILE_AUDIO_FILE) await phone.locator("#audio-file").setInputFiles(process.env.BB_MOBILE_AUDIO_FILE)
+    else {
+      await context.grantPermissions(["microphone"], { origin: new URL(phone.url()).origin })
+      await phone.locator("#record-button").click()
+      await phone.getByText("Recording", { exact: true }).waitFor()
+      await wait(6400)
+      await phone.getByRole("button", { name: "Finish and attach transcript", exact: true }).click()
+    }
+    let uploaded
+    for (let i = 0; i < (process.env.BB_MOBILE_AUDIO_FILE ? 900 : 180); i++) {
+      const rows = await phone.evaluate(async () => (await fetch("/uploads")).json())
+      uploaded = rows.find(row => row.status === "ready" || row.status === "error")
+      if (uploaded) break
+      await wait(500)
+    }
+    assert.ok(uploaded, "The actual upload/transcription did not finish")
+    assert.equal(uploaded.status, speech ? "ready" : "error", speech ? "Synthetic spoken audio must produce a usable transcript" : "Synthetic microphone tone must not become a speech transcript")
+    if (!speech) assert.equal(uploaded.error, copy["bb.error.transcriptEmpty"])
+    const audioJob = (await call("state")).jobs.find(row => row.id === uploaded.jobID)
+    assert.ok(audioJob && audioJob.chunks.every(row => row.done))
+    report.audio = { duration: audioJob.duration, chunks: audioJob.chunks.length, bytes: uploaded.size, engine: audioJob.engine }
+    if (process.env.BB_MOBILE_AUDIO_FILE && !speech) assert.ok(audioJob.duration >= 3600)
+    if (!(await phone.locator("#drawer").isVisible())) await phone.locator("#menu-button").click()
     await phone.getByRole("button", { name: "Audio uploads", exact: true }).click()
-    await phone.getByText(copy["bb.error.transcriptEmpty"], { exact: true }).first().waitFor()
-    assert.equal(await phone.locator("#attachments .source-chip").count(), 0)
+    if (speech) {
+      assert.ok(audioJob.transcript.trim())
+      await phone.locator("#drawer-body").getByRole("button", { name: copy.attach, exact: true }).click()
+      assert.equal(await phone.locator("#attachments .source-chip").count(), 1)
+      assert.equal(await phone.locator("#prompt").inputValue(), "Keep this unsent audio draft")
+      await phone.locator("#attachments .source-chip").first().click()
+      await phone.getByText(audioJob.transcript, { exact: true }).waitFor()
+      await phone.locator("#preview-close").click()
+    } else {
+      await phone.getByText(copy["bb.error.transcriptEmpty"], { exact: true }).first().waitFor()
+      assert.equal(await phone.locator("#attachments .source-chip").count(), 0)
+    }
     assert.equal((await engine(`/session/${session.id}/message`)).length, beforeMessages)
-    await phone.locator("#menu-button").click()
-    check("Paired HTTPS microphone uploads into real CPU Parakeet; no-speech failure is readable and does not attach or send")
+    if (await phone.locator("#drawer").isVisible()) await phone.locator("#menu-button").click()
+    check(speech ? "Real CPU transcription of synthetic spoken audio attaches one compact chip, opens full text on click, and preserves the draft without sending" : process.env.BB_MOBILE_AUDIO_FILE ? "Complete hour-plus browser recording uploads above 25 MB over paired HTTPS and passes every CPU Parakeet chunk without attaching or sending empty speech" : "Paired HTTPS microphone uploads into real CPU Parakeet; no-speech failure is readable and does not attach or send")
   }
   const source = join(data, "Mobile preview.docx")
   await promisify(execFile)(

@@ -15,6 +15,7 @@ If a Python environment points at an absent installation, startup repairs its ho
 - Phone recording now has its own microphone in the composer. Pause/Resume, square Cancel and upward-arrow Finish are separate actions. Finish uploads in resumable chunks, transcribes on the laptop and attaches to the original chat draft; normal Send remains separate. Cancel retains audio on the phone without uploading. Saved browser chunks survive interruptions and can be recovered, downloaded or deleted from Audio uploads.
 - Phone PDF code loads only when previewing a document. Compact attachment styling and notifications keep the draft unobstructed. A second tab cannot replace a live recording.
 - Damaged optional saved-state files are preserved in recovery copies instead of preventing startup. Valid queues and artifacts survive an invalid neighboring entry. Concurrent document publication retains every revision, and nonexistent revisions produce an error instead of showing another version.
+- Office previews reuse a validated content cache. Earlier Word/slides revisions can recover their own preview without replacing the current document. Failed attachment dispatch stops waiting and retains recoverable input, instead of leaving chat stuck.
 - Windows source and upstream history are backed up in the private [DerkOttersberg/BitsBytesChat repository](https://github.com/DerkOttersberg/BitsBytesChat). QA scripts are included under `packages/desktop/scripts`; live AI checks explicitly opt in and default to GPT-5.6 Luna.
 
 ## Chat and document features
