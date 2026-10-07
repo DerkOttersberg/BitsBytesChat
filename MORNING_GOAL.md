@@ -10,3 +10,9 @@ Work until approximately 11:00 Europe/Amsterdam. The user requested about two ho
 6. Package the Windows update, preserve existing user data, push subsequent verified changes and record measured results and remaining physical-device checks.
 
 Dutch transcription accuracy benchmarking remains deferred at the user's request. Production performance comparisons must use comparable workloads. Tests use isolated app profiles and must not restart or close the user's running app.
+
+## Completed verification
+
+The private repository and verified 0.3.4 Windows release are published. Direct phone recording, durable recovery, preview revisions, admission recovery and terminal initialization fixes are included. Real app conversations used GPT-5.6 Luna throughout, covering context, tools, document skills, revisions, Plan, Goal, approvals, long source input and queue/steer/stop/resume. The final packaged run also verified natural ChatGPT token refresh and safely preserved the encrypted update. Stronger models were unnecessary.
+
+The 65-minute recording and full upload/CPU processing passed. Controlled performance reports retain all samples, including slower runs. See `VERIFICATION.md` for the final checks and remaining physical iPhone, Dutch accuracy and unavailable-provider limitations. Runtime release tag `v0.3.4` remains tied to its packaged source commit; subsequent documentation and QA-script updates are on `main`.

@@ -55,15 +55,17 @@ async function preserveRefresh() {
   const current = await readFile(join(source, "credentials.bin")), updated = await readFile(join(data, "credentials.bin"))
   if (hash(updated) === originalHash) return
   if (hash(current) !== originalHash) { report.credentialConflict = true; return }
-  const changed = await app.evaluate(({ safeStorage }, { original, updated }) => {
+  const refresh = await app.evaluate(({ safeStorage }, { original, updated }) => {
     const before = JSON.parse(safeStorage.decryptString(Buffer.from(original, "base64")))
     const after = JSON.parse(safeStorage.decryptString(Buffer.from(updated, "base64")))
-    return before.access !== after.access || before.refresh !== after.refresh || before.expires !== after.expires
+    return { changed: before.access !== after.access || before.refresh !== after.refresh || before.expires !== after.expires,
+      beforeExpires: before.expires, afterExpires: after.expires }
   }, { original: current.toString("base64"), updated: updated.toString("base64") })
-  if (!changed) return
+  if (!refresh.changed) return
   const temp = join(source, "credentials-qa-" + randomUUID() + ".tmp")
   await writeFile(temp, updated); await rename(temp, join(source, "credentials.bin"))
   originalHash = hash(updated); report.refreshedCredentials = true
+  report.credentialRefresh = { beforeExpires: refresh.beforeExpires, afterExpires: refresh.afterExpires, preservedAt: Date.now() }
 }
 try {
   page = await app.firstWindow(); page.setDefaultTimeout(60000)

@@ -14,6 +14,10 @@ Two interleaved production composer comparisons against 0.3.3 retained every sam
 
 Final installer: `packages/desktop/dist/0.3.4/BitsBytesChat-win-x64.exe`, **177,780,887 bytes**, SHA-256 `1b3673a92ca37bad983c354e1b6f34de228c5822635bb53382418ae1aa455b51`. All **1,833 compiled/resource files** match the packaged build. Both launcher aliases select this version. No running older user app was restarted or overwritten. The build remains unsigned; physical iPhone recording and deferred Dutch accuracy checks remain as described below.
 
+The installer and checksum are published in the private [v0.3.4 release](https://github.com/DerkOttersberg/BitsBytesChat/releases/tag/v0.3.4), tied to source commit `f3e758419d9afdf8f00f55e0aa39e1d0d8c59227`. The uploaded installer was downloaded again and verified against its full byte count and SHA-256; `github-release-034.json` records this check. Later documentation and QA-script changes do not change that packaged runtime or release tag.
+
+The final real-provider suite on packaged 0.3.4 passed **four checks** with **GPT-5.6 Luna**: streamed completion, follow-up context, inherited context in an independently rendered side chat, and tool execution with file read-back. It ran at the connection's natural refresh threshold. Automatic refresh extended the token expiry from 10:54:49 to 11:54:04 Amsterdam, and the updated encrypted credentials were preserved with the original-file conflict check. No credential conflict, preservation error or renderer error occurred. `live-refresh-034-final.json` records these results and expiry timestamps without tokens. Stronger models were not needed for any morning live test.
+
 ## 0.3.3 morning verification — 7 October 2026
 
 The Windows build and both CMD launchers target **0.3.3**. Source is backed up with the complete upstream history in the private `DerkOttersberg/BitsBytesChat` repository. Generated packages, private test data, audio, models and encrypted credentials remain outside Git. The new scripts make the checks reproducible; older results below remain historical evidence.

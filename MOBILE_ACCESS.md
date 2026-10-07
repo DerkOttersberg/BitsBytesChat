@@ -72,8 +72,8 @@ Live ChatGPT conversations have separate opt-in tests in `scripts/verify-live-ai
 
 `BB_MOBILE_AUDIO_FILE` supplies a saved recording to the real paired HTTPS/CPU test; the 0.3.3 endurance run used the entire 65-minute browser recording. Optional `scripts/verify-phone-webkit.mjs` adds Windows WebKit layout and upload coverage (`BB_WEBKIT_EXECUTABLE` selects its pinned Playwright executable). Windows WebKit lacks microphone capture in this build and does not prove physical Safari behavior. Physical iPhone microphone/foreground behavior, firewall and certificate interactions still require that device; browser fixtures do not establish Dutch accuracy.
 
-## Third-party QR code library
-
 For spoken-audio functional checks, combine `BB_MOBILE_SPEECH=1` with `BB_MOBILE_AUDIO_FILE` and `BB_MOBILE_AUDIO=1`. This expects nonempty actual CPU transcription and verifies compact attachment, full text on click and complete engine context after explicit Send. Use `BB_MOBILE_REPORT` and `BB_LIVE_REPORT` to retain separately named reports for a new build. These checks do not measure language accuracy.
+
+## Third-party QR code library
 
 The vendored `qrcode-generator` **1.4.4** library by Kazuhiko Arase is used only to generate pairing QR codes locally. Its MIT header is retained in `packages/desktop/resources/bitsbytes/mobile/vendor/qrcode.js`; the accompanying `LICENSE.qrcode-generator` contains the license. PDF.js reuses the app's existing `pdfjs-dist` dependency.
