@@ -30,7 +30,7 @@ export function readPanelState(storage: Pick<Storage, "getItem" | "setItem">, ke
   const previous = record(parsed) ? parsed : undefined
   const rows = Array.isArray(previous?.tabs) ? previous.tabs : []
   const valid = rows.filter(panelTab)
-  const portable = valid.filter((row) => row.kind !== "browser")
+  const portable = valid.filter((row) => row.kind !== "browser" && row.kind !== "goal")
   const seen = new Set<string>()
   const tabs = portable.filter((row) => {
     if (seen.has(row.id)) return false

@@ -17,7 +17,8 @@ catch {
 const hash = bytes => createHash("sha256").update(bytes).digest("hex")
 const files = async folder => (await Promise.all((await readdir(folder, { withFileTypes: true })).map(row =>
   row.isDirectory() ? files(join(folder, row.name)) : [join(folder, row.name)]))).flat()
-const archive = resolve(`dist/${version}/win-unpacked/resources/app.asar`)
+const packageFolder = resolve(process.env.BB_QA_PACKAGE_DIR || `dist/${version}`)
+const archive = join(packageFolder, "win-unpacked/resources/app.asar")
 const output = resolve("out"), matched = []
 for (const path of await files(output)) {
   const name = join("out", relative(output, path))
@@ -28,10 +29,10 @@ const resources = resolve("resources/bitsbytes")
 for (const path of await files(resources)) {
   if (path.split(/[\\/]/).includes("__pycache__")) continue
   const name = relative(resources, path)
-  assert.equal(hash(await readFile(`dist/${version}/win-unpacked/resources/bitsbytes/` + name)), hash(await readFile(path)), "Stale runtime resource: " + name)
+  assert.equal(hash(await readFile(join(packageFolder, "win-unpacked/resources/bitsbytes", name))), hash(await readFile(path)), "Stale runtime resource: " + name)
   matched.push("bitsbytes/" + name)
 }
-const installer = await readFile(`dist/${version}/BitsBytesChat-win-x64.exe`)
+const installer = await readFile(join(packageFolder, "BitsBytesChat-win-x64.exe"))
 const report = { version, matchedFiles: matched.length, installerBytes: installer.length, installerSHA256: hash(installer) }
-await writeFile(join(root, ".tools/qa/results/package-" + version.replaceAll(".", "") + ".json"), JSON.stringify(report, null, 2))
+await writeFile(join(root, ".tools/qa/results/" + (process.env.BB_QA_REPORT || "package-" + version.replaceAll(".", "")) + ".json"), JSON.stringify(report, null, 2))
 console.log(JSON.stringify(report))

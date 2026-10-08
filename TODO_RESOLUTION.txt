@@ -26,7 +26,7 @@ Storage/recovery pauses require explicit Resume. Failed or unknown admission ret
 
 5. Editing a queued message
 Implemented. Edit reserves the durable row and hides it from the visible queue/count while restoring its text, attachment identities, context, model, agent and reasoning variant in the composer. Send replaces the reservation with the same ID and a new revision. Cancel restores the original composer only when doing so will not overwrite an independent newer draft.
-Editing, Cancel and Send survive renderer reload and late A → B → A responses. Move up/down and drag reorder use the same visible neighbors while preserving hidden reservations. An editing status and bounded Undo remain available; sending/uncertain admissions cannot be edited destructively.
+Follow-up: editing restores the queued request in the ordinary composer without an editing banner, Undo or Cancel buttons. Send replaces the same durable reservation. Move up/down and drag reorder retain visible neighbors and hidden reservations; sending/uncertain admissions cannot be edited destructively.
 
 6. Queue appearance
 Implemented using the accepted Codex-style refinement: full composer width, 16px rail corners, compact grip/Steer/menu/delete controls and a scrolling list capped at 30dvh. This supersedes the earlier 520px/half-height suggestion. Narrow windows remain within the composer. Edit removes the row from this rail until Send or Cancel.
@@ -57,7 +57,7 @@ Implemented. The chat preview is bounded and expandable. The full plan remains i
 Implemented and covered by the combined native fixture and ownership regressions. Plan remains read-only under Full access. The selected saved revision remains selected. Todo stays visible during paused work. Queue reservations, delivery receipts and Goal ownership remain independent. Stop freezes Goal accounting and pending work; Resume is explicit where required, without duplicating user input or misclassifying the deliberately canceled turn as a new error.
 
 15. Minimum ten hours of Goal work
-Implemented as an explicit Minimum active work (hours) field, not a promise inferred from natural language. Accumulated active work uses a monotonic clock and excludes paused, blocked, restarted and waiting-for-human periods. Completion before the minimum is rejected with remaining time. Goal edits retain identity and evidence; recovery starts paused.
+Follow-up: removed the hours field and Goal side panel at the user's request. The full prompt now supplies the objective and constraints; explicit work-duration and token-budget phrases become host limits. Accumulated active work uses a monotonic clock and excludes paused, blocked, restarted and waiting-for-human periods. Completion before an explicit minimum is rejected with remaining time. Saved Goal identity and evidence are retained; recovery starts paused.
 Permission, budget, quota and genuine blockers still apply. When meaningful work finishes early, the model must explain the remaining requirement and request a revised duration; it must not create filler work. Controlled-clock and wall-clock-jump checks validate the contract. A ten-hour real Goal run is not claimed.
 
 16. Duplicate outputs/IDs around cancellation

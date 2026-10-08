@@ -1,5 +1,23 @@
 # Bits & Bytes Chat — verification
 
+## Follow-up fixes — 8 October 2026
+
+This follow-up supersedes the Goal editor and queued-edit banner in the earlier candidate. `/goal` keeps a composer chip and reads explicit duration/token-budget constraints from the prompt; there is no hours form or Goal panel. Saved Goal panel tabs are retired. Queued editing uses the ordinary composer without the editing banner, Undo or Cancel buttons, retaining the durable message identity on Send.
+
+The user's local 0.3.5 renderer logs identified the reported tool-workflow failure: `SessionPermissionDock.toolDescription` requested an absent custom-tool translation, then `brandTemplate` called `.replace()` on `undefined`. Missing descriptions now resolve to their key and the dock omits its optional hint. The permission decision remains explicit. This fixes the observed failure; it is not a claim that all possible app crashes are eliminated.
+
+Fresh Send releases a restart recovery pause, reconciles old admissions against the engine, and can proceed past failed/uncertain recovery rows when idle. Those rows are retained for inspection/retry rather than replayed. Stale waiting ownership is retired only after an idle engine inspection; nonterminal receipts retain ownership. Storage-write failures still require explicit recovery and cannot dispatch unsaved work.
+
+Validation: app and desktop typechecks pass; 95 host tests / 591 assertions and 21 app tests / 53 assertions pass. The serialized-journal restart test verifies a fresh Send without re-executing its uncertain predecessor. Actual hidden desktop checks cover Markdown creation and approval, PNG generation and approval/preview, a nonretryable provider failure followed by ordinary Send without Steer, the form-free Goal composer, absence of a Goal panel, and edited queue delivery exactly once. The controlled provider uses the production engine and renderer, without a live account. Windows remain hidden and unfocused throughout.
+
+The first retryable 503 fixture did not reach idle within the test deadline because provider retries remained active; that log is retained privately. The nonretryable 400 fixture verifies the failed-to-idle boundary without changing retry policy. Initial preview checks also used incorrect selectors; the corrected checks verify the actual file and image components. These unsuccessful harness runs are not counted as passing checks.
+
+The production build and local installer pass. The package audit matches all 1,834 compiled/runtime files to source build output. Installer: 175,375,027 bytes; SHA-256 `1e078cc6c7285ded526c742ed3a6533b3f7176cea958249b3f3cb40887261ed6`. It is an unsigned, unpublished 0.3.5 candidate under `.tools/qa/followup-package`; the existing published release and installation are unchanged.
+
+The required production composer baseline/comparison used fresh hidden profiles and the same warm 55,000-character workload: median 9.4 ms before and 9.8 ms after, five samples each. This is a small local check, not evidence of a speedup or a statistically established regression.
+
+Reproduce the native checks from `packages/desktop` with `node scripts/verify-followup-fixes.mjs` and `BB_QA_EXECUTABLE` pointing to the built candidate. Package verification supports `BB_QA_PACKAGE_DIR` and `BB_QA_REPORT` so owned QA output does not replace the accepted baseline report. Current UI captures: [queue](docs/screenshots/035-followup-queue.png), [queued editor](docs/screenshots/035-followup-queue-edit.png), [Goal composer](docs/screenshots/035-followup-goal.png). A new authenticated ChatGPT queue screenshot was unavailable; exact pixel parity is not verified.
+
 ## 0.3.5 candidate — 8 October 2026
 
 The candidate implements the accepted follow-up for all 18 `todo.txt` items. [TODO_RESOLUTION.txt](TODO_RESOLUTION.txt) maps each item to the shipped behavior, and [REFERENCE_ANALYSIS.md](REFERENCE_ANALYSIS.md) records the interaction research, step-by-step contract and reference limits. Work stays on `todo-polish` and [draft PR #2](https://github.com/DerkOttersberg/BitsBytesChat/pull/2). Published `v0.3.4` remains unchanged. The user's app, original checkout, credentials, recordings and models were not replaced, restarted or committed.

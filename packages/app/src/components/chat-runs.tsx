@@ -1,5 +1,5 @@
 import { createEffect, createMemo, For, onCleanup, Show } from "solid-js"
-import { createStore, unwrap } from "solid-js/store"
+import { createStore } from "solid-js/store"
 import { useParams, useSearchParams } from "@solidjs/router"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { Icon } from "@opencode-ai/ui/icon"
@@ -14,7 +14,7 @@ import { useLocal } from "../context/local"
 import { draftAccessKey } from "./chat-access"
 import type { FollowupDraft } from "./prompt-input/submit"
 import { readQueuedDraft, restoreQueuedDraft } from "./chat-run-draft"
-import { createQueuedEditGuard, moveQueuedInput, reorderQueuedInput, queuedEditCancelAction, queuedEditSelection, type QueuedEditComposer, type QueuedEditPrior } from "./chat-run-controls"
+import { createQueuedEditGuard, moveQueuedInput, reorderQueuedInput } from "./chat-run-controls"
 import "./chat-runs.css"
 import "./chat-runs-rail.css"
 
@@ -91,7 +91,7 @@ export function ModeIcon(props: { kind: "plan" | "goal" | "steer" }) {
 
 export function ChatRuns() {
   const run = useChatRun(), language = useLanguage(), prompt = usePrompt(), local = useLocal(), sdk = useSDK(), platform = usePlatform()
-  const [store, setStore] = createStore({ confirmGoal: false, editing: "", prior: undefined as QueuedEditPrior | undefined, now: Date.now(), tick: performance.now(), dragging: "" })
+  const [store, setStore] = createStore({ confirmGoal: false, editing: "", now: Date.now(), tick: performance.now(), dragging: "" })
   const goalClock = createMemo(() => {
     const goal = run.store.value?.goal
     return goal ? { id: goal.id, elapsed: goal.elapsed, running: goal.status === "active" && goal.activeSince !== undefined, tick: performance.now() } : undefined
@@ -100,27 +100,22 @@ export function ChatRuns() {
   const queued = createMemo(() => run.store.value?.queue.filter(item => !item.editing && item.status !== "sending" && item.presentation !== "transcript") ?? [])
   const editing = createMemo(() => run.store.value?.queue.find(item => item.editing)?.id ?? "")
   const editGuard = createQueuedEditGuard()
-  createEffect(() => { if (editGuard.select(run.identity())) setStore({ editing: "", prior: undefined }) })
+  createEffect(() => { if (editGuard.select(run.identity())) setStore({ editing: "" }) })
   onCleanup(editGuard.invalidate)
   const timer = setInterval(() => { if (run.store.value?.goal?.status === "active" || editing()) setStore({ now: Date.now(), tick: performance.now() }) }, 1000)
   onCleanup(() => clearInterval(timer))
   const action = (name: string, args: Record<string, unknown> = {}) => void run.call(name, args).catch(() => undefined)
   const move = (id: string, step: -1 | 1) => { const ids = moveQueuedInput(run.store.value?.queue ?? [], id, step); if (ids) action("reorder", { ids }) }
-  const open = (kind: "plan" | "goal") => window.dispatchEvent(new CustomEvent("bitsbytes:run-panel", { detail: { kind, sessionID: run.identity() } }))
   const title = (item: RunState["queue"][number]) => readQueuedDraft(item.prompt.draft)?.prompt.map(part => "content" in part ? part.content : `[${part.filename}]`).join("").trim() || item.prompt.text
-  const captureComposer = (): QueuedEditComposer => {
-    const model = local.model.current(), selection = local.session.selection()
-    return structuredClone(unwrap({ prompt: prompt.current(), context: prompt.context.items(), ...queuedEditSelection({ selectedAgent: selection?.agent, resolvedAgent: local.agent.current()?.name, selectedModel: selection?.model, resolvedModel: model ? { providerID: model.provider.id, modelID: model.id } : undefined, selectedVariant: selection?.variant, resolvedVariant: local.model.variant.current() }) }))
-  }
   async function edit(item: RunState["queue"][number]) {
     const draft = readQueuedDraft(item.prompt.draft)
     if (!draft) return
-    const sessionID = run.identity(), prior = store.prior?.sessionID === sessionID ? store.prior : undefined, request = editGuard.begin(sessionID)
+    const sessionID = run.identity(), request = editGuard.begin(sessionID)
     await Promise.all([local.session.ready.promise, prompt.ready.promise])
     if (!editGuard.current(request, run.identity())) return
     await run.call("edit", { id: item.id })
     if (!editGuard.current(request, run.identity()) || !run.store.value?.queue.some(row => row.id === item.id && row.editing)) return
-    setStore({ editing: item.id, prior: prior ?? { sessionID, ...captureComposer() } })
+    setStore({ editing: item.id })
     prompt.set(restoreQueuedDraft(draft).prompt)
     for (const context of prompt.context.items()) prompt.context.remove(context.key)
     for (const context of draft.context) prompt.context.add(context)
@@ -128,36 +123,12 @@ export function ChatRuns() {
     local.model.set({ providerID: draft.model.providerID, modelID: draft.model.modelID })
     local.model.variant.set(draft.variant)
   }
-  async function cancelEdit() {
-    if (!editing()) return
-    const sessionID = run.identity(), id = editing(), request = editGuard.begin(sessionID)
-    await Promise.all([local.session.ready.promise, prompt.ready.promise])
-    if (!editGuard.current(request, run.identity()) || editing() !== id) return
-    const prior = store.prior?.sessionID === sessionID ? store.prior : undefined, before = captureComposer()
-    const queued = readQueuedDraft(run.store.value?.queue.find(row => row.id === id)?.prompt.draft)
-    await run.call("cancel-edit", { id })
-    if (!editGuard.current(request, run.identity())) return
-    const policy = queuedEditCancelAction({ sessionID, prior, queued, before, current: captureComposer() })
-    if (policy === "restore" && prior) {
-      prompt.set([...prior.prompt])
-      for (const context of prompt.context.items()) prompt.context.remove(context.key)
-      for (const context of prior.context) prompt.context.add(context)
-      local.agent.set(prior.agent)
-      local.model.set(prior.model)
-      local.model.variant.set(prior.variant)
-    }
-    if (policy === "clear") {
-      prompt.reset()
-      for (const context of prompt.context.items()) prompt.context.remove(context.key)
-    }
-    setStore({ editing: "", prior: undefined })
-  }
-  createEffect(() => { if (store.editing && !run.store.value?.queue.some(item => item.id === store.editing && item.editing)) setStore({ editing: "", prior: undefined }) })
+  createEffect(() => { if (store.editing && !run.store.value?.queue.some(item => item.id === store.editing && item.editing)) setStore({ editing: "" }) })
   const goalRequest = (event: Event) => { if ((event as CustomEvent).detail.sessionID !== run.identity()) return; if (run.store.value?.goal && run.store.value.goal.status !== "complete") setStore("confirmGoal", true); else action("goal-draft", { enabled: true }) }
   window.addEventListener("bitsbytes:goal-draft", goalRequest)
   onCleanup(() => window.removeEventListener("bitsbytes:goal-draft", goalRequest))
   return <Show when={platform.bitsbytes}><div class="bb-run-controls">
-    <Show when={queued().length || editing()}>
+    <Show when={queued().length}>
       <div class="bb-run-queue" data-component="durable-queue">
         <Show when={queued().length}><div class="bb-run-heading"><span>{language.t("bitsbytes.queued", { count: queued().length })}</span>
           <Show when={run.store.value?.paused}><ButtonV2 size="normal" variant="ghost-muted" onClick={() => action("resume")}>{language.t("bitsbytes.resumeQueue")}</ButtonV2></Show>
@@ -175,20 +146,17 @@ export function ChatRuns() {
           </MenuV2.Content></MenuV2.Portal></MenuV2>
           <button disabled={item.status === "sending"} title={language.t("bitsbytes.delete")} aria-label={language.t("bitsbytes.delete")} onClick={() => action("delete", { id: item.id })}><Icon name="close-small" /></button>
         </div>}</For></div>
-        <Show when={editing()}><div class="bb-run-heading bb-queue-editing"><span>{language.t("bitsbytes.editingQueued")}</span><Show when={store.now - (run.store.value?.queue.find(item => item.id === editing())?.editingSince ?? store.now) < 1800000}><ButtonV2 size="normal" variant="ghost-muted" onClick={() => void cancelEdit().catch(() => undefined)}>{language.t("command.session.undo")}</ButtonV2></Show><ButtonV2 size="normal" variant="ghost-muted" onClick={() => void cancelEdit().catch(() => undefined)}>{language.t("bitsbytes.cancelEdit")}</ButtonV2></div></Show>
       </div>
     </Show>
     <Show when={run.store.value?.goal && (run.store.value.goal.status !== "complete" || !run.store.value.goal.summaryDismissed) && run.store.value.goal}>{goal => <div class="bb-goal-row" data-status={goal().status}>
-      <button class="bb-goal-summary" onClick={() => open("goal")} title={goal().objective}><ModeIcon kind="goal" /><span>{language.t((`bitsbytes.goal.${goal().status}`) as "bitsbytes.goal.active")}</span><span class="bb-goal-objective">{goal().objective}</span></button>
+      <div class="bb-goal-summary" title={goal().objective}><ModeIcon kind="goal" /><span>{language.t((`bitsbytes.goal.${goal().status}`) as "bitsbytes.goal.active")}</span><span class="bb-goal-objective">{goal().objective}</span></div>
       <span class="bb-goal-stat">{language.t("bitsbytes.goalElapsed", { minutes: Math.floor(goalElapsed() / 60000) })}<Show when={goal().budget}> · {language.t("bitsbytes.goalTokens", { tokens: goal().tokens, budget: goal().budget! })}</Show></span>
       <button class="bb-goal-icon" onClick={() => action("goal-clear")} title={language.t("bitsbytes.clearGoal")} aria-label={language.t("bitsbytes.clearGoal")}><Icon name="close-small" /></button>
       <Show when={goal().status !== "complete"}><button class="bb-goal-icon" onClick={() => action(goal().status === "active" ? "goal-pause" : "goal-resume")} title={language.t(goal().status === "active" ? "bitsbytes.pause" : "bitsbytes.resume")} aria-label={language.t(goal().status === "active" ? "bitsbytes.pause" : "bitsbytes.resume")}>{goal().status === "active" ? "Ⅱ" : "▷"}</button></Show>
-      <button class="bb-goal-icon" onClick={() => open("goal")} title={language.t("bitsbytes.edit")} aria-label={language.t("bitsbytes.edit")}><Icon name="edit" /></button>
     </div>}</Show>
     <div class="bb-mode-row">
       <Show when={run.store.value?.mode === "plan"}><button class="bb-mode-chip" onClick={() => { action("mode", { mode: "normal" }); local.agent.set("build") }} title={language.t("bitsbytes.removePlan")}><ModeIcon kind="plan" />{language.t("bitsbytes.plan")}<Icon name="close-small" /></button></Show>
       <Show when={run.store.value?.goalDraft}><button class="bb-mode-chip" onClick={() => action("goal-draft", { enabled: false })} title={language.t("bitsbytes.removeGoal")}><ModeIcon kind="goal" />{language.t("bitsbytes.goal")}<Icon name="close-small" /></button></Show>
-      <Show when={run.store.value?.goalDraft}><label class="bb-goal-duration">{language.t("bitsbytes.minActiveHours")}<input type="number" min="0" step="0.25" value={(run.store.value?.goalDraftDurationMs ?? 0) / 3600000} onChange={event => action("goal-draft", { enabled: true, minActiveDurationMs: Math.round(Number(event.currentTarget.value) * 3600000) })} /></label></Show>
     </div>
     <Show when={run.store.error}><p class="bb-queue-error" role="alert">{run.store.error}</p></Show>
     <For each={run.store.value?.queue.filter(item => item.presentation === "transcript" && item.error) ?? []}>{item => <div class="bb-run-heading" role="alert"><span class="bb-queue-error">{language.t("bitsbytes.deliveryUncertain")}</span><ButtonV2 size="normal" variant="ghost-muted" onClick={() => action("retry", { id: item.id })}>{language.t("bitsbytes.retry")}</ButtonV2></div>}</For>

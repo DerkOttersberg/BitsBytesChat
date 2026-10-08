@@ -11,6 +11,13 @@ const tab: PanelTab = {
   previewRevision: 1,
   unread: true,
 }
+
+test("saved Goal panels are retired while the Plan tab remains available", () => {
+  const f = fixture(JSON.stringify({ tabs: [tab, { ...tab, id: "goal:ses_test", kind: "goal", title: "Goal" }], active: "goal:ses_test", open: true }))
+  const result = readPanelState(f.storage, key, 800)
+  expect(result.value.tabs).toEqual([tab])
+  expect(result.value.active).toBe(tab.id)
+})
 function fixture(raw: string | null) {
   const values = new Map<string, string>(raw === null ? [] : [[key, raw]])
   const faults = { read: false, write: false, recovery: false }

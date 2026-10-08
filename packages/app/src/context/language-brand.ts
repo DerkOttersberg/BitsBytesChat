@@ -1,6 +1,9 @@
 import { resolveTemplate } from "@solid-primitives/i18n"
 
-export function brandTemplate(key: string, template: string, applicationName?: string) {
+export function brandTemplate(key: string, template: string | undefined, applicationName?: string) {
+  // Dynamic tool permissions have no dictionary entry. Preserve the translator's
+  // missing-key contract so their approval dock can omit its optional hint.
+  if (typeof template !== "string") return key
   if (
     !applicationName ||
     key.startsWith("provider.connect.opencodeZen.") ||
@@ -12,7 +15,7 @@ export function brandTemplate(key: string, template: string, applicationName?: s
 
 export function resolveBrandedTemplate(
   key: string,
-  template: string,
+  template: string | undefined,
   params?: Record<string, string | number | boolean>,
   applicationName?: string,
 ) {

@@ -1,6 +1,12 @@
 import { expect, test } from "bun:test"
 import { brandTemplate, resolveBrandedTemplate } from "./language-brand"
 
+test("custom tool permission descriptions missing from the dictionary cannot crash branding", () => {
+  const key = "settings.permissions.tool.bitsbytes-local_open_artifact.description"
+  expect(resolveBrandedTemplate(key, undefined, undefined, "Bits & Bytes Chat")).toBe(key)
+  expect(resolveBrandedTemplate(key, undefined)).toBe(key)
+})
+
 test("branding changes source copy while preserving interpolated filenames and errors", () => {
   const params = {
     filename: "OpenCode Desktop notes.txt",

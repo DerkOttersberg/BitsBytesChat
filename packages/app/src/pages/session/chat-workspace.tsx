@@ -298,6 +298,7 @@ export function ChatWorkspace(props: {
     })
     const runPanel = (event: Event) => {
       const detail = (event as CustomEvent<{ sessionID: string; kind: "plan" | "goal" }>).detail
+      if (detail.kind !== "plan") return
       if (detail.sessionID !== owner() && !store.tabs.some((tab) => tab.id === detail.sessionID)) return
       add({
         id: `${detail.kind}:${detail.sessionID}`,

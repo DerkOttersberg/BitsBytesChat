@@ -1,5 +1,13 @@
 # Interface research and implementation
 
+## User-directed simplification — 8 October 2026
+
+The follow-up removes the Goal hours form and Goal panel, including restored panel tabs. `/goal` keeps a composer chip and the prompt supplies the objective and constraints. The compact status row keeps Pause/Resume/Clear. Queued editing restores the request in the ordinary composer without an editing banner, Undo or Cancel buttons; Send still replaces the same durable reservation.
+
+A hidden visit to the current ChatGPT guest page confirmed that it did not expose queued-message editing during a response. No authenticated ChatGPT or Codex reference surface was available through browser control. Exact pixel matching, including dimensions and location against a new reference screenshot, remains unverified. The fork screenshots are actual isolated QA captures, never presented as ChatGPT screenshots. Public queue behavior is documented in [Prompting](https://learn.chatgpt.com/docs/prompting).
+
+These changes supersede the Goal editor and queued-edit banner descriptions and screenshots below.
+
 ## Implemented interaction contract — 8 October 2026
 
 The 0.3.5 candidate uses **Codex desktop** as the primary interaction reference and ChatGPT's per-message hover actions as the branching reference. The local Codex desktop bundle was inspected for control structure and optional-question clock behavior; public product documentation supplies the externally documented contract. Authenticated ChatGPT screens were not available for a new pixel comparison. The resulting patch reproduces the observed mechanics with this fork's design tokens and engine; it does not claim pixel identity or copy private application code.

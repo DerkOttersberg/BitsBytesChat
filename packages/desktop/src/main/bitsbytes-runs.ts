@@ -113,10 +113,12 @@ export class BBRuns {
         if (chat.goal && chat.goal.status !== "complete" && !args.replace && !chat.replaceGoal) throw new Error("bb.error.goalExists")
         const baseline = (await this.inspect(prompt)).messages.reduce((sum, row) => sum + row.tokens, 0)
         if (chat.revision !== revision) throw new Error("bb.error.deliveryConflict")
-        const duration = Number(args.minActiveDurationMs ?? chat.goalDraftDurationMs ?? 0)
+        const objective = String(args.objective || args.userText || (args.prompt as RunPrompt).text).trim()
+        const parameters = goalPromptParameters(objective)
+        const duration = Number(args.minActiveDurationMs ?? parameters.minActiveDurationMs ?? 0)
         if (!Number.isSafeInteger(duration) || duration < 0) throw new Error("bb.error.invalidRequest")
         if (chat.goal) this.clockGoal(chat.goal, false)
-        chat.goal = { id: randomBytes(12).toString("hex"), objective: String(args.objective || args.userText || (args.prompt as RunPrompt).text).trim(), status: "active", reason: "", evidence: "", started: this.now(), elapsed: 0, activeTimeMs: 0, minActiveDurationMs: duration, tokens: 0, budget: typeof args.budget === "number" && args.budget > 0 ? args.budget : undefined, continuations: 0, baseline, firstID: prompt.id, updatedAt: this.now() }
+        chat.goal = { id: randomBytes(12).toString("hex"), objective, status: "active", reason: "", evidence: "", started: this.now(), elapsed: 0, activeTimeMs: 0, minActiveDurationMs: duration, tokens: 0, budget: typeof args.budget === "number" && args.budget > 0 ? args.budget : parameters.budget, continuations: 0, baseline, firstID: prompt.id, updatedAt: this.now() }
         chat.goalDraft = false; chat.replaceGoal = false
         const context = `This is a saved goal (ID ${chat.goal.id}): ${chat.goal.objective}. Work until complete, respecting user constraints and permissions. Minimum active work: ${duration} ms; waiting for the user and paused time do not count. Use bitsbytes-local_goal_progress with this goal ID to report completion with actual validation evidence, or blocked with a precise reason. Do not generate filler work to satisfy the duration. If meaningful work is complete early, explain the remaining duration and ask the user to revise it. Do not claim completion merely because you stop working.`
         prompt.legacyParts = [...(prompt.legacyParts ?? [{ type: "text", text: prompt.text }]), { type: "text", text: context, synthetic: true }]
@@ -133,18 +135,27 @@ export class BBRuns {
         return existing
       }
       const item: QueuedInput = { id: prompt.id, prompt, status: "pending", delivery: args.delivery === "steer" ? "steer" : "queue", dismissGoalID: chat.goal?.status === "complete" ? chat.goal.id : undefined }
-      if (chat.paused && chat.pauseReason === "user-stop") { chat.paused = false; chat.pauseReason = undefined }
+      const recovering = chat.pauseReason === "recovery" || chat.queue.some(row => ["failed", "uncertain"].includes(row.status))
+      // A fresh explicit Send releases restart/failure recovery as well as Stop.
+      // Old uncertain inputs remain available for reconciliation, never replayed.
+      if (chat.paused && (chat.pauseReason === "user-stop" || chat.pauseReason === "recovery")) { chat.paused = false; chat.pauseReason = undefined; chat.resumeRequested = false }
       // Renderer busy events can lag the completed/Stop boundary. Reconcile
       // attempted admission before deciding whether a first new input is queued.
-      const boundary = !chat.paused && !chat.awaiting && (args.immediate === false || chat.queue.some(row => row.sentAt !== undefined))
+      const boundary = !chat.paused && (!chat.awaiting || recovering) && (recovering || args.immediate === false || chat.queue.some(row => row.sentAt !== undefined))
         ? await this.inspect(prompt, { readBusyMessages: chat.queue.some(row => row.sentAt !== undefined), readWaitingState: false }).catch(() => undefined)
         : undefined
       if (chat.revision !== revision) throw new Error("bb.error.deliveryConflict")
       if (boundary) {
         const admitted = new Set(boundary.messages.filter(row => row.receipt?.stage !== "preparing").map(row => row.id))
         chat.queue = chat.queue.filter(row => row === existing || row.sentAt === undefined || !admitted.has(row.id))
+        if (recovering && !boundary.busy) {
+          // Retain unresolved recovery rows, but they no longer own live work.
+          // Confirmed nonterminal receipts keep their engine ownership.
+          chat.awaitingInputIDs = chat.awaitingInputIDs?.filter(id => boundary.messages.some(row => row.id === id && row.receipt && !["completed", "interrupted", "failed"].includes(row.receipt.stage)))
+          chat.awaiting = Boolean(chat.awaitingInputIDs?.length)
+        }
       }
-      item.presentation = (args.immediate === true || boundary?.busy === false) && !chat.paused && !chat.queue.some(row => row !== existing && !row.editing) ? "transcript" : "queue"
+      item.presentation = (args.immediate === true || boundary?.busy === false) && !chat.paused && !chat.queue.some(row => row !== existing && !row.editing && ["pending", "sending"].includes(row.status)) ? "transcript" : "queue"
       if (existing) chat.queue.splice(chat.queue.indexOf(existing), 1, item)
       else chat.queue.push(item)
       await this.save(chat); void this.pump(chat.sessionID); return item
@@ -237,7 +248,7 @@ export class BBRuns {
     let attempt: QueuedInput | undefined
     let dispatchStarted = false
     try {
-      const candidate = chat.queue.find(item => item.delivery === "steer" && !item.editing) ?? chat.queue[0]
+      const candidate = this.candidate(chat)
       const reference = candidate?.prompt ?? chat.last
       if (!reference) return
       if (candidate?.status === "failed" && candidate.sentAt === undefined) return
@@ -246,7 +257,7 @@ export class BBRuns {
       const state = await this.inspect(reference, { readBusyMessages: Boolean(chat.resumeRequested || candidate && (candidate.delivery === "steer" || candidate.status !== "pending" || candidate.sentAt !== undefined)), readWaitingState: chat.goal?.status === "active" })
       // User controls remain available while inspection waits on the engine.
       // Discard the snapshot if Stop, an edit or reordering changed its candidate.
-      if (chat.paused || chat.revision !== revision || candidate !== (chat.queue.find(item => item.delivery === "steer" && !item.editing) ?? chat.queue[0])) return
+      if (chat.paused || chat.revision !== revision || candidate !== this.candidate(chat)) return
       if (chat.goal?.status === "active") {
         const checkpoint = chat.goal.activeSince
         this.clockGoal(chat.goal, state.busy && !state.waiting && Boolean(chat.goal.pendingInputIDs?.length))
@@ -358,6 +369,11 @@ export class BBRuns {
       await this.save(chat).catch(() => undefined)
     } finally { this.admissions.delete(id); this.active.delete(id); this.pumping.delete(id); done.resolve() }
   }
+  private candidate(chat: ChatRun) {
+    return chat.queue.find(item => item.delivery === "steer" && !["failed", "uncertain"].includes(item.status) && !item.editing)
+      ?? (["failed", "uncertain"].includes(chat.queue[0]?.status) ? chat.queue.find(item => item.status === "pending" && !item.editing) : undefined)
+      ?? chat.queue[0]
+  }
   private clockGoal(goal: Goal, running: boolean) {
     const now = this.now()
     const tick = this.monotonic(), previous = this.goalTicks.get(goal.id)
@@ -394,6 +410,20 @@ export class BBRuns {
     chat.awaitingInputIDs = chat.awaitingInputIDs?.filter(inputID => inputID !== id)
     if (!chat.awaitingInputIDs?.length) chat.awaiting = false
     if (chat.goal?.pendingInputIDs) chat.goal.pendingInputIDs = chat.goal.pendingInputIDs.filter(inputID => inputID !== id)
+  }
+}
+
+export function goalPromptParameters(text: string): { minActiveDurationMs?: number; budget?: number } {
+  // Only explicit work-duration and token-budget phrases become host limits.
+  // Other requirements stay in the complete objective for the model to follow.
+  const duration = text.match(/\b(?:keep\s+(?:working|going)|continue\s+working|work|minimum\s+active\s+(?:work|duration)|blijf\s+werken|werk|ga\s+door)\s*(?:(?:for|voor|at\s+least|minimaal)\s*)?[:=]?\s*(\d+(?:[.,]\d+)?)\s*(hours?|hrs?|uur|uren|minutes?|mins?|minuten)\b/i)
+  const tokens = text.match(/\btoken\s*budget\s*(?:(?:of|van)\s*)?[:=]?\s*(\d{1,3}(?:[,._]\d{3})+|\d+)(?![\d.,_])\b/i)
+    ?? text.match(/\b(?:budget|maximum|max)\s*(?:(?:of|van)\s*)?[:=]?\s*(\d{1,3}(?:[,._]\d{3})+|\d+)\s+tokens\b/i)
+  const milliseconds = duration ? Number(duration[1].replace(",", ".")) * (/^(?:h|u)/i.test(duration[2]) ? 3600000 : 60000) : undefined
+  const budget = tokens ? Number(tokens[1].replace(/[,._]/g, "")) : undefined
+  return {
+    ...(milliseconds !== undefined && Number.isSafeInteger(milliseconds) && milliseconds >= 0 ? { minActiveDurationMs: milliseconds } : {}),
+    ...(budget !== undefined && Number.isSafeInteger(budget) && budget > 0 ? { budget } : {}),
   }
 }
 

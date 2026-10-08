@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, readdir, rm, rmdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { tmpdir } from "node:os"
-import { BBRuns, UnsentError, type Inspection, type InspectionOptions, type RunPrompt } from "./bitsbytes-runs"
+import { BBRuns, UnsentError, goalPromptParameters, type Inspection, type InspectionOptions, type RunPrompt } from "./bitsbytes-runs"
 import { proposedPlan } from "@opencode-ai/core/util/proposed-plan"
 import { ascending } from "@opencode-ai/core/id/id"
 
@@ -20,6 +20,55 @@ async function fixture() {
   return { runs, folder, state, sent, fail, prompt, settle, inspections }
 }
 afterEach(async () => { for (const fixture of fixtures.splice(0)) { fixture.runs.close(); const path = resolve(fixture.folder); if (!path.startsWith(resolve(tmpdir()) + "\\bb-runs-test-") && !path.startsWith(resolve(tmpdir()) + "/bb-runs-test-")) throw new Error("Unexpected cleanup path"); await rm(path, { recursive: true, force: true }) } })
+
+test("goal parameters come from explicit prompt constraints, not a previous draft form", async () => {
+  expect(goalPromptParameters("Keep going for 7 hours. Token budget: 12000")).toEqual({ minActiveDurationMs: 25200000, budget: 12000 })
+  expect(goalPromptParameters("Blijf werken voor 1,5 uur; budget van 500 tokens")).toEqual({ minActiveDurationMs: 5400000, budget: 500 })
+  expect(goalPromptParameters("Work for 25 minutes")).toEqual({ minActiveDurationMs: 1500000 })
+  expect(goalPromptParameters("Token budget: 10,000")).toEqual({ budget: 10000 })
+  expect(goalPromptParameters("Token budget: 1.5")).toEqual({})
+  expect(goalPromptParameters("Write a report about a meeting lasting 7 hours and 50 tokens")).toEqual({})
+  const f = await fixture()
+  await f.runs.call("goal-draft", { sessionID: "ses_test", enabled: true, minActiveDurationMs: 36000000 })
+  await f.runs.call("admit", { prompt: f.prompt("msg_goal_prompt", "Complete the requested document") })
+  expect(f.runs.get("ses_test").goal?.minActiveDurationMs).toBe(0)
+})
+
+test.each(["failed", "uncertain"] as const)("fresh Send proceeds past an idle %s input without replaying it", async status => {
+  const f = await fixture(); f.runs.close()
+  await f.runs.call("admit", { prompt: f.prompt("msg_previous") })
+  const chat = f.runs.get("ses_test")
+  chat.queue[0].status = status
+  if (status === "uncertain") chat.queue[0].sentAt = 123
+  chat.paused = true; chat.pauseReason = "recovery"
+  chat.awaiting = true; chat.awaitingInputIDs = ["msg_previous"]
+  f.state.busy = false
+  await f.runs.call("admit", { prompt: f.prompt("msg_fresh"), immediate: false })
+  await f.runs.pump("ses_test"); await f.settle()
+  expect(chat.paused).toBe(false)
+  expect(f.sent.map(prompt => prompt.id)).toEqual(["msg_fresh"])
+  expect(chat.queue.some(item => item.id === "msg_previous" && item.status === status)).toBe(true)
+  expect(chat.awaitingInputIDs).not.toContain("msg_previous")
+})
+
+test("a fresh Send after a real journal restart releases recovery without resuming the old input", async () => {
+  const f = await fixture(); f.runs.close()
+  await f.runs.call("admit", { prompt: f.prompt("msg_crashed") })
+  const old = f.runs.get("ses_test")
+  old.queue[0].status = "uncertain"; old.queue[0].sentAt = 123
+  old.awaiting = true; old.awaitingInputIDs = ["msg_crashed"]
+  await f.runs.call("mode", { sessionID: old.sessionID, mode: "normal" })
+  f.state.busy = false
+  const restored = new BBRuns(f.folder, async () => structuredClone(f.state), async prompt => { f.sent.push(prompt); f.state.busy = true }, () => undefined)
+  fixtures.push({ runs: restored, folder: f.folder }); await restored.start(); restored.close()
+  expect(restored.get("ses_test").pauseReason).toBe("recovery")
+  expect(f.sent).toHaveLength(0)
+  await restored.call("admit", { prompt: f.prompt("msg_after_restart"), immediate: false })
+  await restored.pump("ses_test")
+  expect(f.sent.map(prompt => prompt.id)).toEqual(["msg_after_restart"])
+  expect(restored.get("ses_test").awaitingInputIDs).toEqual(["msg_after_restart"])
+  expect(restored.get("ses_test").queue.find(item => item.id === "msg_crashed")?.status).toBe("uncertain")
+})
 
 async function stoppedGoalFixture(stop = true) {
   const f = await fixture()
@@ -1112,7 +1161,9 @@ test.each(["admit", "goal", "resume"])("a rejected %s save cannot dispatch autom
   if (phase === "goal") await f.runs.call("goal-draft", { sessionID: prompt.sessionID, enabled: true })
   if (phase === "resume") {
     f.runs.get(prompt.sessionID).paused = true
-    f.runs.get(prompt.sessionID).pauseReason = "recovery"
+    // A fresh Send now releases restart recovery. Storage failure still waits
+    // for explicit Resume, so the rejected-write scenario begins there.
+    f.runs.get(prompt.sessionID).pauseReason = "storage"
     await f.runs.call("admit", { prompt })
   }
   const durable = await readFile(join(f.folder, "chat-runs.json"), "utf8")
@@ -1235,7 +1286,7 @@ test("a ten-hour minimum counts active execution, excluding questions, pauses an
   }, () => undefined, undefined, () => now, () => now)
   fixtures.push({ runs, folder }); await runs.start(); runs.close()
   await runs.call("goal-draft", { sessionID: "ses_test", enabled: true, minActiveDurationMs: 36000000 })
-  await runs.call("admit", { prompt: { sessionID: "ses_test", directory: folder, id: "msg_duration", text: "Meaningful work" } })
+  await runs.call("admit", { prompt: { sessionID: "ses_test", directory: folder, id: "msg_duration", text: "Keep working for 10 hours on meaningful work" } })
   await dispatched.promise; await runs.pump("ses_test")
   const goal = runs.get("ses_test").goal!
   now += 60000
@@ -1267,7 +1318,7 @@ test("a wall-clock jump cannot satisfy the Goal minimum", async () => {
   }, () => undefined, undefined, () => wall, () => tick)
   fixtures.push({ runs, folder }); await runs.start(); runs.close()
   await runs.call("goal-draft", { sessionID: "ses_test", enabled: true, minActiveDurationMs: 600000 })
-  await runs.call("admit", { prompt: { sessionID: "ses_test", directory: folder, id: "msg_clock", text: "Verify the artifact" } })
+  await runs.call("admit", { prompt: { sessionID: "ses_test", directory: folder, id: "msg_clock", text: "Work for 10 minutes to verify the artifact" } })
   await dispatched.promise; await runs.pump("ses_test")
   const goal = runs.get("ses_test").goal!
   wall += 10 * 3600000; tick += 60000
