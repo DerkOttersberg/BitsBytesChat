@@ -1,3 +1,4 @@
+import { captureHidden } from "./qa-capture.mjs"
 // Explicit opt-in: this exercises real account inference through the app UI.
 import { createRequire } from "node:module"
 import { mkdir, copyFile, readFile, writeFile, rename, symlink } from "node:fs/promises"
@@ -18,7 +19,9 @@ await mkdir(join(data, "desktop"), { recursive: true })
 await mkdir(join(data, "config/opencode"), { recursive: true })
 await copyFile(join(source, "desktop/Local State"), join(data, "desktop/Local State"))
 await writeFile(join(data, "credentials.bin"), original)
-await copyFile(join(source, "model-catalog.json"), join(data, "model-catalog.json"))
+await copyFile(join(source, "model-catalog.json"), join(data, "model-catalog.json")).catch((error) => {
+  if (error.code !== "ENOENT") throw error
+})
 await symlink(process.env.BB_QA_RUNTIME || join(process.env.LOCALAPPDATA, "BitsBytesChat/runtime"), join(data, "runtime"), "junction")
 const model = process.env.BB_LIVE_MODEL || "gpt-5.6-luna"
 const longSource = process.env.BB_LIVE_LONG_SOURCE === "1"
@@ -46,7 +49,7 @@ const check = (name) => { report.checks.push(name); console.log("PASS", name) }
 const app = await _electron.launch({
   executablePath: process.env.BB_LIVE_EXECUTABLE || join(root, "packages/desktop/node_modules/electron/dist/electron.exe"),
   ...(process.env.BB_LIVE_EXECUTABLE ? {} : { args: [join(root, "packages/desktop")] }),
-  env: { ...process.env, BB_QA_ISOLATED: "1", LOCALAPPDATA: profile }, timeout: 90000,
+  env: { ...process.env, BB_QA_ISOLATED: "1", BB_QA_HIDDEN: "1", BB_QA_CAPTURE: "1", LOCALAPPDATA: profile }, timeout: 90000,
 })
 let page, call, engine
 // Refresh tokens can rotate. Preserve updates only if the user's encrypted store has
@@ -136,17 +139,31 @@ try {
   const side = page.locator(".bb-panel-content:visible"), sideEditor = side.locator("[contenteditable=true]").first()
   await sideEditor.waitFor()
   assert.equal((await side.innerText()).includes("STROOM-42"), false)
-  const before = await engine("/session")
-  // Upstream's fork copies history into a new root session; parentID is reserved
-  // for agent child sessions and is not guaranteed on a conversation fork.
-  const fork = before.find((row) => row.id !== session.id)
-  assert.ok(fork)
+  const sideID = await side.locator('.bb-embedded-chat [data-bb-chat]').getAttribute('data-bb-chat')
+  const fork = await engine('/session/' + sideID)
+  assert.equal(fork.parentID, session.id)
+  assert.ok(fork.metadata.bitsbytesDiagnostic)
+  assert.equal((await engine('/session/' + fork.id + '/message')).length, 0)
+  const parentHistory = await engine('/session/' + session.id + '/message')
   report.side = fork.id
-  await sideEditor.fill("What codeword was supplied in the inherited conversation? Reply with only the codeword; do not use tools.")
+  await sideEditor.fill("Use parent_progress to read the owning main chat's latest confirmed response. Reply with only the codeword in that recorded response. Do not repeat or execute the parent task.")
   await side.locator('[data-action="prompt-submit"]').click()
-  const sideMessages = await completed(fork.id, 3)
+  await completed(fork.id, 1)
+  let sideSettled = false
+  for (let i = 0; i < 120; i++) {
+    const run = await call('runs.get', { sessionID: fork.id }), statuses = await engine('/session/status')
+    if (!run.awaiting && !run.queue.length && statuses[fork.id]?.type !== 'busy') { sideSettled = true; break }
+    await page.waitForTimeout(1000)
+  }
+  assert.ok(sideSettled, 'Live diagnostic side chat did not settle')
+  const sideMessages = await engine('/session/' + fork.id + '/message')
   assert.ok(sideMessages.filter((row) => row.info.role === "assistant").at(-1).parts.some((part) => part.text?.includes("STROOM-42")))
-  check("An empty-looking /side chat uses inherited context in an independent live request")
+  assert.ok(sideMessages.some(row => row.parts.some(part => part.type === 'tool' && part.tool === 'parent_progress' && part.state?.status === 'completed')))
+  assert.deepEqual(await engine('/session/' + session.id + '/message'), parentHistory)
+  await page.locator('.bb-panel-tabs').getByRole('button', { name: 'Close tab', exact: true }).first().click()
+  await page.locator('.bb-embedded-chat').waitFor({ state: 'detached' })
+  assert.ok((await engine('/session/' + fork.id)).time.archived)
+  check("Live /side starts fresh, reads verified parent progress through its diagnostic tool, and closes without changing the main chat")
   await send("Create qa-live.txt in this test workspace containing exactly STROOM-42. Use the local file tools, then read the file and report the content in one short sentence. Stay inside this workspace.")
   messages = await completed(session.id, 3)
   // Tool turns can add multiple assistant records; wait for the run to become idle.
@@ -342,7 +359,7 @@ try {
     check("A real saved Goal creates and verifies its output, reports evidence and updates the Achieved widget")
   }
   report.conversations = (await Promise.all([session.id, ...(report.side ? [report.side] : [])].map(async (id) => ({ id, messages: (await engine(`/session/${id}/message`)).map((row) => ({ role: row.info.role, model: row.info.modelID, tokens: row.info.tokens, tools: row.parts.filter((part) => part.type === "tool").map((part) => ({ name: part.tool, status: part.state?.status })) })) }))))
-  await page.screenshot({ path: join(root, ".tools/qa/results/" + tag + ".png") })
+  await captureHidden(app, page, join(root, ".tools/qa/results/" + tag + ".png"))
   assert.deepEqual(report.errors, [])
 } catch (error) {
   report.errors.push(error.stack)

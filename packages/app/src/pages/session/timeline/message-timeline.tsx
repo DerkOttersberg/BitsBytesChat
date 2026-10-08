@@ -62,7 +62,6 @@ import { useFileComponent } from "@opencode-ai/ui/context/file"
 import { shouldMarkBoundaryGesture, normalizeWheelDelta } from "@/pages/session/message-gesture"
 import { SessionContextUsage } from "@/components/session-context-usage"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
-import { DialogFork } from "@/components/dialog-fork"
 import { useLanguage } from "@/context/language"
 import { useSessionKey } from "@/pages/session/session-layout"
 import { useSessionArchive } from "@/pages/session/session-archive"
@@ -1025,6 +1024,7 @@ export function MessageTimeline(props: {
           <Show when={part()}>
             {(part) => (
               <MessagePart
+                actions={props.actions}
                 part={part()}
                 message={message()}
                 showAssistantCopyPartID={assistantCopyPartID(row().userMessageID)}
@@ -1547,12 +1547,6 @@ export function MessageTimeline(props: {
                                 >
                                   <DropdownMenu.ItemLabel>{language.t("common.rename")}</DropdownMenu.ItemLabel>
                                 </DropdownMenu.Item>
-                                <DropdownMenu.Item
-                                  disabled={!props.userMessages.length}
-                                  onSelect={() => dialog.show(() => <DialogFork />)}
-                                >
-                                  <DropdownMenu.ItemLabel>{language.t("command.session.fork")}</DropdownMenu.ItemLabel>
-                                </DropdownMenu.Item>
                                 <Show when={shareEnabled()}>
                                   <DropdownMenu.Item
                                     onSelect={() => {
@@ -1628,12 +1622,6 @@ export function MessageTimeline(props: {
                                 }}
                               >
                                 {language.t("common.rename")}
-                              </MenuV2.Item>
-                              <MenuV2.Item
-                                disabled={!props.userMessages.length}
-                                onSelect={() => dialog.show(() => <DialogFork />)}
-                              >
-                                {language.t("command.session.fork")}
                               </MenuV2.Item>
                               <Show when={shareEnabled()}>
                                 <MenuV2.Item

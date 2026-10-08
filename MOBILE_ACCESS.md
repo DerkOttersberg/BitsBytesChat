@@ -4,7 +4,7 @@ The phone connects to the **same engine and sessions on your Windows computer**.
 
 ## First connection
 
-1. Open **Start BitsBytesChat.cmd** or **Start BitsBytes Mobile.cmd**. Both launch the same **0.3.4** application with mobile access included. If an older desktop/mobile copy is still running, the launcher offers to close it first. Your existing `%LOCALAPPDATA%\BitsBytesChat` data and credentials are retained.
+1. Open **Start BitsBytesChat.cmd** or **Start BitsBytes Mobile.cmd**. Both launch the same **0.3.5 candidate** application with mobile access included. If an older desktop/mobile copy is still running, the launcher offers to close it first. Your existing `%LOCALAPPDATA%\BitsBytesChat` data and credentials are retained.
 2. Open **Settings → Mobile access → Enable mobile access**. Connect both devices to the same Wi-Fi/LAN. If Windows prompts, allow the executable on the profile used by that Wi-Fi; Windows can classify it as Public even on a home network. The app does not alter firewall rules.
 3. Choose **Pair a phone** and scan the QR code. The QR now prefers connected physical Wi-Fi/Ethernet adapters over VPNs and virtual networks. **Connection addresses** shows the adapter name and marks VPN/virtual choices. An explicitly selected address is remembered for renewed QR codes and subsequent app launches while that address remains available; after an IP change the current LAN address is selected instead. Windows route/interface metadata is read with a five-second limit and cached; a portable fallback ranks recognizable VPNs and point-to-point addresses last.
 4. This local server uses a self-signed HTTPS certificate. On the phone, check the address and SHA-256 fingerprint shown in the desktop settings before accepting the browser's certificate warning. The app does not install system trust certificates. Fingerprints change when a certificate expires or must be regenerated for another network address.
@@ -12,7 +12,7 @@ The phone connects to the **same engine and sessions on your Windows computer**.
 
 Keep the computer awake with the mobile-enabled app running. It may be minimized. Closing the app, sleeping the computer or disconnecting its network disconnects the phone; reopening and reconnecting restores access. **Revoke** removes an individual device. **Disable mobile access** stops the listener.
 
-The unreleased reliability branch keeps the composer available during a temporary startup failure and retries connection metadata. A metadata read that stalls for 15 seconds is cancelled so subsequent polls can reconnect. Delayed responses from an earlier visit cannot replace the latest chat after switching away and back. Large queued sources no longer enlarge every status poll; the host retains the full request for explicit Resume. Stop pauses follow-ups and releases stopped waiting state once the engine is idle, and queue errors show the existing recovery messages. Updates retain selection and focus in unchanged messages; artifact cards still offer their current saved revisions. Unsent drafts remain on the phone; this retry does not resend messages or upload audio.
+The 0.3.5 candidate keeps the composer available during a temporary startup failure and retries connection metadata. A metadata read that stalls for 15 seconds is cancelled so subsequent polls can reconnect. Delayed responses from an earlier visit cannot replace the latest chat after switching away and back. Large queued sources no longer enlarge every status poll; the host retains the full request for explicit Resume. Stop pauses follow-ups and releases stopped waiting state once the engine is idle, and queue errors show the existing recovery messages. Updates retain selection and focus in unchanged messages; artifact cards still offer their current saved revisions. Unsent drafts remain on the phone; this retry does not resend messages or upload audio.
 
 Spreadsheet previews show row numbers and follow the rows actually returned. Large pages can contain fewer than 200 rows; Previous returns through visited pages. Long values/formulas carry a preview notice, and Download retains the complete saved revision. Paging controls wait for reads, and a failed read can be retried.
 
@@ -21,6 +21,14 @@ Spreadsheet previews show row numbers and follow the rows actually returned. Lar
 A VPN address such as a WireGuard tunnel's `10.x.x.x` address generally does not work from a phone on the computer's Wi-Fi. Select the physical Wi-Fi/Ethernet option and scan the QR again. On the laptop examined for this fix, the Wi-Fi URL was `https://192.168.11.242:24483`; this is a diagnostic example, not a hardcoded app default, and DHCP may change it. The old QR chose `10.77.77.2` because the VPN appeared first in OS enumeration. The running server returned its mobile page over the Wi-Fi URL and already had a Windows allow rule for the active Public profile.
 
 If the correct address still times out, check that the phone is on the same LAN rather than a guest Wi-Fi, and that its VPN and the router permit local-network traffic. A certificate warning is a separate step after reaching the server. [Mozilla's Firefox for iOS instructions](https://support.mozilla.org/en-US/kb/certificate-warnings-firefox-ios) describe **Advanced** and the option to visit the site. Check this app's local address and displayed certificate fingerprint before proceeding; system trust settings are not changed.
+
+## Questions and stopped work
+
+The paired page uses the same numbered question wizard as the desktop. Single choice advances automatically after a brief delay; multiple choice uses Next; Back, Skip and a custom answer remain available. Recommended is a badge and initial focus, not a submitted answer. Draft choices are saved by chat/request and survive reload. A failed reply retains them for explicit Retry without silently sending twice. Damaged optional local state is sanitized.
+
+Optional-question expiry is controlled by **Settings → General → Optional question timer** on the computer. Foreground conversation inactivity starts a 90-second countdown after 60 seconds; a background chat uses 90 seconds. The counter appears only in its last minute. Foreground conversation activity resets inactivity, and interaction inside the question card snoozes that request. Expiry and optional Dismiss send empty answers. Required Dismiss stops the owning chat; required questions and approvals never auto-answer. Human waiting time does not count toward a Goal's active duration.
+
+Stop pauses pending work and joins cancellation. A later ordinary Send releases the preserved queue in order while leaving the stopped Goal paused. Storage/recovery pauses and uncertain delivery still need explicit Resume/Retry. Both devices use the same stable admission IDs; phone polling never transfers provider credentials.
 
 ## Available on the phone
 
@@ -45,7 +53,7 @@ The desktop terminal/browser panels, skill editing and remote access outside the
 
 Mobile settings, hashed device tokens, the local HTTPS certificate and resumable upload journals live beneath `%LOCALAPPDATA%\BitsBytesChat\mobile`. The certificate password is encrypted using Electron's Windows credential encryption. The phone receives a Secure, HttpOnly, SameSite=Strict cookie; it never receives the engine password or AI-provider credentials. Only explicitly implemented mobile methods are exposed, with origin/host checks and a private-network address restriction.
 
-The Windows executable is `packages\desktop\dist\0.3.4\win-unpacked\BitsBytesChat.exe`. Keep its accompanying files together. Desktop and mobile access share one build, **0.3.4**. Upstream auto-updates remain disabled. `dist\mobile` contains the historical separate build; both project launchers now target the regular application. The single-instance check protects the shared data profile across both executable names.
+The Windows executable is `packages\desktop\dist\0.3.5\win-unpacked\BitsBytesChat.exe`. Keep its accompanying files together. Desktop and mobile access share one candidate build, **0.3.5**. The published release remains **v0.3.4**. Upstream auto-updates remain disabled. `dist\mobile` contains the historical separate build; both project launchers now target the regular application. The single-instance check protects the shared data profile across both executable names.
 
 ## Build and verification
 
@@ -59,7 +67,7 @@ For package checks, run from `packages\desktop` in PowerShell:
 & ..\..\.tools\bun-windows-x64\bun.exe run package:win -- --publish never
 ```
 
-The regular packaging configuration writes to the versioned `dist\0.3.4` directory. Earlier outputs remain available as historical builds.
+This is an unsigned local candidate, not a published replacement installer. The regular packaging configuration writes to the versioned `dist\0.3.5` directory. Earlier outputs remain available as historical builds.
 
 The HTTPS integration tests run under Node, the runtime used by Electron. Bun's PFX handling differs from Node and is not used for these network tests:
 
@@ -68,7 +76,7 @@ The HTTPS integration tests run under Node, the runtime used by Electron. Bun's 
 node --test ..\..\.tools\mobile\mobile.test.mjs
 ```
 
-`scripts\verify-mobile.mjs` uses the existing `.tools\qa` Playwright installation and installed Edge. It creates an isolated profile, uses a deterministic local provider and leaves the user's app, data, share and credentials untouched. Set `BB_MOBILE_EXECUTABLE` to `dist\0.3.4\win-unpacked\BitsBytesChat.exe` to exercise the unified packaged app. Results and screenshots are written under `.tools\mobile`.
+`scripts\verify-mobile.mjs` uses the existing `.tools\qa` Playwright installation and installed Edge. It creates an isolated profile, uses a deterministic local provider and leaves the user's app, data, share and credentials untouched. Set `BB_MOBILE_EXECUTABLE` to `dist\0.3.5\win-unpacked\BitsBytesChat.exe` to exercise the unified packaged app. Results and screenshots are written under `.tools\mobile`.
 
 The test coverage includes same-session messages in both directions, per-device drafts, frozen skill context, Word/PDF.js preview, HTML isolation, HTTPS pairing, origin/host rejection, credential redaction, upload retry/recovery, a 32 MB upload, restart persistence and device revocation. Run `scripts/setup-qa.ps1` once for the pinned QA dependencies. `scripts/verify-phone-audio.mjs` exercises actual browser MediaRecorder with synthetic microphone audio and an API fixture; `BB_AUDIO_SOAK_MINUTES=65` enables the endurance check. `BB_MOBILE_AUDIO=1` enables the paired HTTPS microphone/CPU worker check; it requires installed Parakeet models. `BB_MOBILE_DAMAGED_STATE=1` checks startup recovery. Use Node.js 24 or later, from `packages/desktop`.
 

@@ -109,7 +109,7 @@ try {
     executablePath:
       process.env.BB_QA_EXECUTABLE || join(root, "packages/desktop/node_modules/electron/dist/electron.exe"),
     args: [process.env.BB_QA_MAIN || join(root, "packages/desktop")],
-    env: { ...process.env, BB_QA_ISOLATED: "1", LOCALAPPDATA: profile },
+    env: { ...process.env, BB_QA_ISOLATED: "1", BB_QA_HIDDEN: "1", LOCALAPPDATA: profile },
     timeout: 90000,
   })
   const desktop = await app.firstWindow()
@@ -137,7 +137,6 @@ try {
   })
   assert.ok(response.ok)
   const session = await response.json()
-  if (!admissionStorage) await call("runs.stop", { sessionID: session.id })
   const prompt = {
     sessionID: session.id,
     directory: join(data, "workspace"),
@@ -155,11 +154,15 @@ try {
       { type: "text", text: source, synthetic: true },
     ],
   }
+  // Ordinary Send intentionally releases a user Stop. Hold this first request
+  // through a real owned journal failure instead: recovery pauses still require
+  // explicit Resume, and the complete frozen source must remain available.
+  const admissionTemporary = join(data, "chat-runs.json.tmp")
+  assert.ok(resolve(admissionTemporary).startsWith(resolve(profile) + sep))
+  await mkdir(admissionTemporary)
+  await assert.rejects(call("runs.admit", { prompt }))
+  await rmdir(admissionTemporary)
   if (admissionStorage) {
-    const temporary = join(data, "chat-runs.json.tmp")
-    await mkdir(temporary)
-    await assert.rejects(call("runs.admit", { prompt }))
-    await rmdir(temporary)
     // Cross multiple real host polling intervals after restoring storage.
     await new Promise(resolve => setTimeout(resolve, 3500))
     const run = await call("runs.get", { sessionID: session.id })
@@ -171,7 +174,7 @@ try {
     assert.ok(run.error.includes("chat-runs.json.tmp"))
     for (const key of Object.keys(prompt)) assert.deepEqual(run.queue[0].prompt[key], prompt[key])
     check("A rejected admission stays paused across host polling after storage recovers and cannot silently reach the provider")
-  } else await call("runs.admit", { prompt })
+  }
   const { createServer } = await import("node:net")
   const available = createServer()
   await new Promise((resolve) => available.listen(0, "127.0.0.1", resolve))

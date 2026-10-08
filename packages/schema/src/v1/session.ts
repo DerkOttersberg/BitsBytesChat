@@ -329,6 +329,17 @@ const messageBase = {
   sessionID: partBase.sessionID,
 }
 
+export const ExecutionReceipt = Schema.Struct({
+  inputID: MessageID,
+  revision: NonNegativeInt,
+  stage: Schema.Literals(["preparing", "admitted", "applied", "completed", "interrupted", "failed"]),
+  turnID: Schema.optional(MessageID),
+  error: Schema.optional(Schema.String),
+  fingerprint: Schema.String,
+  preparedParts: Schema.optional(Schema.Array(Schema.Unknown)),
+}).annotate({ identifier: "ExecutionReceipt" })
+export type ExecutionReceipt = Types.DeepMutable<Schema.Schema.Type<typeof ExecutionReceipt>>
+
 export const User = Schema.Struct({
   ...messageBase,
   role: Schema.Literal("user"),
@@ -351,6 +362,7 @@ export const User = Schema.Struct({
   }),
   system: Schema.optional(Schema.String),
   tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
+  execution: Schema.optional(ExecutionReceipt),
 }).annotate({ identifier: "UserMessage" })
 export type User = Types.DeepMutable<Schema.Schema.Type<typeof User>>
 

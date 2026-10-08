@@ -559,9 +559,10 @@ export class BBMobile {
     if (method === "access") return this.host.call("access.set", { sessionID: id, mode: args.mode })
     if (method === "stop") {
       const saved = await this.host.call("runs.stop", { sessionID: id }).then(
-        () => ({ ok: true }) as const,
+        value => ({ ok: true, value: value as { interruptionOwned?: boolean } }) as const,
         (error) => ({ ok: false, error }) as const,
       )
+      if (saved.ok && saved.value?.interruptionOwned) return saved.value
       const run = this.host.runs.get(id)
       const directory =
         run.last?.directory ??
@@ -572,6 +573,11 @@ export class BBMobile {
       return interrupted
     }
     if (method === "resume") return this.host.call("runs.resume", { sessionID: id })
+    if (method === "question-activity") {
+      const session = await this.host.engineFetch<{ directory: string }>(`/session/${id}`)
+      if (!["foreground", "background", "conversation", "snooze"].includes(String(args.kind))) throw new Error(mobileCopy.invalid)
+      return this.host.call("question.activity", { requestID: safeID(args.id), sessionID: id, directory: session.directory, kind: args.kind })
+    }
     if (method === "permission" || method === "question") {
       const session = await this.host.engineFetch<{ directory: string }>(`/session/${id}`)
       const endpoint = method === "permission" ? "permission" : "question"
@@ -632,6 +638,7 @@ export class BBMobile {
     const messageID = safeID(args.id)
     if (!/^msg_[a-f0-9]{26}$/.test(messageID)) throw new Error(mobileCopy.invalid)
     return this.host.call("runs.admit", {
+      immediate: args.immediate === true,
       delivery: args.delivery === "steer" ? "steer" : "queue",
       userText: request,
       prompt: {

@@ -167,7 +167,11 @@ import type {
   PtyShellsResponses,
   PtyUpdateErrors,
   PtyUpdateResponses,
+  QuestionActivityErrors,
+  QuestionActivityResponses,
   QuestionAnswer,
+  QuestionConfigureErrors,
+  QuestionConfigureResponses,
   QuestionListErrors,
   QuestionListResponses,
   QuestionRejectErrors,
@@ -371,6 +375,8 @@ import type {
   V2SessionQuestionRejectResponses,
   V2SessionQuestionReplyErrors,
   V2SessionQuestionReplyResponses,
+  V2SessionResumeErrors,
+  V2SessionResumeResponses,
   V2SessionRevertClearErrors,
   V2SessionRevertClearResponses,
   V2SessionRevertCommitErrors,
@@ -2980,6 +2986,61 @@ export class Pty extends HeyApiClient {
 }
 
 export class Question extends HeyApiClient {
+  public configure<ThrowOnError extends boolean = false>(
+    parameters?: {
+      enabled?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "enabled" }] }])
+    return (options?.client ?? this.client).post<QuestionConfigureResponses, QuestionConfigureErrors, ThrowOnError>({
+      url: "/question/settings",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public activity<ThrowOnError extends boolean = false>(
+    parameters: {
+      requestID: string
+      directory?: string
+      workspace?: string
+      sessionID?: string
+      kind?: "foreground" | "background" | "conversation" | "snooze"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "requestID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "sessionID" },
+            { in: "body", key: "kind" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<QuestionActivityResponses, QuestionActivityErrors, ThrowOnError>({
+      url: "/question/{requestID}/activity",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
   /**
    * List pending questions
    *
@@ -3751,6 +3812,8 @@ export class Session2 extends HeyApiClient {
       }
       agent?: string
       noReply?: boolean
+      resume?: boolean
+      revision?: number
       tools?: {
         [key: string]: boolean
       }
@@ -3773,6 +3836,8 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "model" },
             { in: "body", key: "agent" },
             { in: "body", key: "noReply" },
+            { in: "body", key: "resume" },
+            { in: "body", key: "revision" },
             { in: "body", key: "tools" },
             { in: "body", key: "format" },
             { in: "body", key: "system" },
@@ -3877,6 +3942,7 @@ export class Session2 extends HeyApiClient {
       directory?: string
       workspace?: string
       messageID?: string
+      inclusive?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3889,6 +3955,7 @@ export class Session2 extends HeyApiClient {
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
             { in: "body", key: "messageID" },
+            { in: "body", key: "inclusive" },
           ],
         },
       ],
@@ -4104,6 +4171,8 @@ export class Session2 extends HeyApiClient {
       }
       agent?: string
       noReply?: boolean
+      resume?: boolean
+      revision?: number
       tools?: {
         [key: string]: boolean
       }
@@ -4126,6 +4195,8 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "model" },
             { in: "body", key: "agent" },
             { in: "body", key: "noReply" },
+            { in: "body", key: "resume" },
+            { in: "body", key: "revision" },
             { in: "body", key: "tools" },
             { in: "body", key: "format" },
             { in: "body", key: "system" },
@@ -5652,6 +5723,25 @@ export class Session3 extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Resume session execution
+   *
+   * Explicitly resume this Session’s existing projected context without admitting another input.
+   */
+  public resume<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).post<V2SessionResumeResponses, V2SessionResumeErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/resume",
+      ...options,
+      ...params,
     })
   }
 

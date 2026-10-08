@@ -3,7 +3,7 @@ export * as QuestionV1 from "./question"
 import { Schema } from "effect"
 import { define, inventory } from "../event"
 import { ascending } from "../identifier"
-import { statics } from "../schema"
+import { statics, NonNegativeInt } from "../schema"
 import { SessionID } from "../session-id"
 import { SessionV1 } from "./session"
 
@@ -37,6 +37,13 @@ export const Request = Schema.Struct({
   sessionID: SessionID,
   questions: Schema.Array(Info).annotate({ description: "Questions to ask" }),
   tool: Schema.optional(Tool),
+  isBlocking: Schema.optional(Schema.Boolean),
+  autoResolution: Schema.optional(
+    Schema.Struct({
+      phase: Schema.Literals(["inactivity", "countdown", "snoozed", "disabled"]),
+      expiresAt: Schema.optional(NonNegativeInt),
+    }),
+  ),
 }).annotate({ identifier: "QuestionRequest" })
 export const Answer = Schema.Array(Schema.String).annotate({ identifier: "QuestionAnswer" })
 export const Reply = Schema.Struct({

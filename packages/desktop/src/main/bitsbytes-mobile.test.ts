@@ -18,6 +18,7 @@ const sessions = [{ id: "ses_shared", title: "Laptop conversation", directory: "
 const frozenSource = "SAVED-QUEUE-CONTEXT 🌿 ".repeat(6000)
 const sessionRead = { held: false, entered: Promise.withResolvers<void>(), release: Promise.withResolvers<void>() }
 const journalFailure = { enabled: false }
+const ownedInterruption = { enabled: false }
 const savedRun = {
   sessionID: "ses_shared",
   queue: [{ id: "msg_pending", status: "pending", delivery: "queue", prompt: { text: frozenSource } }],
@@ -99,6 +100,7 @@ const host = {
     if (method === "runs.stop") {
       savedRun.paused = true
       if (journalFailure.enabled) throw Error("Journal storage unavailable")
+      if (ownedInterruption.enabled) return { interruptionOwned: true }
     }
     return method === "access.get" ? { mode: "ask" } : { ok: true }
   },
@@ -266,6 +268,24 @@ test("phone Stop pauses the host before waiting for engine session metadata", { 
     sessionRead.release.resolve()
     await stopping
   }
+})
+
+test("phone Stop leaves a host-owned interruption to its single coordinator", async () => {
+  ownedInterruption.enabled = true
+  const offset = calls.length
+  try {
+    const response = await api("stop", { sessionID: "ses_shared" })
+    assert.equal(response.status, 200)
+    assert.equal(JSON.parse(response.body).interruptionOwned, true)
+    assert.deepEqual(calls.slice(offset).map(row => row.method), ["runs.stop"])
+  } finally { ownedInterruption.enabled = false }
+})
+
+test("phone question activity retains request and conversation ownership", async () => {
+  const response = await api("question-activity", { sessionID: "ses_shared", id: "que_shared", kind: "snooze" })
+  assert.equal(response.status, 200)
+  assert.deepEqual(calls.findLast(row => row.method === "question.activity")?.args, { sessionID: "ses_shared", requestID: "que_shared", kind: "snooze", directory: sessions[0].directory })
+  assert.equal((await api("question-activity", { sessionID: "ses_shared", id: "que_shared", kind: "invented" })).status, 400)
 })
 
 test("phone Stop uses a known host directory without another metadata read", async () => {

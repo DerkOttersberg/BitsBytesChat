@@ -7,6 +7,8 @@ import { Effect, Latch, Layer, Scope, Context } from "effect"
 import { Session } from "./session"
 import { SessionID } from "./schema"
 import { SessionStatus } from "./status"
+import { Question } from "@/question"
+import { Permission } from "@/permission"
 
 export interface Interface {
   readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void, Session.BusyError>
@@ -31,6 +33,23 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const background = yield* BackgroundJob.Service
     const status = yield* SessionStatus.Service
+    const question = yield* Question.Service
+    const permission = yield* Permission.Service
+
+    // AI SDK tool callbacks bridge into independent Promise fibers. Stopping
+    // their provider stream alone cannot release a pending human response.
+    const settlePending = Effect.fn("SessionRunState.settlePending")(function* (sessionID: SessionID) {
+      for (const item of yield* question.list()) {
+        if (item.sessionID !== sessionID) continue
+        yield* question.reject(item.id).pipe(Effect.catchTag("Question.NotFoundError", () => Effect.void))
+      }
+      for (const item of yield* permission.list()) {
+        if (item.sessionID !== sessionID) continue
+        yield* permission
+          .reply({ requestID: item.id, reply: "reject" })
+          .pipe(Effect.catchTag("Permission.NotFoundError", () => Effect.void))
+      }
+    }, Effect.uninterruptible)
 
     const state = yield* InstanceState.make(
       Effect.fn("SessionRunState.state")(function* () {
@@ -58,7 +77,7 @@ const layer = Layer.effect(
       if (existing) return existing
       const next = Runner.make<SessionV1.WithParts>(data.scope, {
         onIdle: Effect.gen(function* () {
-          data.runners.delete(sessionID)
+          yield* settlePending(sessionID)
           yield* status.set(sessionID, { type: "idle" })
         }),
         onBusy: status.set(sessionID, { type: "busy" }),
@@ -79,6 +98,7 @@ const layer = Layer.effect(
       const data = yield* InstanceState.get(state)
       const existing = data.runners.get(sessionID)
       if (!existing) {
+        yield* settlePending(sessionID)
         yield* status.set(sessionID, { type: "idle" })
         return
       }
@@ -146,6 +166,10 @@ function busyError(sessionID: SessionID) {
   return new Session.BusyError({ sessionID })
 }
 
-export const node = LayerNode.make({ service: Service, layer: layer, deps: [BackgroundJob.node, SessionStatus.node] })
+export const node = LayerNode.make({
+  service: Service,
+  layer: layer,
+  deps: [BackgroundJob.node, SessionStatus.node, Question.node, Permission.node],
+})
 
 export * as SessionRunState from "./run-state"

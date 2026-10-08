@@ -102,6 +102,9 @@ type TerminalCacheEntry = {
 }
 
 const caches = new Set<Map<string, TerminalCacheEntry>>()
+// Retained main routes and embedded conversations can each provide Terminal.
+// Their workspace state and initial creation gate must have one owner.
+const workspaces = new Map<string, TerminalCacheEntry & { users: number }>()
 
 const trimTerminal = (pty: LocalPTY) => {
   if (!pty.buffer && pty.cursor === undefined && pty.scrollY === undefined) return pty
@@ -509,10 +512,34 @@ export const { use: useTerminal, provider: TerminalProvider } = createSimpleCont
         return existing.value
       }
 
-      const entry = createRoot((dispose) => ({
-        value: createWorkspaceTerminalSession(sdk(), dir, serverScope, legacySessionID),
-        dispose,
-      }))
+      const shared =
+        workspaces.get(key) ??
+        createRoot((dispose) => ({
+          // Keep the directory SDK's event subscription owned by the shared root,
+          // even when the first provider closes before another retained route.
+          value: createWorkspaceTerminalSession(
+            serverSDK().ensureDirSdkContext(sdk().directory),
+            dir,
+            serverScope,
+            legacySessionID,
+          ),
+          dispose,
+          users: 0,
+        }))
+      workspaces.set(key, shared)
+      shared.users++
+      let released = false
+      const entry = {
+        value: shared.value,
+        dispose: () => {
+          if (released) return
+          released = true
+          shared.users--
+          if (shared.users) return
+          workspaces.delete(key)
+          shared.dispose()
+        },
+      }
 
       cache.set(key, entry)
       prune()

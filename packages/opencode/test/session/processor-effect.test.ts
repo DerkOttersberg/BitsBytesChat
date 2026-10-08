@@ -226,6 +226,86 @@ const fragmentFailureLLM = Layer.succeed(
 const fragmentFailureEnv = LayerNode.compile(root, [...replacements, [LLM.node, fragmentFailureLLM]])
 const itFragmentFailure = testEffect(fragmentFailureEnv)
 
+const sourceLLM = Layer.succeed(
+  LLM.Service,
+  LLM.Service.of({
+    stream: () =>
+      Stream.make(
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.source({
+          id: "source-1",
+          sourceType: "url",
+          url: "https://example.com/recorded",
+          title: "Recorded page",
+        }),
+        LLMEvent.source({
+          id: "source-1",
+          sourceType: "url",
+          url: "https://example.com/recorded",
+          title: "Updated recorded title",
+        }),
+        LLMEvent.source({
+          id: "source-2",
+          sourceType: "document",
+          title: "Recorded document",
+          filename: "recorded.pdf",
+          mediaType: "application/pdf",
+        }),
+        LLMEvent.textStart({ id: "text-source" }),
+        LLMEvent.textDelta({ id: "text-source", text: "Supported answer" }),
+        LLMEvent.textEnd({ id: "text-source" }),
+        LLMEvent.stepFinish({ index: 0, reason: "stop" }),
+        LLMEvent.finish({ reason: "stop" }),
+      ),
+  }),
+)
+const sourceEnv = LayerNode.compile(root, [...replacements, [LLM.node, sourceLLM]])
+const itSource = testEffect(sourceEnv)
+
+itSource.live("BitsBytes provider source events persist once per source ID without altering the answer", () =>
+  provideTmpdirInstance(
+    (dir) =>
+      Effect.gen(function* () {
+        const { processors, session, provider } = yield* boot()
+        const chat = yield* session.create({ title: "Source fixture" })
+        const parent = yield* user(chat.id, "Find recorded sources")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const model = yield* provider.getModel(ref.providerID, ref.modelID)
+        const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model })
+        yield* handle.process({
+          user: parent,
+          sessionID: chat.id,
+          model,
+          agent: agent(),
+          system: [],
+          messages: [{ role: "user", content: "Find recorded sources" }],
+          tools: {},
+        })
+        const parts = yield* MessageV2.parts(msg.id)
+        const sources = parts.find((part) => part.type === "text" && part.metadata?.sources)
+        expect(sources?.type === "text" && sources.metadata?.sources).toEqual([
+          {
+            type: "source",
+            id: "source-1",
+            sourceType: "url",
+            url: "https://example.com/recorded",
+            title: "Updated recorded title",
+          },
+          {
+            type: "source",
+            id: "source-2",
+            sourceType: "document",
+            title: "Recorded document",
+            filename: "recorded.pdf",
+            mediaType: "application/pdf",
+          },
+        ])
+        expect(parts.filter((part) => part.type === "text" && part.text === "Supported answer")).toHaveLength(1)
+      }),
+    { config: cfg },
+  ),
+)
+
 const boot = Effect.fn("test.boot")(function* () {
   const processors = yield* SessionProcessor.Service
   const session = yield* Session.Service

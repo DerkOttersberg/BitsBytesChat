@@ -26,7 +26,7 @@ import { inArray } from "drizzle-orm"
 import { lt } from "drizzle-orm"
 import { or } from "drizzle-orm"
 import type { SQL } from "drizzle-orm"
-import { PartTable, SessionTable } from "@opencode-ai/core/session/sql"
+import { MessageTable, PartTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { MessageV2 } from "./message-v2"
 import type { InstanceContext } from "../project/instance-context"
@@ -38,7 +38,7 @@ import { SessionID, MessageID, PartID } from "./schema"
 
 import type { Provider } from "@/provider/provider"
 import { Global } from "@opencode-ai/core/global"
-import { Effect, Layer, Option, Context, Schema, Types } from "effect"
+import { Effect, Layer, Option, Context, Schema, Types, SynchronizedRef } from "effect"
 import { NonNegativeInt, optional } from "@opencode-ai/core/schema"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
@@ -273,6 +273,7 @@ export type CreateInput = Types.DeepMutable<Schema.Schema.Type<typeof CreateInpu
 export const ForkInput = Schema.Struct({
   sessionID: SessionID,
   messageID: Schema.optional(MessageID),
+  inclusive: Schema.optional(Schema.Boolean),
 })
 export const GetInput = SessionID
 export const ChildrenInput = SessionID
@@ -422,7 +423,7 @@ export interface Interface {
     permission?: PermissionV1.Ruleset
     workspaceID?: WorkspaceV2.ID
   }) => Effect.Effect<Info>
-  readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info, NotFound>
+  readonly fork: (input: typeof ForkInput.Type) => Effect.Effect<Info, NotFound>
   readonly touch: (sessionID: SessionID) => Effect.Effect<void>
   readonly get: (id: SessionID) => Effect.Effect<Info, NotFound>
   readonly setTitle: (input: { sessionID: SessionID; title: string }) => Effect.Effect<void>
@@ -449,6 +450,7 @@ export interface Interface {
   readonly children: (parentID: SessionID) => Effect.Effect<Info[]>
   readonly remove: (sessionID: SessionID) => Effect.Effect<void, NotFound>
   readonly updateMessage: <T extends SessionV1.Info>(msg: T) => Effect.Effect<T>
+  readonly updateExecution: (msg: SessionV1.User) => Effect.Effect<SessionV1.User>
   readonly removeMessage: (input: { sessionID: SessionID; messageID: MessageID }) => Effect.Effect<MessageID>
   readonly removePart: (input: { sessionID: SessionID; messageID: MessageID; partID: PartID }) => Effect.Effect<PartID>
   readonly getPart: (input: {
@@ -495,6 +497,7 @@ const layer: Layer.Layer<
     const background = yield* BackgroundJob.Service
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
+    const messageWrites = yield* SynchronizedRef.make(false)
 
     const createNext = Effect.fn("Session.createNext")(function* (input: {
       id?: SessionID
@@ -626,11 +629,36 @@ const layer: Layer.Layer<
       }
     })
 
-    const updateMessage = <T extends SessionV1.Info>(msg: T): Effect.Effect<T> =>
-      Effect.gen(function* () {
-        yield* events.publish(SessionV1.Event.MessageUpdated, { sessionID: msg.sessionID, info: msg })
-        return msg
-      }).pipe(Effect.withSpan("Session.updateMessage"))
+    const writeMessage = <T extends SessionV1.Info>(msg: T, execution = false): Effect.Effect<T> =>
+      SynchronizedRef.modifyEffect(
+        messageWrites,
+        Effect.fnUntraced(function* (lock) {
+          const current =
+            msg.role === "user"
+              ? yield* db
+                  .select({ data: MessageTable.data })
+                  .from(MessageTable)
+                  .where(and(eq(MessageTable.id, msg.id), eq(MessageTable.session_id, msg.sessionID)))
+                  .get()
+                  .pipe(Effect.orDie)
+              : undefined
+          // Summary work can finish after the provider or a resumed turn. Its
+          // old user snapshot must never resurrect or replace the owned receipt.
+          // Receipt writes likewise retain the independently computed summary.
+          const info =
+            msg.role === "user" && current?.data.role === "user"
+              ? {
+                  ...msg,
+                  execution: execution ? msg.execution : (current.data.execution ?? msg.execution),
+                  summary: execution ? current.data.summary : msg.summary,
+                }
+              : msg
+          yield* events.publish(SessionV1.Event.MessageUpdated, { sessionID: msg.sessionID, info })
+          return [info, lock] as const
+        }),
+      ).pipe(Effect.withSpan("Session.updateMessage"))
+    const updateMessage = <T extends SessionV1.Info>(msg: T) => writeMessage(msg)
+    const updateExecution = (msg: SessionV1.User) => writeMessage(msg, true)
 
     const updatePart = <T extends SessionV1.Part>(part: T): Effect.Effect<T> =>
       Effect.gen(function* () {
@@ -688,22 +716,28 @@ const layer: Layer.Layer<
       })
     })
 
-    const fork = Effect.fn("Session.fork")(function* (input: { sessionID: SessionID; messageID?: MessageID }) {
+    const fork = Effect.fn("Session.fork")(function* (input: typeof ForkInput.Type) {
       const ctx = yield* InstanceState.context
       const original = yield* get(input.sessionID)
+      const msgs = yield* messages({ sessionID: input.sessionID })
+      const target = input.messageID ? msgs.findIndex((msg) => msg.info.id === input.messageID) : msgs.length
+      if (target < 0) return yield* Effect.fail(new NotFoundError({ message: "Unknown branch message boundary" }))
+      const metadata = structuredClone(original.metadata)
+      if (input.inclusive && metadata) delete metadata.bitsbytesDiagnostic
       const title = getForkedTitle(original.title)
       const session = yield* createNext({
         directory: ctx.directory,
         path: sessionPath(ctx.worktree, ctx.directory),
         workspaceID: original.workspaceID,
         title,
-        metadata: structuredClone(original.metadata),
+        metadata,
+        agent: original.agent,
+        model: original.model,
+        permission: original.permission,
       })
-      const msgs = yield* messages({ sessionID: input.sessionID })
       const idMap = new Map<string, MessageID>()
-      const target = input.messageID ? msgs.findIndex((msg) => msg.info.id === input.messageID) : msgs.length
 
-      for (const msg of msgs.slice(0, target < 0 ? msgs.length : target)) {
+      for (const msg of msgs.slice(0, input.messageID && input.inclusive ? target + 1 : target)) {
         const newID = MessageID.ascending()
         idMap.set(msg.info.id, newID)
 
@@ -713,6 +747,7 @@ const layer: Layer.Layer<
           sessionID: session.id,
           id: newID,
           ...(parentID && { parentID }),
+          ...(msg.info.role === "user" ? { execution: undefined } : {}),
         })
 
         for (const part of msg.parts) {
@@ -759,6 +794,12 @@ const layer: Layer.Layer<
     })
 
     const setMetadata = Effect.fn("Session.setMetadata")(function* (input: typeof SetMetadataInput.Type) {
+      const existing = yield* get(input.sessionID).pipe(Effect.orDie)
+      if (
+        existing.metadata?.bitsbytesDiagnostic &&
+        JSON.stringify(existing.metadata.bitsbytesDiagnostic) !== JSON.stringify(input.metadata?.bitsbytesDiagnostic)
+      )
+        throw new Error("Diagnostic ownership is immutable")
       yield* patch(input.sessionID, { metadata: input.metadata, time: { updated: Date.now() } }).pipe(Effect.orDie)
     })
 
@@ -925,6 +966,7 @@ const layer: Layer.Layer<
       children,
       remove,
       updateMessage,
+      updateExecution,
       removeMessage,
       removePart,
       updatePart,

@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID, createHash } from "node:crypto"
+import { suppressNativeUI } from "./qa-mode"
 import { readFile, writeFile, rename, mkdir } from "node:fs/promises"
 import { createServer } from "node:http"
 import { join } from "node:path"
@@ -156,7 +157,7 @@ export class BBProvider {
     Object.entries(parameters).forEach(([key, value]) => authorization.searchParams.set(key, value))
     const timer = setTimeout(() => pending.reject(new Error("bb.error.authTimeout")), 180000)
     try {
-      await shell.openExternal(authorization.toString())
+      if (!suppressNativeUI("provider-authorize", authorization.origin)) await shell.openExternal(authorization.toString())
       const callback = await pending.promise
       if (callback.searchParams.get("error")) throw new Error("bb.error.planPermission")
       const issued = callback.searchParams.get("client_id") ?? this.credentials.client

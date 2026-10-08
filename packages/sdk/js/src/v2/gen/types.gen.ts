@@ -236,6 +236,16 @@ export type OutputFormatJsonSchema = {
 
 export type OutputFormat = OutputFormatText | OutputFormatJsonSchema
 
+export type ExecutionReceipt = {
+  inputID: string
+  revision: number
+  stage: "preparing" | "admitted" | "applied" | "completed" | "interrupted" | "failed"
+  turnID?: string
+  error?: string
+  fingerprint: string
+  preparedParts?: Array<unknown>
+}
+
 export type UserMessage = {
   id: string
   sessionID: string
@@ -259,6 +269,7 @@ export type UserMessage = {
   tools?: {
     [key: string]: boolean
   }
+  execution?: ExecutionReceipt
 }
 
 export type ProviderAuthError = {
@@ -1516,6 +1527,11 @@ export type GlobalEvent = {
            */
           questions: Array<QuestionInfo>
           tool?: QuestionTool
+          isBlocking?: boolean
+          autoResolution?: {
+            phase: "inactivity" | "countdown" | "snoozed" | "disabled"
+            expiresAt?: number
+          }
         }
       }
     | {
@@ -2452,6 +2468,12 @@ export type PtyForbiddenError = {
   message: string
 }
 
+export type QuestionNotFoundError = {
+  _tag: "QuestionNotFoundError"
+  requestID: string
+  message: string
+}
+
 export type QuestionRequest = {
   id: string
   sessionID: string
@@ -2460,12 +2482,11 @@ export type QuestionRequest = {
    */
   questions: Array<QuestionInfo>
   tool?: QuestionTool
-}
-
-export type QuestionNotFoundError = {
-  _tag: "QuestionNotFoundError"
-  requestID: string
-  message: string
+  isBlocking?: boolean
+  autoResolution?: {
+    phase: "inactivity" | "countdown" | "snoozed" | "disabled"
+    expiresAt?: number
+  }
 }
 
 export type PermissionRequest = {
@@ -2598,6 +2619,12 @@ export type SubtaskPartInput = {
   command?: string
 }
 
+export type ConflictError = {
+  _tag: "ConflictError"
+  message: string
+  resource?: string
+}
+
 export type SessionBusyError = {
   _tag: "SessionBusyError"
   sessionID: string
@@ -2712,12 +2739,6 @@ export type PromptInput = {
   text: string
   files?: Array<PromptInputFileAttachment>
   agents?: Array<PromptAgentAttachment>
-}
-
-export type ConflictError = {
-  _tag: "ConflictError"
-  message: string
-  resource?: string
 }
 
 export type ServiceUnavailableError = {
@@ -5950,6 +5971,11 @@ export type QuestionAsked = {
      */
     questions: Array<QuestionInfo>
     tool?: QuestionTool
+    isBlocking?: boolean
+    autoResolution?: {
+      phase: "inactivity" | "countdown" | "snoozed" | "disabled"
+      expiresAt?: number
+    }
   }
 }
 
@@ -6959,6 +6985,11 @@ export type EventQuestionAsked = {
      */
     questions: Array<QuestionInfo>
     tool?: QuestionTool
+    isBlocking?: boolean
+    autoResolution?: {
+      phase: "inactivity" | "countdown" | "snoozed" | "disabled"
+      expiresAt?: number
+    }
   }
 }
 
@@ -9135,6 +9166,70 @@ export type PtyConnectTokenResponses = {
 
 export type PtyConnectTokenResponse = PtyConnectTokenResponses[keyof PtyConnectTokenResponses]
 
+export type QuestionConfigureData = {
+  body?: {
+    enabled: boolean
+  }
+  path?: never
+  query?: never
+  url: "/question/settings"
+}
+
+export type QuestionConfigureErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type QuestionConfigureError = QuestionConfigureErrors[keyof QuestionConfigureErrors]
+
+export type QuestionConfigureResponses = {
+  /**
+   * Success
+   */
+  200: boolean
+}
+
+export type QuestionConfigureResponse = QuestionConfigureResponses[keyof QuestionConfigureResponses]
+
+export type QuestionActivityData = {
+  body?: {
+    sessionID: string
+    kind: "foreground" | "background" | "conversation" | "snooze"
+  }
+  path: {
+    requestID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/question/{requestID}/activity"
+}
+
+export type QuestionActivityErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * QuestionNotFoundError
+   */
+  404: QuestionNotFoundError
+}
+
+export type QuestionActivityError = QuestionActivityErrors[keyof QuestionActivityErrors]
+
+export type QuestionActivityResponses = {
+  /**
+   * Success
+   */
+  200: boolean
+}
+
+export type QuestionActivityResponse = QuestionActivityResponses[keyof QuestionActivityResponses]
+
 export type QuestionListData = {
   body?: never
   path?: never
@@ -9803,6 +9898,8 @@ export type SessionPromptData = {
     }
     agent?: string
     noReply?: boolean
+    resume?: boolean
+    revision?: number
     tools?: {
       [key: string]: boolean
     }
@@ -9830,6 +9927,10 @@ export type SessionPromptErrors = {
    * NotFoundError
    */
   404: NotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
 }
 
 export type SessionPromptError = SessionPromptErrors[keyof SessionPromptErrors]
@@ -9926,6 +10027,7 @@ export type SessionMessageResponse = SessionMessageResponses[keyof SessionMessag
 export type SessionForkData = {
   body?: {
     messageID?: string
+    inclusive?: boolean
   }
   path: {
     sessionID: string
@@ -10150,6 +10252,8 @@ export type SessionPromptAsyncData = {
     }
     agent?: string
     noReply?: boolean
+    resume?: boolean
+    revision?: number
     tools?: {
       [key: string]: boolean
     }
@@ -10177,6 +10281,10 @@ export type SessionPromptAsyncErrors = {
    * NotFoundError
    */
   404: NotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
 }
 
 export type SessionPromptAsyncError = SessionPromptAsyncErrors[keyof SessionPromptAsyncErrors]
@@ -11598,6 +11706,41 @@ export type V2SessionPromptResponses = {
 }
 
 export type V2SessionPromptResponse = V2SessionPromptResponses[keyof V2SessionPromptResponses]
+
+export type V2SessionResumeData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/resume"
+}
+
+export type V2SessionResumeErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionResumeError = V2SessionResumeErrors[keyof V2SessionResumeErrors]
+
+export type V2SessionResumeResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2SessionResumeResponse = V2SessionResumeResponses[keyof V2SessionResumeResponses]
 
 export type V2SessionCompactData = {
   body?: never

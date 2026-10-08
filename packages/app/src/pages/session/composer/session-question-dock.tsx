@@ -13,8 +13,13 @@ import { makeEventListener } from "@solid-primitives/event-listener"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { useServerSDK } from "@/context/server-sdk"
 import { ScopedKey } from "@/utils/server-scope"
+import { usePlatform } from "@/context/platform"
+import "./question-dock.css"
 
-const cache = new Map<string, { tab: number; answers: QuestionAnswer[]; custom: string[]; customOn: boolean[] }>()
+const cache = new Map<
+  string,
+  { tab: number; answers: QuestionAnswer[]; custom: string[]; customOn: boolean[]; minimized: boolean }
+>()
 
 function Mark(props: { multi: boolean; picked: boolean; onClick?: (event: MouseEvent) => void }) {
   return (
@@ -30,6 +35,7 @@ function Mark(props: { multi: boolean; picked: boolean; onClick?: (event: MouseE
 
 function Option(props: {
   multi: boolean
+  number: number
   picked: boolean
   label: string
   description?: string
@@ -38,6 +44,8 @@ function Option(props: {
   onFocus?: VoidFunction
   onClick: VoidFunction
 }) {
+  const language = useLanguage()
+  const recommended = () => props.label.endsWith(" (Recommended)")
   return (
     <button
       type="button"
@@ -50,9 +58,19 @@ function Option(props: {
       onFocus={props.onFocus}
       onClick={props.onClick}
     >
-      <Mark multi={props.multi} picked={props.picked} />
+      <span data-slot="question-option-number" aria-hidden="true">
+        {props.number}
+      </span>
+      <Show when={props.multi}>
+        <Mark multi={true} picked={props.picked} />
+      </Show>
       <span data-slot="question-option-main">
-        <span data-slot="option-label">{props.label}</span>
+        <span data-slot="option-label">
+          {recommended() ? props.label.slice(0, -14) : props.label}
+          <Show when={recommended()}>
+            <span data-slot="question-recommended">{language.t("session.question.recommended")}</span>
+          </Show>
+        </span>
         <Show when={props.description}>
           <span data-slot="option-description">{props.description}</span>
         </Show>
@@ -65,6 +83,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   const sdk = useSDK()
   const serverSDK = useServerSDK()
   const language = useLanguage()
+  const platform = usePlatform()
   const cacheKey = ScopedKey.from(serverSDK().scope, props.request.id)
 
   const questions = createMemo(() => props.request.questions)
@@ -78,8 +97,10 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
     customOn: cached?.customOn ?? ([] as boolean[]),
     editing: false,
     focus: 0,
-    minimized: false,
+    minimized: cached?.minimized ?? false,
     optionsHeight: 180,
+    advancing: false,
+    now: Date.now(),
   })
 
   let root: HTMLDivElement | undefined
@@ -88,6 +109,40 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   let optsRef: HTMLButtonElement[] = []
   let replied = false
   let focusFrame: number | undefined
+  let advanceTimer: ReturnType<typeof setTimeout> | undefined
+  const activity = (kind: "foreground" | "background" | "conversation" | "snooze") =>
+    void platform.bitsbytes
+      ?.call("question.activity", {
+        requestID: props.request.id,
+        sessionID: props.request.sessionID,
+        directory: sdk().directory,
+        kind,
+      })
+      .catch(() => undefined)
+  onMount(() => {
+    activity(document.hasFocus() ? "foreground" : "background")
+    const timer = setInterval(() => setStore("now", Date.now()), 1000)
+    const foreground = () => activity("foreground"),
+      background = () => activity("background")
+    let lastActivity = 0
+    const conversation = (event: Event) => {
+      if (
+        event.type !== "pointermove" &&
+        event.target instanceof Element &&
+        event.target.closest('[data-component="session-question-dock"]')
+      )
+        return
+      if (Date.now() - lastActivity < 1000) return
+      lastActivity = Date.now()
+      activity("conversation")
+    }
+    makeEventListener(window, "focus", foreground)
+    makeEventListener(window, "blur", background)
+    makeEventListener(window, "pointerdown", conversation)
+    makeEventListener(window, "pointermove", conversation)
+    makeEventListener(window, "keydown", conversation)
+    onCleanup(() => clearInterval(timer))
+  })
 
   const question = createMemo(() => questions()[store.tab])
   const options = createMemo(() => question()?.options ?? [])
@@ -155,10 +210,13 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   const pickFocus = (tab: number = store.tab) => {
     const list = questions()[tab]?.options ?? []
     if (store.customOn[tab] === true) return list.length
-    return Math.max(
-      0,
-      list.findIndex((item) => store.answers[tab]?.includes(item.label) ?? false),
-    )
+    const selected = list.findIndex((item) => store.answers[tab]?.includes(item.label) ?? false)
+    return selected >= 0
+      ? selected
+      : Math.max(
+          0,
+          list.findIndex((item) => item.label.endsWith(" (Recommended)")),
+        )
   }
 
   const focus = (i: number) => {
@@ -207,6 +265,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   })
 
   onCleanup(() => {
+    if (advanceTimer) clearTimeout(advanceTimer)
     if (focusFrame !== undefined) cancelAnimationFrame(focusFrame)
     if (replied) return
     cache.set(cacheKey, {
@@ -214,7 +273,9 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
       answers: store.answers.map((a) => (a ? [...a] : [])),
       custom: store.custom.map((s) => s ?? ""),
       customOn: store.customOn.map((b) => b ?? false),
+      minimized: store.minimized,
     })
+    if (cache.size > 64) cache.delete(cache.keys().next().value!)
   })
 
   const fail = (err: unknown) => {
@@ -225,24 +286,33 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   const replyMutation = useMutation(() => ({
     mutationFn: (answers: QuestionAnswer[]) =>
       sdk().api.question.reply({ sessionID: props.request.sessionID, requestID: props.request.id, answers }),
-    onMutate: () => {
-      props.onSubmit()
-    },
     onSuccess: () => {
       replied = true
       cache.delete(cacheKey)
+      props.onSubmit()
     },
     onError: fail,
   }))
 
   const rejectMutation = useMutation(() => ({
-    mutationFn: () => sdk().api.question.reject({ sessionID: props.request.sessionID, requestID: props.request.id }),
-    onMutate: () => {
-      props.onSubmit()
+    mutationFn: async () => {
+      if (props.request.isBlocking === false)
+        return sdk().api.question.reply({
+          sessionID: props.request.sessionID,
+          requestID: props.request.id,
+          answers: questions().map(() => []),
+        })
+      const stopped = await platform.bitsbytes
+        ?.call<{ interruptionOwned?: boolean }>("runs.stop", {
+          sessionID: props.request.sessionID,
+        })
+        .catch(fail)
+      if (!stopped?.interruptionOwned) await sdk().api.session.interrupt({ sessionID: props.request.sessionID })
     },
     onSuccess: () => {
       replied = true
       cache.delete(cacheKey)
+      props.onSubmit()
     },
     onError: fail,
   }))
@@ -256,10 +326,10 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
 
   const reject = async () => {
     if (sending()) return
-    await rejectMutation.mutateAsync()
+    await rejectMutation.mutateAsync().catch(() => undefined)
   }
 
-  const submit = () => void reply(questions().map((_, i) => store.answers[i] ?? []))
+  const submit = () => void reply(questions().map((_, i) => store.answers[i] ?? [])).catch(() => undefined)
 
   const answered = (i: number) => {
     if ((store.answers[i]?.length ?? 0) > 0) return true
@@ -283,7 +353,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   }
 
   const customToggle = () => {
-    if (sending()) return
+    if (sending() || store.advancing) return
     setStore("focus", options().length)
 
     if (!multi()) {
@@ -308,7 +378,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   }
 
   const customOpen = () => {
-    if (sending()) return
+    if (sending() || store.advancing) return
     setStore("focus", options().length)
     if (!on()) setStore("customOn", store.tab, true)
     setStore("editing", true)
@@ -321,7 +391,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   }
 
   const nav = (event: KeyboardEvent) => {
-    if (event.defaultPrevented) return
+    if (event.defaultPrevented || event.isComposing || event.repeat || store.advancing) return
 
     if (event.key === "Escape") {
       event.preventDefault()
@@ -343,13 +413,28 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
     if (!(target instanceof HTMLElement)) return
     if (event.altKey || event.ctrlKey || event.metaKey) return
 
-    if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+    if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+      event.preventDefault()
+      event.key === "ArrowRight" ? next() : back()
+      return
+    }
+    if (/^[1-9]$/.test(event.key)) {
+      event.preventDefault()
+      selectOption(Number(event.key) - 1)
+      return
+    }
+    if (event.key === "Enter") {
+      event.preventDefault()
+      selectOption(store.focus)
+      return
+    }
+    if (event.key === "ArrowDown") {
       event.preventDefault()
       move(1)
       return
     }
 
-    if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+    if (event.key === "ArrowUp") {
       event.preventDefault()
       move(-1)
       return
@@ -367,7 +452,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   }
 
   const selectOption = (optIndex: number) => {
-    if (sending()) return
+    if (sending() || store.advancing) return
 
     if (optIndex === options().length) {
       customOpen()
@@ -382,6 +467,12 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
       return
     }
     pick(opt.label)
+    setStore("advancing", true)
+    advanceTimer = setTimeout(() => {
+      advanceTimer = undefined
+      setStore("advancing", false)
+      next()
+    }, 180)
   }
 
   const commitCustom = () => {
@@ -409,7 +500,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   }
 
   const next = () => {
-    if (sending()) return
+    if (sending() || store.advancing) return
     if (store.editing) commitCustom()
 
     if (store.tab >= total() - 1) {
@@ -424,7 +515,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   }
 
   const back = () => {
-    if (sending()) return
+    if (sending() || store.advancing) return
     if (store.tab <= 0) return
     const tab = store.tab - 1
     setStore("tab", tab)
@@ -433,7 +524,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   }
 
   const jump = (tab: number) => {
-    if (sending()) return
+    if (sending() || store.advancing) return
     setStore("tab", tab)
     setStore("editing", false)
     if (!store.minimized) focus(pickFocus(tab))
@@ -452,15 +543,38 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   }
 
   return (
-    <div data-component="session-question-dock">
+    <div
+      data-component="session-question-dock"
+      onPointerDown={() => activity("snooze")}
+      onKeyDown={() => activity("snooze")}
+    >
       <DockPrompt
         kind="question"
         ref={(el) => (root = el)}
         onKeyDown={nav}
         header={
           <>
-            <div data-slot="question-header-title">{summary()}</div>
+            <div data-slot="question-header-title">{question()?.question}</div>
             <div data-slot="question-header-actions">
+              <button
+                type="button"
+                disabled={sending() || store.advancing || store.tab === 0}
+                onClick={back}
+                aria-label={language.t("ui.common.back")}
+              >
+                <Icon name="chevron-left" size="small" />
+              </button>
+              <span aria-label={summary()}>
+                {store.tab + 1}/{total()}
+              </span>
+              <button
+                type="button"
+                disabled={sending() || store.advancing || last()}
+                onClick={next}
+                aria-label={language.t("ui.common.next")}
+              >
+                <Icon name="chevron-right" size="small" />
+              </button>
               <Show when={total() > 1}>
                 <div data-slot="question-progress">
                   <For each={questions()}>
@@ -470,7 +584,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
                         data-slot="question-progress-segment"
                         data-active={i() === store.tab}
                         data-answered={answered(i())}
-                        disabled={sending()}
+                        disabled={sending() || store.advancing}
                         onClick={() => jump(i())}
                         aria-label={language.t("ui.tool.questions.numbered", { number: i() + 1 })}
                       />
@@ -496,23 +610,49 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
         }
         footer={
           <>
-            <Button variant="ghost" size="large" disabled={sending()} onClick={reject} aria-keyshortcuts="Escape">
+            <Button
+              variant="ghost"
+              size="normal"
+              disabled={sending() || store.advancing}
+              onClick={reject}
+              aria-keyshortcuts="Escape"
+            >
               {language.t("ui.common.dismiss")}
             </Button>
             <div data-slot="question-footer-actions">
+              <Show
+                when={
+                  props.request.autoResolution?.phase === "countdown" &&
+                  props.request.autoResolution.expiresAt &&
+                  props.request.autoResolution.expiresAt - store.now <= 60000
+                }
+              >
+                <span data-slot="question-countdown" role="timer">
+                  {language.t("session.question.autoResolution", {
+                    seconds: Math.max(0, Math.ceil((props.request.autoResolution!.expiresAt! - store.now) / 1000)),
+                  })}
+                </span>
+              </Show>
               <Show when={store.tab > 0}>
-                <Button variant="secondary" size="large" disabled={sending()} onClick={back}>
+                <Button variant="secondary" size="large" disabled={sending() || store.advancing} onClick={back}>
                   {language.t("ui.common.back")}
                 </Button>
               </Show>
               <Button
                 variant={last() ? "primary" : "secondary"}
                 size="large"
-                disabled={sending()}
-                onClick={next}
+                disabled={sending() || store.advancing}
+                onClick={() => {
+                  if (!answered(store.tab)) setStore("answers", store.tab, [])
+                  next()
+                }}
                 aria-keyshortcuts="Meta+Enter Control+Enter"
               >
-                {last() ? language.t("ui.common.submit") : language.t("ui.common.next")}
+                {answered(store.tab)
+                  ? last()
+                    ? language.t("ui.common.submit")
+                    : language.t("ui.common.next")
+                  : language.t("session.question.skip")}
               </Button>
             </div>
           </>
@@ -527,7 +667,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
             overflow: store.minimized ? "hidden" : undefined,
           }}
         >
-          {question()?.question}
+          <Show when={store.minimized}>{summary()}</Show>
         </div>
         <Show when={!store.minimized}>
           <Show when={multi()} fallback={<div data-slot="question-hint">{language.t("ui.question.singleHint")}</div>}>
@@ -549,10 +689,11 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
             {(opt, i) => (
               <Option
                 multi={multi()}
+                number={i() + 1}
                 picked={picked(opt.label)}
                 label={opt.label}
                 description={opt.description}
-                disabled={sending()}
+                disabled={sending() || store.advancing}
                 ref={(el) => (optsRef[i()] = el)}
                 onFocus={() => setStore("focus", i())}
                 onClick={() => selectOption(i())}
@@ -571,7 +712,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
                 data-picked={on()}
                 role={multi() ? "checkbox" : "radio"}
                 aria-checked={on()}
-                disabled={sending()}
+                disabled={sending() || store.advancing}
                 onFocus={() => setStore("focus", options().length)}
                 onClick={customOpen}
               >

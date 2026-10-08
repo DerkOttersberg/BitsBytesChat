@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process"
+import { suppressNativeUI } from "./qa-mode"
 import { stat } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron"
@@ -139,6 +140,7 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle(
     "open-directory-picker",
     async (_event: IpcMainInvokeEvent, opts?: { multiple?: boolean; title?: string; defaultPath?: string }) => {
+      if (suppressNativeUI("directory-picker")) return null
       const result = await dialog.showOpenDialog({
         properties: ["openDirectory", ...(opts?.multiple ? ["multiSelections" as const] : []), "createDirectory"],
         title: opts?.title ?? nativeT("desktop.dialog.chooseFolder"),
@@ -155,6 +157,7 @@ export function registerIpcHandlers(deps: Deps) {
       event: IpcMainInvokeEvent,
       opts?: { multiple?: boolean; title?: string; defaultPath?: string; extensions?: string[] },
     ) => {
+      if (suppressNativeUI("file-picker")) return null
       const result = await dialog.showOpenDialog({
         properties: ["openFile", ...(opts?.multiple ? ["multiSelections" as const] : [])],
         title: opts?.title ?? nativeT("desktop.dialog.chooseFile"),
@@ -186,6 +189,7 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle(
     "save-file-picker",
     async (_event: IpcMainInvokeEvent, opts?: { title?: string; defaultPath?: string }) => {
+      if (suppressNativeUI("save-picker")) return null
       const result = await dialog.showSaveDialog({
         title: opts?.title ?? nativeT("desktop.dialog.saveFile"),
         defaultPath: opts?.defaultPath,
@@ -204,6 +208,7 @@ export function registerIpcHandlers(deps: Deps) {
   })
 
   ipcMain.handle("open-path", async (_event: IpcMainInvokeEvent, path: string, app?: string) => {
+    if (suppressNativeUI("open-path", path)) return
     if (!app) return shell.openPath(path)
     await new Promise<void>((resolve, reject) => {
       const [cmd, args] =
@@ -213,6 +218,7 @@ export function registerIpcHandlers(deps: Deps) {
   })
 
   ipcMain.handle("reveal-path", async (_event: IpcMainInvokeEvent, path: string) => {
+    if (suppressNativeUI("reveal-path", path)) return false
     const exists = await stat(path).then(
       () => true,
       () => false,
@@ -249,11 +255,13 @@ export function registerIpcHandlers(deps: Deps) {
   })
 
   ipcMain.handle("set-window-focus", (event: IpcMainInvokeEvent) => {
+    if (suppressNativeUI("focus")) return
     const win = BrowserWindow.fromWebContents(event.sender)
     win?.focus()
   })
 
   ipcMain.handle("show-window", (event: IpcMainInvokeEvent) => {
+    if (suppressNativeUI("show")) return
     const win = BrowserWindow.fromWebContents(event.sender)
     win?.show()
   })

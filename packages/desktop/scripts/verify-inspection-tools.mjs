@@ -40,7 +40,7 @@ await symlink(join(process.env.LOCALAPPDATA,'BitsBytesChat/runtime'),join(data,'
 await writeFile(join(data,'config/opencode/opencode.json'),JSON.stringify({provider:{'bitsbytes-qa':{name:'Local QA',npm:'@ai-sdk/openai-compatible',options:{baseURL:'http://127.0.0.1:'+fixture.address().port+'/v1',apiKey:'fixture-only'},models:{'qa-model':{name:'QA model',limit:{context:128000,output:8192}}}}},model:'bitsbytes-qa/qa-model'}))
 let app
 try {
-  app=await _electron.launch({executablePath:process.env.BB_QA_EXECUTABLE||join(root,'packages/desktop/node_modules/electron/dist/electron.exe'),args:[process.env.BB_QA_MAIN||process.cwd()],env:{...process.env,BB_QA_ISOLATED:"1",LOCALAPPDATA:profile},timeout:90000})
+  app=await _electron.launch({executablePath:process.env.BB_QA_EXECUTABLE||join(root,'packages/desktop/node_modules/electron/dist/electron.exe'),args:[process.env.BB_QA_MAIN||process.cwd()],env:{...process.env,BB_QA_ISOLATED:"1",BB_QA_HIDDEN:"1",LOCALAPPDATA:profile},timeout:90000})
   await app.evaluate(({BrowserWindow})=>{for(const window of BrowserWindow.getAllWindows())window.hide()})
   const page=await app.firstWindow();page.on('pageerror',error=>report.errors.push(error.message))
   const server=await page.evaluate(()=>window.api.awaitInitialization())

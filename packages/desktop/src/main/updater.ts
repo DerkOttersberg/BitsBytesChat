@@ -1,4 +1,5 @@
 import { app, dialog } from "electron"
+import { hiddenQA, suppressNativeUI } from "./qa-mode"
 import pkg from "electron-updater"
 import { UPDATER_ENABLED } from "./constants"
 import { createUpdaterController, type UpdaterReadyRecord } from "./updater-controller"
@@ -27,7 +28,7 @@ export function setupAutoUpdater(stop: () => Promise<void>) {
 
   const store = getStore("opencode.updater")
   return createUpdaterController({
-    enabled: UPDATER_ENABLED,
+    enabled: UPDATER_ENABLED && !hiddenQA(),
     currentVersion: app.getVersion(),
     backend: {
       checkForUpdates: () => autoUpdater.checkForUpdates(),
@@ -61,6 +62,7 @@ export function setupAutoUpdater(stop: () => Promise<void>) {
 }
 
 export async function showUpdaterDialog(controller: ReturnType<typeof setupAutoUpdater>, alertOnFail: boolean) {
+  if (suppressNativeUI("updater")) return
   const state = await controller.check()
   if (state.status === "error") {
     if (!alertOnFail) return

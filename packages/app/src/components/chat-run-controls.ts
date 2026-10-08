@@ -100,8 +100,8 @@ function canonical(value: unknown): unknown {
 
 // Reorder the visible neighbors without dropping the durable original that
 // is currently being edited in the composer.
-export function moveQueuedInput(queue: { id: string; editing?: boolean }[], id: string, step: -1 | 1) {
-  const visible = queue.filter((item) => !item.editing)
+export function moveQueuedInput(queue: { id: string; editing?: boolean; status?: string; presentation?: string }[], id: string, step: -1 | 1) {
+  const visible = queue.filter((item) => !item.editing && item.status !== "sending" && item.presentation !== "transcript")
   const selected = visible.findIndex((item) => item.id === id)
   const neighbor = visible[selected + step]
   if (selected < 0 || !neighbor) return
@@ -110,4 +110,14 @@ export function moveQueuedInput(queue: { id: string; editing?: boolean }[], id: 
     to = ids.indexOf(neighbor.id)
   ;[ids[from], ids[to]] = [ids[to], ids[from]]
   return ids
+}
+
+export function reorderQueuedInput(queue: { id: string; editing?: boolean; status?: string; presentation?: string }[], id: string, target: string) {
+  const visible = queue.filter(row => !row.editing && row.status !== "sending" && row.presentation !== "transcript")
+  const from = visible.findIndex(row => row.id === id), to = visible.findIndex(row => row.id === target)
+  if (from < 0 || to < 0 || from === to) return
+  const moved = [...visible]
+  moved.splice(to, 0, ...moved.splice(from, 1))
+  let position = 0
+  return queue.map(row => visible.includes(row) ? moved[position++].id : row.id)
 }

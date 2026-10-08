@@ -1,4 +1,6 @@
 import { BBArtifacts } from "./bitsbytes-artifacts"
+import { BBSide } from "./bitsbytes-side"
+import { suppressNativeUI } from "./qa-mode"
 import { BBRuns, type RunPrompt, type Inspection, type InspectionOptions } from "./bitsbytes-runs"
 import { BBMcpSettings } from "./bitsbytes-mcp"
 import { BBBrowser } from "./bitsbytes-browser"
@@ -48,6 +50,9 @@ export class BitsBytes {
   private workerError = ""
   private requests = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>()
   private engine: () => Promise<ServerReadyData>
+  private side: BBSide
+  private sideRecovery?: Promise<void>
+  private questionSettings?: { url: string; ready: Promise<unknown> }
   private tools?: ReturnType<typeof createServer>
   private toolToken = randomBytes(32).toString("hex")
   private toolURL = ""
@@ -55,7 +60,10 @@ export class BitsBytes {
   private pending = new Map<string, Promise<unknown>>()
   artifacts = new BBArtifacts(this.root, this.python, this.assets, (artifact, published) => this.emit({ type: "artifact", artifact, published }))
   browser = new BBBrowser(event => this.emit(event))
-  runs = new BBRuns(this.root, (prompt, options) => this.inspectRun(prompt, options), (prompt, signal) => this.dispatchRun(prompt, signal), sessionID => this.emit({ type: "run", sessionID }))
+  runs = new BBRuns(this.root, (prompt, options) => this.inspectRun(prompt, options), (prompt, signal) => this.dispatchRun(prompt, signal), sessionID => this.emit({ type: "run", sessionID }), async prompt => {
+    const path = prompt.protocol === "v2" ? `/api/session/${encodeURIComponent(prompt.sessionID)}/interrupt` : `/session/${encodeURIComponent(prompt.sessionID)}/abort`
+    await engineRequest(await this.engine(), path, { method: "POST" }, prompt.directory)
+  })
   mobile = new BBMobile(this, () => this.emit({ type: "refresh" }), value => safeStorage.encryptString(value).toString("base64"), value => safeStorage.decryptString(Buffer.from(value, "base64")))
   private protocols = new Map<string, "v1" | "v2">()
   private transcriptReads = new Map<string, Set<number>>()
@@ -65,7 +73,8 @@ export class BitsBytes {
   private accessModes: Record<string, "ask" | "full"> = {}
   private selection?: { providerID: string; modelID: string }
   private stateSaving = Promise.resolve()
-  constructor(engine: () => Promise<ServerReadyData>, private progress: (stage: string) => void = () => undefined) { this.engine = engine }
+  private preferenceSaving: Promise<unknown> = Promise.resolve()
+  constructor(engine: () => Promise<ServerReadyData>, private progress: (stage: string) => void = () => undefined) { this.engine = engine; this.side = new BBSide(this.root, (path, options, directory) => this.engineFetch(path, options, directory), this.runs) }
 
   emit(event: BBEvent) { BrowserWindow.getAllWindows().forEach((window) => window.webContents.send("bitsbytes:event", event)) }
   async start() {
@@ -146,6 +155,13 @@ export class BitsBytes {
     await this.mobile.start()
     app.on("before-quit", () => this.close())
     this.progress("ready")
+    // Engine startup completes after local service startup. Recovery must not
+    // block that dependency or open/close any unowned historical fork.
+    void this.engine().then(async server => { await this.configureQuestionSettings(server, join(this.root, "workspace")); await this.recoverSides() }).catch(() => this.progress("question settings or temporary side chat recovery unavailable"))
+  }
+  private recoverSides() {
+    const recovery = this.sideRecovery ??= this.side.recover()
+    return recovery.catch(error => { if (this.sideRecovery === recovery) this.sideRecovery = undefined; throw error })
   }
 
   async startWorker() {
@@ -301,8 +317,16 @@ export class BitsBytes {
     await writeFile(configPath, JSON.stringify(config, null, 2))
     if (invalidate) await this.engineFetch("/global/dispose", { method: "POST" }).catch(() => undefined)
   }
+  private async configureQuestionSettings(server: ServerReadyData, directory: string) {
+    if (this.questionSettings?.url !== server.url) this.questionSettings = { url: server.url, ready: engineRequest(server, "/question/settings", { method: "POST", body: JSON.stringify({ enabled: this.settings.questionAutoResolve !== false }), signal: AbortSignal.timeout(15000) }, directory) }
+    const pending = this.questionSettings
+    try { await pending.ready }
+    catch (error) { if (this.questionSettings === pending) this.questionSettings = undefined; throw error }
+  }
   async engineFetch<T = unknown>(path: string, options: RequestInit = {}, directory = join(this.root, "workspace")): Promise<T> {
-    return engineRequest<T>(await this.engine(), path, options, directory)
+    const server = await this.engine()
+    await this.configureQuestionSettings(server, directory)
+    return engineRequest<T>(server, path, options, directory)
   }
   async session(prompt: string, title: string, test = false, sessionID?: string, testDir?: string) {
     const model = this.selection ?? (this.settings.model ? { providerID: this.settings.provider === "openrouter" ? "openrouter" : "bitsbytes-chatgpt", modelID: this.settings.model } : undefined)
@@ -327,8 +351,10 @@ export class BitsBytes {
     return this.artifacts.publish(path, sessionID, sourceID, origin?.id ?? reference.id)
   }
   private async tool(name: string, args: Record<string, unknown>, sessionID = "", signal?: AbortSignal) {
+    if (name === "side.progress") return this.side.progress(String(args.sessionID))
+    if (sessionID && await this.side.relation(sessionID)) throw new Error("bb.error.sideReadOnly")
     if (name === "get_goal") return this.runs.get(sessionID).goal ?? null
-    if (name === "goal_progress") return this.runs.call("goal-progress", { ...args, sessionID })
+    if (name === "goal_progress") return this.runCall("goal-progress", { ...args, sessionID })
     if (["create_artifact", "run_artifact_script", "publish_artifact", "create_word", "create_intake"].includes(name)) {
       for (const [id, revision] of Object.entries(this.transcriptSources[sessionID] ?? {})) {
         const text = await this.transcript(id, revision)
@@ -430,6 +456,10 @@ export class BitsBytes {
     return dispatchEngine(await this.engine(), prompt, { protocol: this.protocols.get(prompt.sessionID), contextRoot: join(this.root, "run-context"), resolveAttachment: uri => this.resolveAttachment(uri, prompt.sessionID), signal })
   }
   private async runCall(action: string, args: Record<string, unknown>) {
+    const sessionID = String(args.sessionID ?? (args.prompt as RunPrompt | undefined)?.sessionID ?? "")
+    const diagnostic = await this.side.relation(sessionID)
+    if (diagnostic && ["goal-draft", "goal-progress", "goal-resume", "implement", "mode", "inherit"].includes(action)) throw new Error("bb.error.sideReadOnly")
+    if (args.prompt) args = { ...args, prompt: await this.side.prepare(args.prompt as RunPrompt) }
     if (action === "permission") {
       const id = String(args.sessionID), chat = this.runs.chats[id]
       if (chat) return { plan: (chat.awaiting ? chat.last?.mode : chat.mode) === "plan" }
@@ -447,6 +477,18 @@ export class BitsBytes {
     return this.stateSaving
   }
   async call(method: string, args: Record<string, unknown> = {}): Promise<unknown> {
+    if (method === "branch.open") {
+      const sessionID = String(args.sessionID), directory = String(args.directory)
+      const fork = await this.engineFetch<{ id: string }>(`/session/${encodeURIComponent(sessionID)}/fork`, { method: "POST", body: JSON.stringify({ messageID: args.messageID, inclusive: true }) }, directory)
+      const access = await this.call("access.get", { sessionID }) as { mode: string }
+      await this.call("access.set", { sessionID: fork.id, mode: access.mode })
+      return fork
+    }
+    if (method === "side.open") { await this.recoverSides(); return this.side.open(String(args.parentID), String(args.ownerID), String(args.directory), bbt("sideChat")) }
+    if (method === "side.progress") return this.side.progress(String(args.sessionID))
+    if (method === "side.close") return this.side.close(String(args.sessionID), String(args.ownerID))
+    if (method === "question.activity") return this.engineFetch(`/question/${encodeURIComponent(String(args.requestID))}/activity`, { method: "POST", body: JSON.stringify({ sessionID: args.sessionID, kind: args.kind }) }, String(args.directory ?? join(this.root, "workspace")))
+    if (["skill.import", "skill.export", "skill.resources", "pick.file", "pick.template", "audio.import", "artifact.save-copy", "usage", "file.open"].includes(method) && suppressNativeUI(method)) return null
     if (method.startsWith("mcp.settings.")) {
       this.customMcp ??= new BBMcpSettings(join(process.env.XDG_CONFIG_HOME!, "opencode/opencode.json"),
         (path, options, directory) => this.engineFetch(path, options, directory),
@@ -492,14 +534,23 @@ export class BitsBytes {
     }
     if (method === "state") return this.state()
     if (method === "settings.save") {
-      const settings = { ...this.settings, ...args } as Settings
-      intakePaths(settings)
-      if (!["parakeet", "whisper", "groq"].includes(settings.engine) || !["chatgpt", "openrouter"].includes(settings.provider)) throw new Error("bb.error.invalidSettings")
-      this.settings = settings
-      this.provider.select(settings.provider)
-      await writeFile(join(this.root, "settings.json"), JSON.stringify(settings, null, 2))
-      await this.configure()
-      this.emit({ type: "refresh" }); return this.settings
+      const operation = this.preferenceSaving.catch(() => undefined).then(async () => {
+        const previous = this.settings, settings = { ...previous, ...args } as Settings
+        intakePaths(settings)
+        if (!["parakeet", "whisper", "groq"].includes(settings.engine) || !["chatgpt", "openrouter"].includes(settings.provider) || settings.questionAutoResolve !== undefined && typeof settings.questionAutoResolve !== "boolean") throw new Error("bb.error.invalidSettings")
+        await this.persistState("settings.json", () => settings)
+        this.settings = settings
+        this.provider.select(settings.provider)
+        const timerChanged = (settings.questionAutoResolve !== false) !== (previous.questionAutoResolve !== false)
+        if (timerChanged) this.questionSettings = undefined
+        // Optional-question preferences belong to the host. Applying them must
+        // preserve the pending request and every running chat/tool fiber.
+        if (Object.keys(args).some(key => key !== "questionAutoResolve" && !Object.is(settings[key as keyof Settings], previous[key as keyof Settings]))) await this.configure()
+        if (timerChanged) await this.configureQuestionSettings(await this.engine(), join(this.root, "workspace"))
+        this.emit({ type: "refresh" }); return this.settings
+      })
+      this.preferenceSaving = operation
+      return operation
     }
     if (method === "keys.save") return this.provider.keys(args)
     if (method === "auth.connect") { await this.provider.signIn(); this.settings.provider = "chatgpt"; await this.modelConfig(); return this.state() }

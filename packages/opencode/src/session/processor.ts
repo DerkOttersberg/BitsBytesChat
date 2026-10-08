@@ -71,6 +71,7 @@ interface ProcessorContext extends Input {
   blocked: boolean
   needsCompaction: boolean
   currentText: SessionV1.TextPart | undefined
+  sources: SessionV1.TextPart | undefined
   reasoningMap: Record<string, SessionV1.ReasoningPart>
 }
 
@@ -110,6 +111,7 @@ const layer = Layer.effect(
         blocked: false,
         needsCompaction: false,
         currentText: undefined,
+        sources: undefined,
         reasoningMap: {},
       }
       let aborted = false
@@ -497,6 +499,22 @@ const layer = Layer.effect(
             return
           }
 
+          case "source": {
+            ctx.sources ??= {
+              id: PartID.ascending(),
+              sessionID: ctx.sessionID,
+              messageID: ctx.assistantMessage.id,
+              type: "text",
+              text: "",
+              metadata: { sources: [] },
+            }
+            const sources = ctx.sources.metadata!.sources as Extract<LLMEvent, { type: "source" }>[]
+            const index = sources.findIndex((source) => source.id === value.id)
+            if (index < 0) sources.push(value)
+            else sources[index] = value
+            yield* session.updatePart(ctx.sources)
+            return
+          }
           case "text-start":
             ctx.currentText = {
               id: PartID.ascending(),

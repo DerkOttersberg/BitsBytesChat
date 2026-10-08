@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { hiddenQA, offscreenQA } from "./qa-mode"
 import { mkdirSync, rmSync } from "node:fs"
 import * as http from "node:http"
 import { createServer } from "node:net"
@@ -66,6 +67,10 @@ const TEST_ONBOARDING = process.env.OPENCODE_TEST_ONBOARDING === "1"
 const SIDECAR_VERSION = process.env.OPENCODE_SIDECAR_V2 === "1" ? "v2" : "v1"
 const jsCallStackFeature = "DocumentPolicyIncludeJSCallStacksInCrashReports"
 
+// An explicitly requested isolated capturer renders without the Windows
+// compositor. Normal launches and performance comparisons retain their GPU.
+if (offscreenQA()) app.disableHardwareAcceleration()
+
 let logger: ReturnType<typeof initLogging>
 let server: SidecarListener | null = null
 
@@ -123,7 +128,7 @@ const main = Effect.gen(function* () {
   process.env.XDG_STATE_HOME = join(bitsRoot, "state")
   process.env.OPENCODE_DISABLE_AUTOUPDATE = "true"
   process.env.OPENCODE_DISABLE_EXTERNAL_SKILLS = "true"
-  contextMenu({ showSaveImageAs: true, showLookUpSelection: false, showSearchWithGoogle: false })
+  if (!hiddenQA()) contextMenu({ showSaveImageAs: true, showLookUpSelection: false, showSearchWithGoogle: false })
 
   // on macOS apps run in `/` which can cause issues with ripgrep
   try {
@@ -179,6 +184,7 @@ const main = Effect.gen(function* () {
     wslServers.stopAll()
   }
   const relaunch = () => {
+    if (hiddenQA()) return
     setAppQuitting()
     void stopSidecars().finally(() => {
       app.relaunch()
@@ -219,8 +225,7 @@ const main = Effect.gen(function* () {
     }
     const win = getLastFocusedWindow()
     if (win) {
-      win.show()
-      win.focus()
+      if (!hiddenQA()) { win.show(); win.focus() }
     }
   })
 
@@ -438,6 +443,6 @@ const main = Effect.gen(function* () {
 
 Effect.runFork(main.pipe(Effect.catchCause(() => Effect.sync(() => {
   logger?.error("application startup failed; saved data retained")
-  dialog.showErrorBox(bbt("brand"), bbt("startupFailed").replace("{{path}}", join(app.getPath("userData"), "logs")))
+  if (!hiddenQA()) dialog.showErrorBox(bbt("brand"), bbt("startupFailed").replace("{{path}}", join(app.getPath("userData"), "logs")))
   app.quit()
 }))))

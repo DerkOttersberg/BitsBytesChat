@@ -4,6 +4,7 @@ import { Question } from "../question"
 import DESCRIPTION from "./question.txt"
 
 export const Parameters = Schema.Struct({
+  isBlocking: Schema.optional(Schema.Boolean).annotate({ description: "Defaults to true. Set false only for optional, skippable preferences. Never use false for approvals, permission requests or information required to proceed safely. Optional questions may expire with empty answers." }),
   questions: Schema.mutable(Schema.Array(Question.Prompt)).annotate({ description: "Questions to ask" }),
 })
 
@@ -24,6 +25,7 @@ export const QuestionTool = Tool.define<typeof Parameters, Metadata, Question.Se
           const answers = yield* question.ask({
             sessionID: ctx.sessionID,
             questions: params.questions,
+            isBlocking: params.isBlocking,
             tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
           })
 

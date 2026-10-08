@@ -58,9 +58,11 @@ export async function inspectEngine(
   const protocol = prompt.protocol ?? protocols.get(prompt.sessionID) ?? (legacy?.healthy === true ? "v1" : "v2")
   protocols.set(prompt.sessionID, protocol)
   if (protocol === "v1") {
+    const waiting = options.readWaitingState ? await Promise.all([read<{ sessionID: string }[]>("/question"), read<{ sessionID: string }[]>("/permission")])
+      .then(groups => groups.some(rows => rows.some(row => row.sessionID === prompt.sessionID)), () => true) : undefined
     const summary =
       options.readBusyMessages === false ? await read<Record<string, { type: string }>>("/session/status") : undefined
-    if (summary?.[prompt.sessionID] && summary[prompt.sessionID].type !== "idle") return { busy: true, messages: [] }
+    if (summary?.[prompt.sessionID] && summary[prompt.sessionID].type !== "idle") return { busy: true, waiting, messages: [] }
     const state = await Promise.all([
       summary ?? read<Record<string, { type: string }>>("/session/status"),
       read<
@@ -72,6 +74,7 @@ export async function inspectEngine(
             time?: { created?: number }
             tokens?: { input?: number; output?: number; reasoning?: number }
             error?: unknown
+            execution?: Inspection["messages"][number]["receipt"]
           }
           parts: {
             type: string
@@ -84,8 +87,10 @@ export async function inspectEngine(
     ])
     return {
       busy: Boolean(state[0][prompt.sessionID] && state[0][prompt.sessionID].type !== "idle"),
+      waiting,
       messages: state[1].map((row) => ({
         id: row.info.id,
+        receipt: row.info.execution,
         assistant: row.info.role === "assistant",
         parentID: typeof row.info.parentID === "string" ? row.info.parentID : undefined,
         created: typeof row.info.time?.created === "number" && Number.isFinite(row.info.time.created) && row.info.time.created >= 0 ? row.info.time.created : undefined,
@@ -95,13 +100,13 @@ export async function inspectEngine(
           .map((part) => part.text ?? "")
           .join("\n"),
         tokens: (row.info.tokens?.input ?? 0) + (row.info.tokens?.output ?? 0),
-        tools: row.parts.filter((part) => part.type === "tool").length,
-        progress: row.parts.some((part) => part.type === "tool")
+        tools: row.parts.filter((part) => part.type === "tool" && !/(?:goal_progress|get_goal)$/.test(part.tool ?? "")).length,
+        progress: row.parts.some((part) => part.type === "tool" && !/(?:goal_progress|get_goal)$/.test(part.tool ?? ""))
           ? createHash("sha256")
               .update(
                 JSON.stringify(
                   row.parts
-                    .filter((part) => part.type === "tool")
+                    .filter((part) => part.type === "tool" && !/(?:goal_progress|get_goal)$/.test(part.tool ?? ""))
                     .map((part) => ({
                       tool: part.tool,
                       input: part.state?.input,
@@ -116,11 +121,15 @@ export async function inspectEngine(
       })),
     }
   }
+  const waiting = options.readWaitingState ? await Promise.all([
+    read<{ data: unknown[] }>(`/api/session/${encodeURIComponent(prompt.sessionID)}/question`),
+    read<{ data: unknown[] }>(`/api/session/${encodeURIComponent(prompt.sessionID)}/permission`),
+  ]).then(groups => groups.some(group => group.data.length > 0), () => true) : undefined
   const summary =
     options.readBusyMessages === false
       ? await read<{ data: Record<string, unknown> }>("/api/session/active")
       : undefined
-  if (summary?.data[prompt.sessionID]) return { busy: true, messages: [] }
+  if (summary?.data[prompt.sessionID]) return { busy: true, waiting, messages: [] }
   const [active, context] = await Promise.all([
     summary ?? read<{ data: Record<string, unknown> }>("/api/session/active"),
     read<{
@@ -141,6 +150,7 @@ export async function inspectEngine(
   ])
   return {
     busy: Boolean(active.data[prompt.sessionID]),
+    waiting,
     messages: context.data.map((row) => ({
       id: row.id,
       assistant: row.type === "assistant",
@@ -152,13 +162,13 @@ export async function inspectEngine(
           .join("\n") ??
         "",
       tokens: (row.tokens?.input ?? 0) + (row.tokens?.output ?? 0),
-      tools: row.content?.filter((part) => part.type === "tool").length ?? 0,
-      progress: row.content?.some((part) => part.type === "tool")
+      tools: row.content?.filter((part) => part.type === "tool" && !/(?:goal_progress|get_goal)$/.test(part.name ?? "")).length ?? 0,
+      progress: row.content?.some((part) => part.type === "tool" && !/(?:goal_progress|get_goal)$/.test(part.name ?? ""))
         ? createHash("sha256")
             .update(
               JSON.stringify(
                 row.content
-                  .filter((part) => part.type === "tool")
+                  .filter((part) => part.type === "tool" && !/(?:goal_progress|get_goal)$/.test(part.name ?? ""))
                   .map((part) => ({
                     tool: part.name,
                     input: part.state?.input,
@@ -187,6 +197,11 @@ export async function dispatchEngine(
   let attempted = false
   try {
     if (options.signal?.aborted) return "not-sent"
+    if (options.protocol === "v2" && prompt.resume) {
+      attempted = true
+      await engineRequest(server, `/api/session/${encodeURIComponent(prompt.sessionID)}/resume`, { method: "POST", signal: options.signal }, prompt.directory)
+      return
+    }
     // Source preparation can outlast Stop. Check the same cancellation signal
     // before admission, then preserve uncertainty if its POST has begun.
     const attachments = (prompt.legacyParts ?? []) as { type: string; url?: string }[]
@@ -212,6 +227,8 @@ export async function dispatchEngine(
             agent: prompt.agent,
             model: prompt.model,
             variant: prompt.variant,
+            revision: prompt.revision,
+            resume: prompt.resume,
             parts: prompt.legacyParts ?? [{ type: "text", text: prompt.text }],
           }),
         },

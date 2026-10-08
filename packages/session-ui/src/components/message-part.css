@@ -263,6 +263,13 @@
   }
 }
 
+[data-component="message-sources"]{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:8px 0;font-size:12px;color:var(--text-weak)}
+[data-component="message-sources"] .source-pill{display:flex;align-items:center;gap:4px;max-width:220px;padding:2px 8px;border:1px solid var(--border-weak-base);border-radius:99px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:var(--background-strong)}
+[data-component="message-sources"] .source-pill span{font-size:10px;opacity:.7}
+[data-component="message-sources"] details{max-width:100%;overflow-wrap:anywhere}
+[data-component="message-sources"] summary{cursor:pointer;padding:2px 8px}
+@media(hover:none){[data-component="user-message"] [data-slot="user-message-copy-wrapper"],[data-component="text-part"] [data-slot="text-part-copy-wrapper"]{opacity:1;pointer-events:auto}}
+
 [data-component="compaction-part"] {
   width: 100%;
   display: flex;

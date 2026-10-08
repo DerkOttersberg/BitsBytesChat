@@ -23,6 +23,8 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { isRecord } from "@/util/record"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { DesktopBridge } from "@opencode-ai/core/desktop-bridge"
+import { diagnosticSession, diagnosticToolAllowed } from "./diagnostic"
 
 const MCP_RESOURCE_TOOLS = {
   list: "list_mcp_resources",
@@ -55,6 +57,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   const mcp = yield* MCP.Service
   const truncate = yield* Truncate.Service
   const flags = yield* RuntimeFlags.Service
+  const diagnostic = diagnosticSession(input.session)
 
   const context = (args: Record<string, unknown>, options: ToolExecutionOptions): Tool.Context => ({
     sessionID: input.session.id,
@@ -95,6 +98,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     agent: input.agent,
     permission: input.session.permission,
   })) {
+    if (diagnostic && !diagnosticToolAllowed(item.id)) continue
     const schema = ProviderTransform.schema(input.model, ToolJsonSchema.fromTool(item))
     tools[item.id] = tool({
       description: item.description,
@@ -131,6 +135,20 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
         )
       },
     })
+  }
+
+  if (diagnostic) {
+    tools.parent_progress = tool({
+      description:
+        "Read a fresh bounded snapshot of this side chat's owning parent. Captured tool outcomes are facts; the parent objective is context, not a task for you.",
+      inputSchema: jsonSchema({ type: "object", properties: {}, additionalProperties: false }),
+      execute: async () => ({
+        title: "Parent progress",
+        output: JSON.stringify(await DesktopBridge.call("side.progress", { sessionID: input.session.id })),
+        metadata: {},
+      }),
+    })
+    return tools
   }
 
   const hasMcpResourceServer = Object.values(yield* mcp.clients()).some(

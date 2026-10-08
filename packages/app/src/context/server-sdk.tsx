@@ -235,7 +235,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
     buffer = events
     queue.length = 0
 
-    last = Date.now()
+    last = performance.now()
     const output = coalesceServerEvents(events)
     batch(() => {
       output.forEach((event) => emitter.emit(event.directory, event.payload))
@@ -246,7 +246,9 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
 
   const schedule = () => {
     if (timer) return
-    const elapsed = Date.now() - last
+    // Wall-clock corrections must not schedule the next transcript/question
+    // update hours into the future. Scheduling uses one monotonic time base.
+    const elapsed = performance.now() - last
     timer = setTimeout(flush, Math.max(0, FLUSH_FRAME_MS - elapsed))
   }
 
@@ -277,7 +279,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
             kind === "v1"
               ? (await eventSdk.global.event({ signal: attempt.signal })).stream
               : eventApi.event.subscribe({ signal: attempt.signal })
-          let yielded = Date.now()
+          let yielded = performance.now()
           for await (const event of events) {
             streamErrorLogged = false
             const legacy = "payload" in event
@@ -286,8 +288,8 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
             const payload = legacy ? (event.payload as Event) : adaptServerEvent(event)
             if (enqueueServerEvent(queue, { directory, payload })) schedule()
 
-            if (Date.now() - yielded < STREAM_YIELD_MS) continue
-            yielded = Date.now()
+            if (performance.now() - yielded < STREAM_YIELD_MS) continue
+            yielded = performance.now()
             await wait(0)
           }
         } catch (error) {

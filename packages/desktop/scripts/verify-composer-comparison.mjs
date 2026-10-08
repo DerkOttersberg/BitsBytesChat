@@ -18,12 +18,12 @@ for (let round = 0; round < 3; round++) {
     })
     const report = JSON.parse(await readFile(join(root, ".tools/qa/results/composer-" + tag + ".json"), "utf8"))
     assert.equal(report.isolated, true)
-    rows.push({ round, label, version: builds[label], ...report })
+    rows.push({ round, label, rendererVersion: builds[label], ...report })
     console.log("PASS", round, label, report.medianMs)
   }
 }
 const median = samples => { const sorted = [...samples].sort((a, b) => a - b), middle = sorted.length / 2; return (sorted[Math.floor(middle)] + sorted[Math.ceil(middle) - 1]) / 2 }
-const report = { workload: "Serial interleaved production launches, identical fixture profile, fonts ready, warm 55,000-character input; three runs and fifteen samples per build", builds, rows,
+const report = { workload: process.env.BB_COMPARE_WORKLOAD || "Serial interleaved production launches, identical fixture profile, fonts ready, warm 55,000-character input; three runs and fifteen samples per build", builds, rows,
   summary: Object.fromEntries(Object.keys(builds).map(label => [label, { medianMs: median(rows.filter(row => row.label === label).flatMap(row => row.samplesMs)) }])) }
 await writeFile(join(root, ".tools/qa/results/composer-controlled-" + release + ".json"), JSON.stringify(report, null, 2))
 console.log(JSON.stringify(report.summary))

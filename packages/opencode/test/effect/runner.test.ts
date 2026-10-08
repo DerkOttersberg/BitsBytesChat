@@ -204,7 +204,7 @@ describe("Runner", () => {
   )
 
   it.live(
-    "cancel does not deadlock when replacement work starts before interrupted run exits",
+    "replacement work waits for interrupted run finalizers without deadlocking",
     Effect.gen(function* () {
       const s = yield* Scope.Scope
       const hit = yield* Deferred.make<void>()
@@ -228,11 +228,12 @@ describe("Runner", () => {
         const b = yield* runner.ensureRunning(Deferred.await(done).pipe(Effect.as("second"))).pipe(Effect.forkChild)
         yield* Effect.yieldNow
         expect(runner.busy).toBe(true)
+        expect(runner.state._tag).toBe("Stopping")
 
         yield* Deferred.succeed(hold, undefined)
         const stopExit = yield* Fiber.await(stop).pipe(Effect.timeout("250 millis"))
         expect(Exit.isSuccess(stopExit)).toBe(true)
-
+        yield* waitForState(runner, "Running")
         expect(runner.busy).toBe(true)
         yield* Deferred.succeed(done, undefined)
         expect(yield* Fiber.join(b).pipe(Effect.timeout("250 millis"))).toBe("second")

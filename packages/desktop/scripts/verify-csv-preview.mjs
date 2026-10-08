@@ -14,7 +14,7 @@ await writeFile(wide,Array.from({length:5},(_,row)=>Array.from({length:125},(_,c
 await writeFile(paged,Array.from({length:450},(_,row)=>`Row ${row},Value ${row}`).join('\r\n'))
 let app,page
 try {
-  app=await _electron.launch({executablePath:process.env.BB_QA_EXECUTABLE||join(root,'packages/desktop/node_modules/electron/dist/electron.exe'),args:[process.env.BB_QA_MAIN||process.cwd()],env:{...process.env,BB_QA_ISOLATED:"1",LOCALAPPDATA:profile},timeout:90000})
+  app=await _electron.launch({executablePath:process.env.BB_QA_EXECUTABLE||join(root,'packages/desktop/node_modules/electron/dist/electron.exe'),args:[process.env.BB_QA_MAIN||process.cwd()],env:{...process.env,BB_QA_ISOLATED:"1",BB_QA_HIDDEN:"1",LOCALAPPDATA:profile},timeout:90000})
   await app.evaluate(({BrowserWindow})=>{for(const window of BrowserWindow.getAllWindows())window.hide()})
   page=await app.firstWindow();page.setDefaultTimeout(30000);page.on('pageerror',error=>report.errors.push(error.message))
   await page.locator('[contenteditable=true]').first().waitFor({timeout:90000})

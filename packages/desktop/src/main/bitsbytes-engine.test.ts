@@ -3,7 +3,7 @@ import { createServer } from "node:http"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { engineRequest } from "./bitsbytes-engine"
+import { dispatchEngine, engineRequest, inspectEngine } from "./bitsbytes-engine"
 import { BBRuns } from "./bitsbytes-runs"
 
 const servers: ReturnType<typeof createServer>[] = []
@@ -34,6 +34,37 @@ test("engine metadata retains authentication, encoded workspace and response sem
   expect(seen[0]).toEqual({ url: "/metadata", auth: "Basic " + Buffer.from("qa:fixture-only").toString("base64"), directory: encodeURIComponent("D:\\QA space\\é"), custom: "kept" })
   expect(await engineRequest(server, "/empty", {}, "D:\\QA")).toBeUndefined()
   await expect(engineRequest(server, "/bad", {}, "D:\\QA")).rejects.toThrow("Bits & Bytes Chat 503: unavailable")
+})
+
+test("explicit V2 Resume posts no new prompt, model or user attachment", async () => {
+  const seen: { url?: string; body: string }[] = []
+  const server = await fixture(async (request, response) => {
+    let body = ""; for await (const chunk of request) body += chunk
+    seen.push({ url: request.url, body }); response.writeHead(204).end()
+  })
+  await dispatchEngine(server, { id: "msg_saved", sessionID: "ses_saved", directory: "D:/QA", text: "Original task", resume: true, model: { providerID: "qa", modelID: "qa" }, agent: "build", legacyParts: [{ type: "file", url: "bitsbytes://transcript/frozen?revision=1" }] }, { protocol: "v2", contextRoot: "D:/QA", resolveAttachment: async () => { throw new Error("Resume should not resolve new attachments") } })
+  expect(seen).toEqual([{ url: "/api/session/ses_saved/resume", body: "" }])
+})
+
+test("V2 Goal inspection excludes waiting questions and Goal bookkeeping from progress", async () => {
+  let question = true, remaining = 100, read = false
+  const server = await fixture((request, response) => {
+    response.setHeader("content-type", "application/json")
+    if (request.url?.endsWith("/question")) { response.end(JSON.stringify({ data: question ? [{ id: "que_owned" }] : [] })); return }
+    if (request.url?.endsWith("/permission")) { response.end('{"data":[]}'); return }
+    if (request.url === "/api/session/active") { response.end('{"data":{"ses_owned":{}}}'); return }
+    response.end(JSON.stringify({ data: [{ id: "msg_assistant", type: "assistant", content: [{ type: "tool", name: "bitsbytes_get_goal", state: { output: { remaining } } }, ...(read ? [{ type: "tool", name: "read", state: { output: "Recorded file" } }] : [])] }] }))
+  })
+  const prompt = { id: "msg_owned", sessionID: "ses_owned", text: "Work", directory: "D:/QA", protocol: "v2" as const }
+  const first = await inspectEngine(server, prompt, new Map(), { readWaitingState: true })
+  expect(first.waiting).toBe(true)
+  expect(first.messages[0]).toMatchObject({ tools: 0, progress: undefined })
+  question = false; remaining = 90; read = true
+  const next = await inspectEngine(server, prompt, new Map(), { readWaitingState: true })
+  expect(next.waiting).toBe(false)
+  expect(next.messages[0].tools).toBe(1)
+  remaining = 80
+  expect((await inspectEngine(server, prompt, new Map())).messages[0].progress).toBe(next.messages[0].progress)
 })
 
 test.each(["headers", "body"])("a stalled metadata %s read expires and a later read works", async phase => {

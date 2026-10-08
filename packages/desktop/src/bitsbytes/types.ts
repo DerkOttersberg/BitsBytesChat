@@ -12,6 +12,7 @@ export type Settings = {
   model: string
   browserControl: boolean
   computerControl: boolean
+  questionAutoResolve?: boolean
   microphone: number | null
 }
 export type Artifact = { saved: boolean; path: string; used_fallback: boolean; verified_field_count?: number }

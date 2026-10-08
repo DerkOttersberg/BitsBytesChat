@@ -138,7 +138,14 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
   if (input.desktop) {
     if (!(await wait())) return false
     const protocol = await input.protocol
-    await input.desktop.call("runs.admit", unwrap({ delivery: input.delivery ?? "queue", userText: text, prompt: {
+    const immediate = input.sync.data.session_status?.[input.draft.sessionID]?.type !== "busy"
+    const addImmediate = (id: string) => input.sync.session.optimistic.add({ directory: input.draft.sessionDirectory, sessionID: input.draft.sessionID,
+      message: { id, sessionID: input.draft.sessionID, role: "user", time: { created: Date.now() }, agent: input.draft.agent, model: { ...input.draft.model, variant: input.draft.variant } },
+      parts: optimisticParts.map(part => ({ ...part, messageID: id })) })
+    const removeImmediate = () => input.sync.session.optimistic.remove({ directory: input.draft.sessionDirectory, sessionID: input.draft.sessionID, messageID })
+    if (immediate) addImmediate(messageID)
+    try {
+    const admitted = await input.desktop.call<{ id: string; presentation?: string }>("runs.admit", unwrap({ immediate, delivery: input.delivery ?? "queue", userText: text, prompt: {
       sessionID: input.draft.sessionID, directory: input.draft.sessionDirectory, id: messageID,
       protocol,
       agent: input.draft.agent, model: input.draft.model, variant: input.draft.variant,
@@ -147,7 +154,10 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       agents: requestParts.flatMap(part => part.type === "agent" ? [{ name: part.name }] : []),
       draft: { ...input.draft, prompt: input.draft.prompt.map(part => part.type === "image" ? { type: "image", id: part.id, mime: part.mime, filename: part.filename, dataUrl: encodedImages.find(image => image.id === part.id)?.dataUrl } : part) },
     } }))
+    if (immediate && (admitted.presentation !== "transcript" || admitted.id !== messageID)) removeImmediate()
+    if (admitted.presentation === "transcript") { if (admitted.id !== messageID || !immediate) addImmediate(admitted.id); setBusy() }
     return true
+    } catch (error) { if (immediate) removeImmediate(); throw error }
   }
 
   const message: Message = {
@@ -291,7 +301,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
 
     input.onAbort?.()
     // A storage failure must remain visible without preventing interruption.
-    await platform.bitsbytes?.call("runs.stop", { sessionID }).catch((error) => {
+    const stopped = await platform.bitsbytes?.call<{ interruptionOwned?: boolean }>("runs.stop", { sessionID }).catch((error) => {
       showToast({ variant: "error", title: language.t("common.requestFailed"), description: errorMessage(error) })
     })
 
@@ -303,6 +313,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       pending.delete(key)
       return Promise.resolve()
     }
+    if (stopped?.interruptionOwned) return
     return sdk()
       .api.session.interrupt({ sessionID })
       .catch(() => {})

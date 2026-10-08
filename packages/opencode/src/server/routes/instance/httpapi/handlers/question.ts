@@ -4,6 +4,7 @@ import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { QuestionNotFoundError } from "../errors"
+import { ActivityPayload } from "../groups/question"
 
 export const questionHandlers = HttpApiBuilder.group(InstanceHttpApi, "question", (handlers) =>
   Effect.gen(function* () {
@@ -50,5 +51,8 @@ export const questionHandlers = HttpApiBuilder.group(InstanceHttpApi, "question"
     })
 
     return handlers.handle("list", list).handle("reply", reply).handle("reject", reject)
+      .handle("configure", ctx => svc.configure(ctx.payload.enabled).pipe(Effect.as(true)))
+      .handle("activity", (ctx: { params: { requestID: QuestionID }; payload: typeof ActivityPayload.Type }) =>
+        svc.activity({ ...ctx.payload, requestID: ctx.params.requestID }).pipe(Effect.as(true), Effect.catchTag("Question.NotFoundError", error => Effect.fail(new QuestionNotFoundError({ requestID: String(error.requestID), message: "Question request is no longer pending" })))))
   }),
 )

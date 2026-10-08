@@ -280,9 +280,53 @@ test("a rejected dispatch stops waiting and retains the request for recovery", a
   expect(runs.get("ses_test").queue[0].status).toBe("uncertain")
   expect(runs.get("ses_test").queue[0].prompt.text).toBe("Use the recording")
   expect(runs.get("ses_test").error).toContain("Missing transcript revision")
-  await runs.call("delete", { sessionID: "ses_test", id: "msg_rejected" })
-  expect(runs.get("ses_test").error).toBe("")
+  await expect(runs.call("delete", { sessionID: "ses_test", id: "msg_rejected" })).rejects.toThrow("deliveryConflict")
+  expect(runs.get("ses_test").queue[0].id).toBe("msg_rejected")
+  // Damaged legacy timing metadata cannot turn uncertain delivery into proof
+  // that an input was unsent.
+  runs.get("ses_test").queue[0].sentAt = undefined
+  await expect(runs.call("delete", { sessionID: "ses_test", id: "msg_rejected" })).rejects.toThrow("deliveryConflict")
+  await expect(runs.call("edit", { sessionID: "ses_test", id: "msg_rejected" })).rejects.toThrow("deliveryConflict")
 })
+test("deleting a request rejected before admission cannot hold a later completed receipt busy", async () => {
+  const f = await fixture()
+  f.runs.close(); f.state.busy = false; f.fail.unsent = true
+  const chat = f.runs.get("ses_test")
+  await f.runs.call("admit", { prompt: f.prompt("msg_failed_preparation") })
+  await f.settle()
+  expect(chat.queue[0].status).toBe("failed")
+  expect(chat.awaitingInputIDs ?? []).toEqual([])
+  // Older journals can contain the unsent ID. Explicit Delete must remove its
+  // waiting ownership as well as the visible recovery row.
+  chat.awaitingInputIDs = ["msg_failed_preparation"]
+  await f.runs.call("delete", { sessionID: chat.sessionID, id: "msg_failed_preparation" })
+  f.fail.unsent = false
+  await f.runs.call("admit", { prompt: f.prompt("msg_recovered_receipt") })
+  await f.settle()
+  const row = f.state.messages[0]
+  row.receipt = { inputID: row.id as NonNullable<typeof row.receipt>["inputID"], revision: 1, stage: "completed", fingerprint: "recovered" }
+  f.state.busy = false
+  for (let i = 0; i < 50 && (chat.queue.length || chat.awaiting); i++) { await f.runs.pump(chat.sessionID); await Bun.sleep(2) }
+  expect(chat.awaiting).toBe(false)
+  expect(chat.awaitingInputIDs).toEqual([])
+  expect(chat.queue).toHaveLength(0)
+  expect(f.sent.map(prompt => prompt.id)).toEqual(["msg_recovered_receipt"])
+})
+
+test("unsent Steer retires only its own waiting and Goal ownership", async () => {
+  const f = await fixture()
+  f.runs.close(); f.fail.unsent = true
+  const chat = f.runs.get("ses_test")
+  chat.awaiting = true; chat.awaitingInputIDs = ["msg_original_owned"]
+  chat.goal = { id: "goal_owned", objective: "Keep useful work", status: "active", reason: "", evidence: "", started: 1, elapsed: 0, tokens: 0, continuations: 0, pendingInputIDs: ["msg_original_owned"] }
+  await f.runs.call("admit", { delivery: "steer", prompt: f.prompt("msg_unsent_steer") })
+  await f.settle()
+  expect(chat.queue[0].status).toBe("failed")
+  expect(chat.awaitingInputIDs).toEqual(["msg_original_owned"])
+  expect(chat.goal.pendingInputIDs).toEqual(["msg_original_owned"])
+  expect(chat.awaiting).toBe(true)
+})
+
 test("an unprojected idle admission times out visibly without replaying the request", async () => {
   const folder = await mkdtemp(join(tmpdir(), "bb-runs-test-"))
   const state: Inspection = { busy: false, messages: [] }
@@ -402,7 +446,7 @@ test("goal replacement needs confirmation, completion evidence and Stop pauses b
   const f = await fixture()
   await f.runs.call("goal-draft", { sessionID: "ses_test", enabled: true })
   await f.runs.call("admit", { prompt: f.prompt() })
-  await expect(f.runs.call("goal-progress", { sessionID: "ses_test", status: "complete" })).rejects.toThrow("goalEvidence")
+  await expect(f.runs.call("goal-progress", { sessionID: "ses_test", goalID: f.runs.get("ses_test").goal!.id, status: "complete" })).rejects.toThrow("goalEvidence")
   await f.runs.call("stop", { sessionID: "ses_test" })
   expect(f.runs.get("ses_test").goal?.status).toBe("paused")
   await f.runs.call("goal-draft", { sessionID: "ses_test", enabled: true })
@@ -410,7 +454,7 @@ test("goal replacement needs confirmation, completion evidence and Stop pauses b
   await f.runs.call("goal-draft", { sessionID: "ses_test", enabled: true, replace: true })
   await f.runs.call("admit", { prompt: f.prompt("msg_b", "New objective") })
   expect(f.runs.get("ses_test").goal?.objective).toBe("New objective")
-  await f.runs.call("goal-progress", { sessionID: "ses_test", status: "complete", evidence: "Verified saved output" })
+  await f.runs.call("goal-progress", { sessionID: "ses_test", goalID: f.runs.get("ses_test").goal!.id, status: "complete", evidence: "Verified saved output" })
   expect(f.runs.get("ses_test").goal?.status).toBe("complete")
 })
 
@@ -483,6 +527,32 @@ test("an earlier queued request cannot dismiss a replacement Goal", async () => 
   expect(chat.goal?.summaryDismissed).toBeUndefined()
 })
 
+test.each([{}, "damaged", ["msg_neighbor", null], ["msg_neighbor", "msg_neighbor"]])("damaged waiting ownership and timing cannot break recovery (%#)", async ids => {
+  const f = await fixture()
+  f.runs.close()
+  await f.runs.call("admit", { prompt: f.prompt("msg_recover_unsent", "Keep the exact saved request 🌿") })
+  const stored = JSON.parse(await readFile(join(f.folder, "chat-runs.json"), "utf8"))
+  Object.assign(stored.ses_test, { awaitingInputIDs: ids, revision: "invalid", goalDraftDurationMs: "invalid", resumeRequested: true })
+  const source = JSON.stringify(stored)
+  await writeFile(join(f.folder, "chat-runs.json"), source)
+  const restored = new BBRuns(f.folder, async () => ({ busy: false, messages: [] }), async () => { throw new UnsentError("Missing recorded source before admission") }, () => undefined)
+  fixtures.push({ runs: restored, folder: f.folder })
+  await restored.start(); restored.close()
+  const chat = restored.get("ses_test")
+  expect(chat.paused).toBe(true)
+  expect(chat.queue[0].prompt.text).toBe("Keep the exact saved request 🌿")
+  expect(chat.revision).toBe(0)
+  expect(chat.goalDraftDurationMs).toBeUndefined()
+  expect(chat.resumeRequested).toBe(false)
+  expect(chat.awaitingInputIDs).toEqual(Array.isArray(ids) ? ["msg_neighbor"] : [])
+  await restored.call("resume", { sessionID: chat.sessionID })
+  for (let i = 0; i < 50 && chat.queue[0].status !== "failed"; i++) { await restored.pump(chat.sessionID); await Bun.sleep(2) }
+  expect(chat.queue[0].status).toBe("failed")
+  const backup = (await readdir(f.folder)).find(name => name.startsWith("chat-runs-recovery-"))
+  expect(backup).toBeDefined()
+  expect(await readFile(join(f.folder, backup!), "utf8")).toBe(source)
+})
+
 test("a damaged optional summary marker retains the valid Goal evidence during recovery", async () => {
   const f = await fixture()
   f.runs.close()
@@ -490,6 +560,8 @@ test("a damaged optional summary marker retains the valid Goal evidence during r
   await f.runs.call("stop", { sessionID: "ses_test" })
   const stored = JSON.parse(await readFile(join(f.folder, "chat-runs.json"), "utf8"))
   stored.ses_test.goal.summaryDismissed = { damaged: true }
+  stored.ses_test.goal.stagnantCount = { damaged: true }
+  stored.ses_test.goal.updatedAt = { damaged: true }
   const source = JSON.stringify(stored)
   await writeFile(join(f.folder, "chat-runs.json"), source)
   const restored = new BBRuns(f.folder, async () => f.state, async () => { throw new Error("Recovery cannot dispatch") }, () => undefined)
@@ -497,6 +569,8 @@ test("a damaged optional summary marker retains the valid Goal evidence during r
   await restored.start()
   expect(restored.get("ses_test").goal).toMatchObject({ id: "goal_complete", status: "complete", evidence: "Retain exact validation 🌿" })
   expect(restored.get("ses_test").goal?.summaryDismissed).toBeUndefined()
+  expect(restored.get("ses_test").goal?.stagnantCount).toBe(0)
+  expect(restored.get("ses_test").goal?.updatedAt).toBeUndefined()
   const backup = (await readdir(f.folder)).find(name => name.startsWith("chat-runs-recovery-"))
   expect(backup).toBeDefined()
   expect(await readFile(join(f.folder, backup!), "utf8")).toBe(source)
@@ -509,7 +583,7 @@ test("the Goal's own completion and a rejected journal write cannot dismiss its 
   await f.runs.call("goal-draft", { sessionID: "ses_test", enabled: true })
   await f.runs.call("admit", { prompt: f.prompt("msg_goal", "Complete the original goal") })
   await f.settle()
-  await f.runs.call("goal-progress", { sessionID: "ses_test", status: "complete", evidence: "Original goal validated" })
+  await f.runs.call("goal-progress", { sessionID: "ses_test", goalID: f.runs.get("ses_test").goal!.id, status: "complete", evidence: "Original goal validated" })
   await f.settle()
   expect(f.runs.get("ses_test").goal?.summaryDismissed).toBeUndefined()
   const journal = await readFile(join(f.folder, "chat-runs.json"), "utf8")
@@ -577,19 +651,19 @@ test("selected Plan, active Goal and reordered edited queue retain exact identit
   await reach(() => !chat.queue.some(item => item.id === second.id))
   expect(chat.goal?.status).toBe("paused")
   state.busy = false
-  state.messages.push({ id: ascending("message"), assistant: true, text: "Steering progress", tools: 1, tokens: 50, progress: "steered" })
+  state.messages.push({ id: ascending("message"), parentID: second.id, assistant: true, text: "Steering progress", tools: 1, tokens: 50, progress: "steered" })
   await reach(() => sent.length === 3)
   expect(sent[2]).toMatchObject({ id: implementation.id, mode: "normal", agent: "build", text: "PLEASE IMPLEMENT THIS PLAN:\nSelected revision one 🌿" })
   expect(sent[2].text).not.toContain("Latest revision two")
   await reach(() => !chat.queue.some(item => item.id === implementation.id))
   await runs.call("cancel-edit", { sessionID: chat.sessionID, id: first.id })
   state.busy = false
-  state.messages.push({ id: ascending("message"), assistant: true, text: "Implemented selected source", tools: 1, tokens: 70, progress: "implemented" })
+  state.messages.push({ id: ascending("message"), parentID: implementation.id, assistant: true, text: "Implemented selected source", tools: 1, tokens: 70, progress: "implemented" })
   await reach(() => sent.length === 4)
   expect(sent[3]).toMatchObject({ id: first.id, text: first.text, files: first.files })
   await reach(() => !chat.queue.length)
   state.busy = false
-  state.messages.push({ id: ascending("message"), assistant: true, text: "Queued work verified", tools: 1, tokens: 90, progress: "queued" })
+  state.messages.push({ id: ascending("message"), parentID: first.id, assistant: true, text: "Queued work verified", tools: 1, tokens: 90, progress: "queued" })
   await reach(() => chat.goal?.tokens === 210 && !chat.awaiting)
   expect(sent.map(item => item.id)).toEqual([original.id, second.id, implementation.id, first.id])
   expect(new Set(sent.map(item => item.id)).size).toBe(sent.length)
@@ -713,7 +787,7 @@ test("ignoring a deliberately stopped cancellation still enforces the original t
 
 test("saved Stop ownership survives restart and preserves exact Goal evidence", async () => {
   const f = await stoppedGoalFixture()
-  await f.runs.call("goal-progress", { sessionID: "ses_test", evidence: "Saved work and validation 🌿" })
+  await f.runs.call("goal-progress", { sessionID: "ses_test", goalID: f.runs.get("ses_test").goal!.id, evidence: "Saved work and validation 🌿" })
   const restored = new BBRuns(f.folder, async () => structuredClone(f.state), async () => { throw new Error("Recovery must not dispatch") }, () => undefined)
   fixtures.push({ runs: restored, folder: f.folder }); await restored.start(); restored.close()
   expect(restored.get("ses_test").goal).toEqual(f.chat.goal)
@@ -728,7 +802,7 @@ test.each([
   { field: "stoppedInputs", value: [{ id: "same", before: 1 }, { id: "same", before: 2 }] },
 ])("damaged optional $field cancellation ownership retains the Goal and exact recovery source", async damaged => {
   const f = await stoppedGoalFixture()
-  await f.runs.call("goal-progress", { sessionID: "ses_test", evidence: "Keep exact saved evidence 🌿" })
+  await f.runs.call("goal-progress", { sessionID: "ses_test", goalID: f.runs.get("ses_test").goal!.id, evidence: "Keep exact saved evidence 🌿" })
   const stored = JSON.parse(await readFile(join(f.folder, "chat-runs.json"), "utf8"))
   stored.ses_test.goal[damaged.field] = damaged.value
   const source = JSON.stringify(stored)
@@ -875,21 +949,24 @@ test("a valid journal is retained without creating a repair backup", async () =>
   expect((await readdir(f.folder)).some(name => name.startsWith("chat-runs-recovery-"))).toBe(false)
 })
 
-test("only an idle-waiting queue uses busy summaries; steer, acknowledgement and Goal baseline retain history", async () => {
+test("busy execution uses summaries after acknowledgement; Steer and Goal baselines still read history", async () => {
   const f = await fixture()
   f.runs.get("ses_test").paused = true
   await f.runs.call("admit", { prompt: f.prompt("msg_summary") })
   f.runs.get("ses_test").paused = false
   await f.runs.pump("ses_test")
-  expect(f.inspections.at(-1)).toEqual({ readBusyMessages: false })
+  expect(f.inspections.at(-1)).toEqual({ readBusyMessages: false, readWaitingState: false })
   expect(f.sent).toHaveLength(0)
   await f.runs.call("steer", { sessionID: "ses_test", id: "msg_summary" })
   await f.settle()
-  expect(f.inspections.at(-1)).toEqual({ readBusyMessages: true })
+  expect(f.inspections.at(-1)).toEqual({ readBusyMessages: true, readWaitingState: false })
   expect(f.sent).toHaveLength(1)
   await f.runs.pump("ses_test")
-  expect(f.inspections.at(-1)).toEqual({ readBusyMessages: true })
+  expect(f.inspections.at(-1)).toEqual({ readBusyMessages: true, readWaitingState: false })
   expect(f.runs.get("ses_test").queue).toHaveLength(0)
+  await f.runs.pump("ses_test")
+  expect(f.inspections.at(-1)).toEqual({ readBusyMessages: false, readWaitingState: false })
+  expect(f.runs.get("ses_test").awaiting).toBe(true)
   await f.runs.call("goal-draft", { sessionID: "ses_test", enabled: true })
   const baseline = f.inspections.length
   await f.runs.call("admit", { prompt: f.prompt("msg_goal_baseline", "Account for all prior tokens") })
@@ -1034,7 +1111,8 @@ test.each(["admit", "goal", "resume"])("a rejected %s save cannot dispatch autom
   const prompt = f.prompt("msg_rejected_save", "Keep this unacknowledged source 🌿")
   if (phase === "goal") await f.runs.call("goal-draft", { sessionID: prompt.sessionID, enabled: true })
   if (phase === "resume") {
-    await f.runs.call("stop", { sessionID: prompt.sessionID })
+    f.runs.get(prompt.sessionID).paused = true
+    f.runs.get(prompt.sessionID).pauseReason = "recovery"
     await f.runs.call("admit", { prompt })
   }
   const durable = await readFile(join(f.folder, "chat-runs.json"), "utf8")
@@ -1058,4 +1136,158 @@ test.each(["admit", "goal", "resume"])("a rejected %s save cannot dispatch autom
   expect(f.sent).toHaveLength(1)
   expect(f.sent[0].id).toBe(prompt.id)
   expect(f.sent[0].text).toContain(prompt.text)
+})
+
+test("idle admission has one stable transcript identity while the engine admission is pending", async () => {
+  const f = await fixture()
+  f.runs.close(); f.state.busy = false
+  const prompt = f.prompt("msg_immediate")
+  const admitted = await f.runs.call("admit", { prompt, immediate: true }) as { id: string; presentation: string }
+  expect(admitted).toMatchObject({ id: prompt.id, presentation: "transcript" })
+  await f.settle(); await f.runs.pump(prompt.sessionID)
+  expect(f.sent.map(row => row.id)).toEqual([prompt.id])
+  expect(f.state.messages.filter(row => row.id === prompt.id)).toHaveLength(1)
+})
+
+test("an idle engine overrides a stale renderer busy hint without displaying a queued row", async () => {
+  const f = await fixture()
+  f.runs.close(); f.state.busy = false
+  const admitted = await f.runs.call("admit", { prompt: f.prompt("msg_stale_busy"), immediate: false })
+  expect(admitted).toMatchObject({ presentation: "transcript" })
+  expect(f.inspections[0]).toEqual({ readBusyMessages: false, readWaitingState: false })
+  await f.settle()
+  expect(f.sent.map(row => row.id)).toEqual(["msg_stale_busy"])
+})
+
+test("a first Send after Stop retires only proven old admissions before choosing transcript presentation", async () => {
+  const f = await fixture()
+  f.runs.close(); f.state.busy = false
+  const old = f.prompt("msg_old_stop")
+  f.runs.get(old.sessionID).queue.push({ id: old.id, prompt: old, status: "uncertain", sentAt: 1, delivery: "queue", presentation: "transcript" })
+  f.state.messages.push({ id: old.id, text: old.text, tokens: 0, tools: 0, receipt: { inputID: old.id as never, revision: 1, fingerprint: "fixture", stage: "interrupted" } })
+  await f.runs.call("stop", { sessionID: old.sessionID })
+  const next = await f.runs.call("admit", { prompt: f.prompt("msg_after_stop"), immediate: true })
+  expect(next).toMatchObject({ presentation: "transcript" })
+  expect(f.runs.get(old.sessionID).queue.some(row => row.id === old.id)).toBe(false)
+  await f.settle()
+  expect(f.sent.map(row => row.id)).toEqual(["msg_after_stop"])
+})
+
+test("Send after Stop releases queued inputs in order after cancellation finishes, leaving the Goal paused", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "bb-runs-test-"))
+  const state: Inspection = { busy: false, messages: [] }
+  const sent: RunPrompt[] = []
+  const entered = Promise.withResolvers<void>(), released = Promise.withResolvers<void>()
+  const runs = new BBRuns(folder, async () => structuredClone(state), async prompt => {
+    sent.push(prompt); state.busy = true
+    state.messages.push({ id: prompt.id, text: prompt.text, tokens: 0, tools: 0, receipt: { inputID: prompt.id as never, revision: 1, fingerprint: "test", stage: "applied" } })
+  }, () => undefined, async () => { entered.resolve(); await released.promise; state.busy = false; state.messages[0].receipt!.stage = "interrupted" })
+  fixtures.push({ runs, folder }); await runs.start(); runs.close()
+  const prompt = (id: string) => ({ sessionID: "ses_test", directory: folder, id, text: id, protocol: "v1" as const })
+  await runs.call("goal-draft", { sessionID: "ses_test", enabled: true })
+  await runs.call("admit", { prompt: prompt("msg_original") })
+  for (let i = 0; i < 50 && !sent.length; i++) { await runs.pump("ses_test"); await Bun.sleep(2) }
+  await runs.pump("ses_test")
+  await runs.call("admit", { prompt: prompt("msg_queued_a") })
+  const stopped = runs.call("stop", { sessionID: "ses_test" })
+  await entered.promise
+  await runs.call("admit", { prompt: prompt("msg_new_b"), immediate: true })
+  await runs.pump("ses_test")
+  expect(sent.map(row => row.id)).toEqual(["msg_original"])
+  expect(runs.get("ses_test").paused).toBe(false)
+  expect(runs.get("ses_test").goal?.status).toBe("paused")
+  released.resolve(); await stopped
+  for (let i = 0; i < 50 && sent.length < 2; i++) { await runs.pump("ses_test"); await Bun.sleep(2) }
+  await runs.pump("ses_test")
+  expect(sent[1].id).toBe("msg_queued_a")
+  state.busy = false; state.messages.find(row => row.id === "msg_queued_a")!.receipt!.stage = "completed"
+  for (let i = 0; i < 50 && sent.length < 3; i++) { await runs.pump("ses_test"); await Bun.sleep(2) }
+  expect(sent.map(row => row.id)).toEqual(["msg_original", "msg_queued_a", "msg_new_b"])
+  expect(runs.get("ses_test").goal?.status).toBe("paused")
+})
+
+test("explicit Resume uses the admitted receipt without creating a second user input", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "bb-runs-test-"))
+  const state: Inspection = { busy: false, messages: [] }
+  const sent: RunPrompt[] = []
+  const runs = new BBRuns(folder, async () => structuredClone(state), async prompt => {
+    sent.push(prompt); state.busy = true
+    if (!prompt.resume) state.messages.push({ id: prompt.id, text: prompt.text, tools: 0, tokens: 0, receipt: { inputID: prompt.id as never, fingerprint: "test", revision: 1, stage: "admitted" } })
+  }, () => undefined, async () => { state.busy = false; state.messages[0].receipt!.stage = "interrupted" })
+  fixtures.push({ runs, folder }); await runs.start(); runs.close()
+  const prompt = { id: "msg_resume_receipt", sessionID: "ses_test", directory: folder, text: "Frozen", protocol: "v1" as const }
+  await runs.call("admit", { prompt })
+  for (let i = 0; i < 50 && !sent.length; i++) { await runs.pump("ses_test"); await Bun.sleep(2) }
+  await runs.pump("ses_test"); await runs.call("stop", { sessionID: prompt.sessionID })
+  await runs.call("resume", { sessionID: prompt.sessionID })
+  for (let i = 0; i < 50 && sent.length < 2; i++) { await runs.pump("ses_test"); await Bun.sleep(2) }
+  expect(sent.map(row => [row.id, row.resume])).toEqual([[prompt.id, undefined], [prompt.id, true]])
+  expect(state.messages).toHaveLength(1)
+})
+
+test("a ten-hour minimum counts active execution, excluding questions, pauses and restart downtime", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "bb-runs-test-"))
+  let now = 1000
+  const state: Inspection = { busy: false, waiting: false, messages: [] }
+  const dispatched = Promise.withResolvers<void>()
+  const runs = new BBRuns(folder, async () => structuredClone(state), async prompt => {
+    state.busy = true; state.messages.push({ id: prompt.id, text: prompt.text, tokens: 0, tools: 0 }); dispatched.resolve()
+  }, () => undefined, undefined, () => now, () => now)
+  fixtures.push({ runs, folder }); await runs.start(); runs.close()
+  await runs.call("goal-draft", { sessionID: "ses_test", enabled: true, minActiveDurationMs: 36000000 })
+  await runs.call("admit", { prompt: { sessionID: "ses_test", directory: folder, id: "msg_duration", text: "Meaningful work" } })
+  await dispatched.promise; await runs.pump("ses_test")
+  const goal = runs.get("ses_test").goal!
+  now += 60000
+  const denied = await runs.call("goal-progress", { sessionID: "ses_test", goalID: goal.id, status: "complete", evidence: "Tests pass" }) as { completionDenied: boolean; remainingMs: number }
+  expect(denied).toMatchObject({ completionDenied: true, remainingMs: 35940000 })
+  state.waiting = true; await runs.pump("ses_test")
+  now += 5 * 3600000; await runs.pump("ses_test")
+  expect(goal.activeTimeMs).toBe(60000)
+  state.waiting = false; await runs.pump("ses_test")
+  now += 35940000
+  await runs.call("goal-pause", { sessionID: "ses_test" })
+  expect(goal.activeTimeMs).toBe(36000000)
+  now += 3600000
+  const restored = new BBRuns(folder, async () => state, async () => undefined, () => undefined, undefined, () => now, () => now)
+  fixtures.push({ runs: restored, folder }); await restored.start(); restored.close()
+  expect(restored.get("ses_test").goal).toMatchObject({ status: "paused", activeTimeMs: 36000000, activeSince: undefined })
+  await restored.call("goal-progress", { sessionID: "ses_test", goalID: goal.id, status: "complete", evidence: "Tests and artifacts verified" })
+  expect(restored.get("ses_test").goal?.status).toBe("complete")
+  expect(restored.get("ses_test").goal?.activeTimeMs).toBe(36000000)
+})
+
+test("a wall-clock jump cannot satisfy the Goal minimum", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "bb-runs-test-"))
+  let wall = 1700000000000, tick = 0
+  const state: Inspection = { busy: false, waiting: false, messages: [] }
+  const dispatched = Promise.withResolvers<void>()
+  const runs = new BBRuns(folder, async () => structuredClone(state), async prompt => {
+    state.busy = true; state.messages.push({ id: prompt.id, text: prompt.text, tokens: 0, tools: 0 }); dispatched.resolve()
+  }, () => undefined, undefined, () => wall, () => tick)
+  fixtures.push({ runs, folder }); await runs.start(); runs.close()
+  await runs.call("goal-draft", { sessionID: "ses_test", enabled: true, minActiveDurationMs: 600000 })
+  await runs.call("admit", { prompt: { sessionID: "ses_test", directory: folder, id: "msg_clock", text: "Verify the artifact" } })
+  await dispatched.promise; await runs.pump("ses_test")
+  const goal = runs.get("ses_test").goal!
+  wall += 10 * 3600000; tick += 60000
+  const first = await runs.call("goal-progress", { sessionID: "ses_test", goalID: goal.id, status: "complete", evidence: "Artifact verified" })
+  expect(first).toMatchObject({ completionDenied: true, remainingMs: 540000 })
+  wall -= 12 * 3600000; tick += 60000
+  await runs.call("goal-pause", { sessionID: "ses_test" })
+  expect(goal.activeTimeMs).toBe(120000)
+  expect(goal.status).toBe("paused")
+})
+
+test("late Goal progress cannot complete a replaced or cleared Goal", async () => {
+  const f = await fixture(); f.runs.close()
+  await f.runs.call("goal-draft", { sessionID: "ses_test", enabled: true })
+  await f.runs.call("admit", { prompt: f.prompt("msg_old_goal") })
+  const oldID = f.runs.get("ses_test").goal!.id
+  await f.runs.call("goal-draft", { sessionID: "ses_test", enabled: true, replace: true })
+  await f.runs.call("admit", { prompt: f.prompt("msg_new_goal", "New objective") })
+  await expect(f.runs.call("goal-progress", { sessionID: "ses_test", goalID: oldID, status: "complete", evidence: "Old tests" })).rejects.toThrow("deliveryConflict")
+  expect(f.runs.get("ses_test").goal?.objective).toBe("New objective")
+  await f.runs.call("goal-clear", { sessionID: "ses_test" })
+  await expect(f.runs.call("goal-progress", { sessionID: "ses_test", goalID: oldID, status: "complete", evidence: "Old tests" })).rejects.toThrow("deliveryConflict")
 })

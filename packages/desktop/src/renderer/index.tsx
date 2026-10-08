@@ -1,6 +1,7 @@
 import { DocumentPanel, BrowserPanel } from "./bitsbytes/panels"
 import { RunPanel } from "./bitsbytes/run-panel"
 import { MobileSettings } from "./bitsbytes/mobile-settings"
+import notificationIcon from "./bitsbytes/bits-en-bytes-logo.png"
 import { mobileCopy } from "../bitsbytes/mobile-copy"
 // @refresh reload
 
@@ -264,7 +265,7 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
 
       const notification = new Notification(title, {
         body: description ?? "",
-        icon: "https://opencode.ai/favicon-96x96-v3.png",
+        icon: notificationIcon,
       })
       notification.onclick = () => {
         void window.api.showWindow()
@@ -379,6 +380,8 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
   function Inner() {
     const navigate = useNavigate()
     const location = useLocation()
+    let mounted = true
+    onCleanup(() => { mounted = false })
     const encodedDirectory = (value: string) => btoa(unescape(encodeURIComponent(value))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
     const openBitsSession = (event: Event) => {
       const detail = (event as CustomEvent<{ directory: string; sessionID: string }>).detail
@@ -390,7 +393,10 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
     onCleanup(() => window.removeEventListener("bitsbytes:session", openBitsSession))
     onMount(() => {
       if (location.pathname !== "/") return
-      void window.api.bitsbytes.call<{ root: string }>("state").then((state) => navigate(`/${encodedDirectory(state.root + "\\workspace")}/session`, { replace: true }))
+      void window.api.bitsbytes.call<{ root: string }>("state").then((state) => {
+        if (!mounted || location.pathname !== "/") return
+        navigate(`/${encodedDirectory(state.root + "\\workspace")}/session`, { replace: true })
+      })
     })
     const cmd = useCommand()
     const openSettings = () => cmd.trigger("settings.open")

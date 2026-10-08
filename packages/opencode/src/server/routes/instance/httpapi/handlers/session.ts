@@ -36,7 +36,7 @@ import {
   SummarizePayload,
   UpdatePayload,
 } from "../groups/session"
-import { PermissionNotFoundError } from "../errors"
+import { PermissionNotFoundError, ConflictError } from "../errors"
 import * as SessionError from "./session-errors"
 
 const tryParseJson = (text: string) =>
@@ -211,6 +211,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
         session.fork({
           sessionID: ctx.params.sessionID,
           messageID: ctx.payload?.messageID,
+          inclusive: ctx.payload?.inclusive,
         }),
       )
     })
@@ -302,7 +303,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
           ...ctx.payload,
           sessionID: ctx.params.sessionID,
         })
-        .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+        .pipe(Effect.mapError(error => error._tag === "PromptInputError" ? new ConflictError({ message: error.message, resource: ctx.payload.messageID }) : new HttpApiError.BadRequest({})))
       return HttpServerResponse.stream(Stream.make(JSON.stringify(message)).pipe(Stream.encodeText), {
         contentType: "application/json",
       })
@@ -313,7 +314,10 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       payload: typeof PromptPayload.Type
     }) {
       yield* requireSession(ctx.params.sessionID)
-      yield* promptSvc.prompt({ ...ctx.payload, sessionID: ctx.params.sessionID }).pipe(
+      const admitted = yield* promptSvc.prompt({ ...ctx.payload, sessionID: ctx.params.sessionID, noReply: true })
+        .pipe(Effect.mapError(error => error._tag === "PromptInputError" ? new ConflictError({ message: error.message, resource: ctx.payload.messageID }) : new HttpApiError.BadRequest({})))
+      if (ctx.payload.noReply === true || (admitted.info.role === "user" && admitted.info.execution?.stage === "completed")) return HttpApiSchema.NoContent.make()
+      yield* promptSvc.loop({ sessionID: ctx.params.sessionID, resume: ctx.payload.resume }).pipe(
         Effect.catchCause((cause) =>
           Effect.gen(function* () {
             yield* Effect.logError("prompt_async failed", { sessionID: ctx.params.sessionID, cause })

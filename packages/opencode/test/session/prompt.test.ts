@@ -240,7 +240,295 @@ function makeHttpNoLLMServer(input?: { mcpInstructions?: MCP.ServerInstructions[
 }
 
 const it = testEffect(makeHttp())
+
+it.instance("BitsBytes exact admission retry is idempotent and conflicting reuse fails", () =>
+  Effect.gen(function* () {
+    yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service,
+      sessions = yield* Session.Service
+    const chat = yield* sessions.create({ title: "Pinned receipt test" })
+    const input = {
+      sessionID: chat.id,
+      messageID: MessageID.ascending(),
+      noReply: true,
+      agent: "build",
+      model: ref,
+      parts: [{ type: "text" as const, text: "Frozen input 🌿" }],
+    }
+    const [first, retry] = yield* Effect.all([prompt.prompt(input), prompt.prompt({ ...input, resume: true })], {
+      concurrency: 2,
+    })
+    expect(first.info.id).toBe(retry.info.id)
+    expect(first.parts.map((part) => part.id)).toEqual(retry.parts.map((part) => part.id))
+    const rows = yield* sessions.messages({ sessionID: chat.id })
+    expect(rows).toHaveLength(1)
+    expect(rows[0].info.role === "user" && rows[0].info.execution?.stage).toBe("admitted")
+    const conflict = yield* prompt.prompt({ ...input, parts: [{ type: "text", text: "Changed" }] }).pipe(Effect.flip)
+    expect(conflict._tag).toBe("PromptInputError")
+    expect(yield* sessions.messages({ sessionID: chat.id })).toHaveLength(1)
+  }),
+)
+
+it.instance("BitsBytes a delayed summary cannot resurrect a completed execution receipt", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({ title: "Late summary receipt ownership" })
+    const admitted = yield* prompt.prompt({
+      sessionID: chat.id,
+      messageID: MessageID.ascending(),
+      noReply: true,
+      model: ref,
+      parts: [{ type: "text", text: "Complete once" }],
+    })
+    const stale = structuredClone(admitted.info)
+    if (stale.role !== "user") throw Error("Expected an admitted user")
+    yield* llm.text("Completed once")
+    yield* prompt.loop({ sessionID: chat.id })
+    const before = (yield* sessions.messages({ sessionID: chat.id })).find((row) => row.info.id === stale.id)
+    expect(before?.info.role === "user" && before.info.execution?.stage).toBe("completed")
+    // SessionSummary computes against an earlier snapshot, then publishes its
+    // ordinary user-message update after execution has finished.
+    yield* sessions.updateMessage({ ...stale, summary: { diffs: [] } })
+    const current = (yield* sessions.messages({ sessionID: chat.id })).find((row) => row.info.id === stale.id)
+    expect(current?.info.role === "user" && current.info.execution?.stage).toBe("completed")
+    expect(current?.info.role === "user" && current.info.summary?.diffs).toEqual([])
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      messageID: stale.id,
+      model: ref,
+      parts: [{ type: "text", text: "Complete once" }],
+    })
+    expect((yield* sessions.messages({ sessionID: chat.id })).filter((row) => row.info.role === "user")).toHaveLength(1)
+    expect(yield* llm.hits).toHaveLength(1)
+  }),
+)
+
+it.instance("BitsBytes partial admission repairs frozen parts and stable identities", () =>
+  Effect.gen(function* () {
+    yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service,
+      sessions = yield* Session.Service
+    const chat = yield* sessions.create({})
+    const input = {
+      sessionID: chat.id,
+      messageID: MessageID.ascending(),
+      noReply: true,
+      agent: "build",
+      model: ref,
+      parts: [{ type: "text" as const, text: "Original frozen bytes 🌿" }],
+    }
+    const original = yield* prompt.prompt(input)
+    if (original.info.role !== "user" || !original.info.execution || original.parts[0].type !== "text")
+      throw Error("Expected admitted user text")
+    yield* sessions.updateExecution({
+      ...original.info,
+      execution: { ...original.info.execution, stage: "preparing", preparedParts: original.parts },
+    })
+    yield* sessions.updatePart({ ...original.parts[0], text: "Incomplete projection" })
+    const repaired = yield* prompt.prompt({ ...input, resume: true })
+    expect(repaired.parts).toEqual(original.parts)
+    expect(repaired.info.role === "user" && repaired.info.execution).toMatchObject({
+      stage: "admitted",
+      preparedParts: undefined,
+    })
+    expect(yield* sessions.messages({ sessionID: chat.id })).toHaveLength(1)
+    const stored = yield* sessions.messages({ sessionID: chat.id })
+    expect(stored[0].parts).toEqual(original.parts)
+  }),
+)
+
+it.instance("BitsBytes completed receipts and explicit interrupted Resume preserve one user row", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service,
+      sessions = yield* Session.Service
+    const chat = yield* sessions.create({ title: "Pinned receipt test" })
+    const input = {
+      sessionID: chat.id,
+      messageID: MessageID.ascending(),
+      agent: "build",
+      model: ref,
+      parts: [{ type: "text" as const, text: "Work" }],
+    }
+    yield* prompt.prompt({ ...input, noReply: true })
+    yield* llm.text("First result")
+    const first = yield* prompt.loop({ sessionID: chat.id })
+    const rows = yield* sessions.messages({ sessionID: chat.id })
+    const user = rows.find((row) => row.info.role === "user")!.info
+    if (user.role !== "user" || !user.execution) throw Error("Expected receipt")
+    expect(user.execution).toMatchObject({ stage: "completed", inputID: input.messageID, turnID: first.info.id })
+    yield* prompt.prompt(input)
+    expect(yield* llm.hits).toHaveLength(1)
+    yield* sessions.updateExecution({ ...user, execution: { ...user.execution, stage: "interrupted" } })
+    yield* llm.text("Resumed result")
+    const resumed = yield* prompt.prompt({ ...input, resume: true })
+    expect(resumed.info.id).not.toBe(first.info.id)
+    const after = yield* sessions.messages({ sessionID: chat.id })
+    expect(after.filter((row) => row.info.role === "user")).toHaveLength(1)
+    expect(new Set(after.map((row) => row.info.id)).size).toBe(after.length)
+    expect(yield* llm.hits).toHaveLength(2)
+  }),
+)
 const noLLMServer = testEffect(makeHttpNoLLMServer())
+
+it.instance("BitsBytes Stop clears detached questions and approvals before Idle without touching another chat", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service,
+      sessions = yield* Session.Service
+    const question = yield* Question.Service,
+      permission = yield* Permission.Service
+    const events = yield* EventV2Bridge.Service,
+      status = yield* SessionStatus.Service
+    const chat = yield* sessions.create({ title: "Question Stop ownership" })
+    const other = yield* sessions.create({ title: "Unrelated pending input" })
+    const questions = [
+      {
+        question: "Required selection",
+        header: "Required",
+        options: [{ label: "Continue", description: "Explicit choice" }],
+      },
+    ]
+    const rejected: string[] = []
+    const off = yield* events.listen((event) => {
+      if (event.type === Question.Event.Rejected.type) rejected.push((event.data as { requestID: string }).requestID)
+      return Effect.void
+    })
+    yield* Effect.addFinalizer(() => off)
+    const unrelated = yield* question.ask({ sessionID: other.id, questions }).pipe(Effect.forkScoped)
+    const approval = (sessionID: SessionID) =>
+      permission.ask({
+        sessionID,
+        permission: "edit",
+        patterns: ["*"],
+        metadata: {},
+        always: [],
+        ruleset: [{ permission: "edit", pattern: "*", action: "ask" }],
+      })
+    const ownApproval = yield* approval(chat.id).pipe(Effect.forkScoped)
+    const otherApproval = yield* approval(other.id).pipe(Effect.forkScoped)
+    yield* llm.tool("question", { questions })
+    const execution = yield* prompt
+      .prompt({ sessionID: chat.id, agent: "build", parts: [{ type: "text", text: "Ask for required input" }] })
+      .pipe(Effect.forkChild)
+    const owned = yield* pollWithTimeout(
+      question.list().pipe(Effect.map((items) => items.find((item) => item.sessionID === chat.id))),
+      "Question tool did not become pending",
+      "10 seconds",
+    )
+    yield* pollWithTimeout(
+      permission.list().pipe(Effect.map((items) => items.length === 2 || undefined)),
+      "Approvals did not become pending",
+      "10 seconds",
+    )
+    yield* prompt.cancel(chat.id)
+    yield* Fiber.await(execution)
+    expect(yield* status.get(chat.id)).toEqual({ type: "idle" })
+    expect((yield* question.list()).map((item) => item.sessionID)).toEqual([other.id])
+    expect((yield* permission.list()).map((item) => item.sessionID)).toEqual([other.id])
+    expect(Exit.isFailure(yield* Fiber.await(ownApproval))).toBe(true)
+    yield* prompt.cancel(chat.id)
+    expect(rejected).toEqual([owned.id])
+    const remaining = (yield* question.list())[0]
+    yield* question.reply({ requestID: remaining.id, answers: [[]] })
+    expect(yield* Fiber.join(unrelated)).toEqual([[]])
+    yield* permission.reply({ requestID: (yield* permission.list())[0].id, reply: "reject" })
+    expect(Exit.isFailure(yield* Fiber.await(otherApproval))).toBe(true)
+  }),
+)
+
+it.instance(
+  "BitsBytes inclusive branch copies the selected response, attachment bytes and model without execution ownership",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service,
+        sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Pinned branch test",
+        agent: "build",
+        model: { id: ref.modelID, providerID: ref.providerID, variant: "qa-variant" },
+        permission: [{ permission: "read", pattern: "*", action: "allow" }],
+      })
+      const png =
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGNUSFjAgA0wYRUdtBIA5UgBMGHyow0AAAAASUVORK5CYII="
+      const admitted = yield* prompt.prompt({
+        sessionID: chat.id,
+        messageID: MessageID.ascending(),
+        noReply: true,
+        agent: "build",
+        model: ref,
+        parts: [
+          { type: "text", text: "Preserve source" },
+          { type: "file", mime: "image/png", filename: "frozen.png", url: png },
+        ],
+      })
+      yield* llm.text("Selected answer")
+      const response = yield* prompt.loop({ sessionID: chat.id })
+      yield* sessions.setAgentModel({
+        sessionID: chat.id,
+        agent: "build",
+        model: { id: ref.modelID, providerID: ref.providerID, variant: "qa-variant" },
+        time: Date.now(),
+      })
+      const parent = yield* sessions.get(chat.id)
+      const branch = yield* sessions.fork({ sessionID: chat.id, messageID: response.info.id, inclusive: true })
+      const copies = yield* sessions.messages({ sessionID: branch.id })
+      expect(copies).toHaveLength(2)
+      expect(copies.at(-1)?.parts.some((part) => part.type === "text" && part.text === "Selected answer")).toBe(true)
+      expect(copies[0].parts.find((part) => part.type === "file")).toMatchObject({ url: png, filename: "frozen.png" })
+      expect(copies[0].info.role === "user" && copies[0].info.execution).toBeUndefined()
+      expect(branch.permission).toEqual(parent.permission)
+      expect(branch.model).toEqual(parent.model)
+      expect(branch.model).toMatchObject({ id: ref.modelID, providerID: ref.providerID, variant: "qa-variant" })
+      expect(branch.agent).toBe("build")
+      expect(copies[0].info.id).not.toBe(admitted.info.id)
+      const before = yield* sessions.children(chat.id)
+      const invalid = yield* sessions
+        .fork({ sessionID: chat.id, messageID: MessageID.ascending(), inclusive: true })
+        .pipe(Effect.flip)
+      expect(invalid._tag).toBe("NotFoundError")
+      expect(yield* sessions.children(chat.id)).toHaveLength(before.length)
+    }),
+)
+
+it.instance("BitsBytes diagnostic metadata enforces read-only tools even with Full permissions", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service,
+      sessions = yield* Session.Service
+    const parent = yield* sessions.create({ title: "Pinned parent" })
+    const diagnostic = { key: "owned-key", parentID: parent.id, ownerID: parent.id }
+    const chat = yield* sessions.create({
+      title: "Pinned side",
+      parentID: parent.id,
+      metadata: { bitsbytesDiagnostic: diagnostic },
+      permission: [{ permission: "*", pattern: "*", action: "allow" }],
+    })
+    const input = {
+      sessionID: chat.id,
+      agent: "build",
+      model: ref,
+      noReply: true,
+      parts: [{ type: "text" as const, text: "Explain progress" }],
+    }
+    const denied = yield* prompt.prompt({ ...input, tools: { bash: true } }).pipe(Effect.flip)
+    expect(denied._tag).toBe("PromptInputError")
+    yield* prompt.prompt(input)
+    yield* llm.text("Recorded progress explained")
+    yield* prompt.loop({ sessionID: chat.id })
+    const hits = yield* llm.hits
+    const tools = hits[0].body.tools as { function: { name: string } }[]
+    expect(tools.map((tool) => tool.function.name).sort()).toEqual(["glob", "grep", "parent_progress", "read"])
+    expect(JSON.stringify(hits[0].body)).toContain("temporary diagnostic side chat")
+    const before = yield* sessions.get(chat.id)
+    const removed = yield* sessions.setMetadata({ sessionID: chat.id, metadata: {} }).pipe(Effect.exit)
+    expect(Exit.isFailure(removed)).toBe(true)
+    expect((yield* sessions.get(chat.id)).metadata).toEqual(before.metadata)
+  }),
+)
 const raceNoLLMServer = testEffect(makeHttpNoLLMServer({ processor: "blocking" }))
 const withMcpInstructions = testEffect(
   makeHttp({

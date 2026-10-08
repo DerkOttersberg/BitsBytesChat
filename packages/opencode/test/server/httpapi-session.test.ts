@@ -550,6 +550,10 @@ describe("session HttpApi", () => {
         expect(wait.status).toBe(404)
         expect(yield* responseJson(wait)).toEqual(expected)
 
+        const resume = yield* request(`/api/session/${missing}/resume`, { method: "POST", headers })
+        expect(resume.status).toBe(404)
+        expect(yield* responseJson(resume)).toEqual(expected)
+
         const prompt = yield* request(`/api/session/${missing}/prompt`, {
           method: "POST",
           headers: { ...headers, "content-type": "application/json" },
@@ -557,6 +561,33 @@ describe("session HttpApi", () => {
         })
         expect(prompt.status).toBe(404)
         expect(yield* responseJson(prompt)).toEqual(expected)
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
+  it.instance(
+    "v2 explicit Resume returns no content without admitting an input or changing context",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const headers = { "x-opencode-directory": test.directory }
+        const session = yield* createSession({ title: "v2 explicit resume" })
+        const before = yield* requestJson<{ data: unknown[] }>(`/api/session/${session.id}/context`, { headers })
+        const response = yield* request(`/api/session/${session.id}/resume`, { method: "POST", headers })
+        expect(response.status).toBe(204)
+        yield* request(`/api/session/${session.id}/wait`, { method: "POST", headers })
+        expect(yield* requestJson<{ data: unknown[] }>(`/api/session/${session.id}/context`, { headers })).toEqual(
+          before,
+        )
+        const inputs = yield* Database.Service.use(({ db }) =>
+          db
+            .select()
+            .from(SessionInputTable)
+            .where(eq(SessionInputTable.session_id, session.id))
+            .all()
+            .pipe(Effect.orDie),
+        )
+        expect(inputs).toEqual([])
       }),
     { git: true, config: { formatter: false, lsp: false } },
   )
@@ -712,6 +743,61 @@ describe("session HttpApi", () => {
 
         expect(response.status).toBe(200)
         expect((yield* json<Session.Info>(response)).summary?.diffs).toEqual([{ additions: 1, deletions: 0 }])
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
+  it.instance(
+    "BitsBytes HTTP inclusive branch includes its selected response and preserves legacy exclusive boundaries",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const sessions = yield* Session.Service
+        const chat = yield* createSession({ title: "HTTP branch boundary" })
+        const user = yield* createTextMessage(chat.id, "Original request")
+        const response = yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          sessionID: chat.id,
+          role: "assistant",
+          parentID: user.info.id,
+          time: { created: Date.now(), completed: Date.now() },
+          agent: "build",
+          mode: "build",
+          modelID: ModelV2.ID.make("test"),
+          providerID: ProviderV2.ID.make("test"),
+          path: { cwd: test.directory, root: test.directory },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          finish: "stop",
+        })
+        yield* sessions.updatePart({
+          id: PartID.ascending(),
+          sessionID: chat.id,
+          messageID: response.id,
+          type: "text",
+          text: "Selected response",
+        })
+        yield* createTextMessage(chat.id, "Later request must be excluded")
+        const headers = { "x-opencode-directory": test.directory, "content-type": "application/json" }
+        const fork = (inclusive: boolean) =>
+          requestJson<Session.Info>(pathFor(SessionPaths.fork, { sessionID: chat.id }), {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ messageID: response.id, inclusive }),
+          })
+        const branch = yield* fork(true)
+        const copied = yield* sessions.messages({ sessionID: branch.id })
+        expect(copied).toHaveLength(2)
+        expect(copied.map((row) => row.info.role)).toEqual(["user", "assistant"])
+        expect(copied.at(-1)?.parts).toMatchObject([{ type: "text", text: "Selected response" }])
+        expect(
+          copied
+            .flatMap((row) => row.parts)
+            .some((part) => part.type === "text" && part.text.includes("Later request")),
+        ).toBe(false)
+        expect(copied[1].info.id).not.toBe(response.id)
+        const exclusive = yield* fork(false)
+        expect(yield* sessions.messages({ sessionID: exclusive.id })).toHaveLength(1)
       }),
     { git: true, config: { formatter: false, lsp: false } },
   )

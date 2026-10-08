@@ -267,8 +267,21 @@ export function toLLMEvents(
     case "error":
       return Effect.fail(event.error)
 
-    case "abort":
     case "source":
+      return Effect.succeed([
+        LLMEvent.source(
+          event.sourceType === "url"
+            ? { sourceType: "url", id: event.id, url: event.url, title: event.title }
+            : {
+                sourceType: "document",
+                id: event.id,
+                title: event.title,
+                filename: event.filename,
+                mediaType: event.mediaType,
+              },
+        ),
+      ])
+    case "abort":
     case "file":
     case "tool-output-denied":
     case "tool-approval-request":

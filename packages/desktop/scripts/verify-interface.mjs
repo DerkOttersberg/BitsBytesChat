@@ -1,3 +1,4 @@
+import { captureHidden } from "./qa-capture.mjs"
 import { createRequire } from 'node:module'
 import { createServer } from 'node:http'
 import { mkdir, readFile, writeFile, symlink } from 'node:fs/promises'
@@ -13,7 +14,7 @@ const version = JSON.parse(await readFile(join(root, 'packages/desktop/package.j
 const tag = process.env.BB_QA_REPORT || process.argv[2] || 'release-03'
 const profile = root + '/.tools/qa/release-03-' + Date.now()
 const data = profile + '/BitsBytesChat'
-const report = { checks: [], errors: [], requests: [] }
+const report = { checks: [], errors: [], requests: [], profile }
 const requests = []
 const firstSlow = { entered: false, active: true, release: Promise.withResolvers() }
 let qaDocument = ''
@@ -42,7 +43,7 @@ const fixture = createServer(async (req, res) => {
     calls.push({ name: named('create_artifact'), args: { job_id: 'qa-sheet', spec: { filename: 'Release QA.xlsx', sheets: [{ name: 'Data', rows: [['Value', 'Total'], [4, '=SUM(A2:A3)'], [6, '=A2*A3']] }] } } })
   }
   if (latest.includes('revise-artifact') && !hasTool && named('run_artifact_script')) calls.push({ name: named('run_artifact_script'), args: { job_id: 'qa-document-revision', code: 'from docx import Document\np=' + JSON.stringify(qaDocument) + '\nd=Document(p)\nd.add_paragraph("Revised content")\nd.save(p)\n', files: [qaDocument] } })
-  if (latest.includes('goal-evidence') && !hasTool && named('goal_progress')) calls.push({ name: named('goal_progress'), args: { status: 'complete', reason: 'QA goal achieved', evidence: 'The deterministic provider returned the requested response and verified the goal callback.' } })
+  if (latest.includes('goal-evidence') && !hasTool && named('goal_progress')) calls.push({ name: named('goal_progress'), args: { goalID: JSON.stringify(input).match(/goal \(ID ([a-f0-9]+)\)/i)?.[1], status: 'complete', reason: 'QA goal achieved', evidence: 'The deterministic provider returned the requested response and verified the goal callback.' } })
   res.writeHead(200, { 'content-type': 'text/event-stream' })
   const emit = delta => res.write('data: ' + JSON.stringify({ id: 'chatcmpl-' + randomUUID(), object: 'chat.completion.chunk', created: Math.floor(Date.now()/1000), model: 'qa-model', choices: [{ index: 0, delta, finish_reason: null }] }) + '\n\n')
   emit({ role: 'assistant' })
@@ -55,7 +56,7 @@ const url = 'http://127.0.0.1:' + fixture.address().port
 await mkdir(data + '/config/opencode', { recursive: true })
 await symlink(process.env.LOCALAPPDATA + '/BitsBytesChat/runtime', data + '/runtime', 'junction')
 await writeFile(data + '/config/opencode/opencode.json', JSON.stringify({ provider: { 'bitsbytes-qa': { name: 'Local QA', npm: '@ai-sdk/openai-compatible', options: { baseURL: url + '/v1', apiKey: 'fixture-only' }, models: { 'qa-model': { name: 'QA model', limit: { context: 128000, output: 8192 }, variants: { low: { reasoningEffort: 'low' }, high: { reasoningEffort: 'high' } } } } } }, model: 'bitsbytes-qa/qa-model' }))
-const app = await _electron.launch({ executablePath: process.env.BB_QA_EXECUTABLE || join(root, `packages/desktop/dist/${version}/win-unpacked/BitsBytesChat.exe`), ...(process.env.BB_QA_MAIN ? { args: [process.env.BB_QA_MAIN] } : {}), env: { ...process.env, BB_QA_ISOLATED: "1", LOCALAPPDATA: profile }, timeout: 90000 })
+const app = await _electron.launch({ executablePath: process.env.BB_QA_EXECUTABLE || join(root, `packages/desktop/dist/${version}/win-unpacked/BitsBytesChat.exe`), ...(process.env.BB_QA_MAIN ? { args: [process.env.BB_QA_MAIN] } : {}), env: { ...process.env, BB_QA_ISOLATED: "1", BB_QA_HIDDEN: "1", BB_QA_CAPTURE: "1", LOCALAPPDATA: profile }, timeout: 90000 })
 await app.evaluate(({ BrowserWindow }) => { for (const window of BrowserWindow.getAllWindows()) window.hide() })
 let page, call, engine, bridge
 const sessions = []
@@ -106,7 +107,7 @@ try {
   await main.locator('[data-component=proposed-plan] .bb-plan-chevron').waitFor()
   await main.locator('[data-component=proposed-plan] summary').click(); await main.locator('[data-component=proposed-plan]').getByRole('button',{name:'Implement this plan',exact:true}).waitFor()
   await main.getByRole('button',{name:'Open plan',exact:true}).last().click(); await page.locator('.bb-run-panel').waitFor(); await page.locator('.bb-panel-content:visible').getByRole('button',{name:'Edit',exact:true}).click(); await page.locator('.bb-run-panel textarea').fill('# Revised agreed plan\n\nCreate only the requested output.'); await page.locator('.bb-panel-content:visible').getByRole('button',{name:'Save',exact:true}).click(); const plan=(await call('runs.get',{sessionID:chat.id})).plan; assert.equal(plan.revision,2)
-  await page.screenshot({path:root+'/.tools/qa/results/'+tag+'-plan.png'})
+  await captureHidden(app, page, root+'/.tools/qa/results/'+tag+'-plan.png')
   await page.locator('.bb-panel-content:visible').getByRole('button',{name:'Implement this plan',exact:true}).click(); await idle(chat)
   assert.ok(requests.some(request=>JSON.stringify(request.messages).includes('Revised agreed plan')))
   check('Plan chip/card/editable tab work; Full access cannot execute a Plan command; implementation uses approved revision')
@@ -117,7 +118,7 @@ try {
   for(let i=0;i<150;i++){ const items=(await call('artifacts.list')).filter(item=>item.sessionID===files.id); if(items.every(item=>item.status==='ready'))break; if(items.some(item=>item.status==='error'))throw Error(JSON.stringify(items.map(item=>item.error))); await wait(300) }
   assert.ok(await page.locator('.bb-workspace-panel').isVisible()); assert.equal(await main.locator('[data-component=artifact-cards] button').count(),2)
   const selected=await page.locator('.bb-panel-tabs [aria-selected=true]').innerText(); assert.ok(/Release QA/.test(selected)); await page.locator('.bb-unread').waitFor(); report.unread=await page.locator('.bb-unread').count(); assert.equal(report.unread,1)
-  await main.locator('[data-component=artifact-cards] button').filter({hasText:'Release QA.docx'}).click(); await page.waitForFunction(()=>{const canvas=document.querySelector('.bb-panel-content:not([style*="display: none"]) .bb-paper canvas');return canvas?.width>100}); await page.screenshot({path:root+'/.tools/qa/results/'+tag+'-document.png'})
+  await main.locator('[data-component=artifact-cards] button').filter({hasText:'Release QA.docx'}).click(); await page.waitForFunction(()=>{const canvas=document.querySelector('.bb-panel-content:not([style*="display: none"]) .bb-paper canvas');return canvas?.width>100}); await captureHidden(app, page, root+'/.tools/qa/results/'+tag+'-document.png')
   await main.locator('[data-component=artifact-cards] button').filter({hasText:'Release QA.xlsx'}).click(); await page.locator('.bb-panel-content:visible .bb-sheet-scroll').waitFor(); assert.ok((await page.locator('.bb-panel-content:visible .bb-sheet-scroll').innerText()).includes('10'))
   check('Multiple native MCP outputs publish clickable cards; first result opens collapsed panel, later tab is unread; spreadsheet displays Excel values')
   const doc=artifacts.find(item=>item.kind==='document'); qaDocument=doc.path; await editor.fill('revise-artifact'); await editor.press('Enter'); await idle(files); const revised=(await call('artifacts.list')).find(item=>item.id===doc.id); assert.equal(revised.revision,2); assert.equal(revised.history.length,2); const originalCard=main.locator('[data-component=artifact-cards] button').filter({hasText:'Release QA.docx'}).first(); assert.ok((await originalCard.innerText()).includes('Revision 1')); await originalCard.click(); await page.waitForFunction(()=>document.querySelector('.bb-panel-content:not([style*="display: none"]) select[aria-label="Version history"]')?.value==='1')
@@ -125,9 +126,29 @@ try {
   await main.locator('[data-component=artifact-cards] button').filter({hasText:'QA.html'}).click(); await page.frameLocator('.bb-panel-content:visible iframe').getByRole('heading',{name:'Safe preview',exact:true}).waitFor(); assert.equal(await page.frameLocator('.bb-panel-content:visible iframe').locator('body').getAttribute('data-bridge'),'undefined'); await page.locator('.bb-panel-content:visible').getByRole('button',{name:'Source',exact:true}).click(); assert.ok((await page.locator('.bb-panel-content:visible pre').innerText()).includes('window.api'))
   check('Document revisions retain immutable history; HTML Preview/Source has no privileged bridge')
   const code=join(data,'QA.js'); await writeFile(code,'export const verifiedOutput = 42;\n'); await bridge('publish_artifact',{path:code},files.id); await main.locator('[data-component=artifact-cards] button').filter({hasText:'QA.js'}).last().click(); await page.locator('.bb-panel-content:visible').getByText('verifiedOutput',{exact:false}).first().waitFor()
+  report.terminalsBefore = await engine('/pty')
+  report.terminalRequests = []
+  page.on('request', request => { if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/pty')) report.terminalRequests.push({ url: request.url(), input: request.postDataJSON() }) })
   await page.route('**/pty', async route => { if (route.request().method() === 'POST') await wait(400); await route.continue() })
-  const plus=page.locator('.bb-panel-add button').first(); await plus.click({button:'right'}); await page.getByRole('menuitem',{name:'Terminal',exact:true}).click(); const terminalInput=page.locator('.bb-panel-content:visible textarea').first(); await terminalInput.waitFor({state:'attached'}); await terminalInput.pressSequentially('echo BitsBytesTerminalQA'); await terminalInput.press('Enter'); await wait(1000); assert.equal((await engine('/pty')).length,1)
+  const plus=page.locator('.bb-panel-add button').first(); await plus.click({button:'right'}); await page.getByRole('menuitem',{name:'Terminal',exact:true}).click(); const terminalInput=page.locator('.bb-panel-content:visible textarea').first(); await terminalInput.waitFor({state:'attached'}); await terminalInput.pressSequentially('echo BitsBytesTerminalQA'); await terminalInput.press('Enter'); await wait(1000); report.terminalsAfter = await engine('/pty'); assert.equal(report.terminalsAfter.length,1)
+  assert.equal(report.terminalRequests.length, 1)
+  const firstTerminal = report.terminalsAfter[0].id
+  const terminalPanel = page.locator('.bb-panel-content:visible')
+  await terminalPanel.getByRole('button', {name:'New terminal',exact:true}).click()
+  await terminalPanel.getByRole('tab', {name:'Terminal 2',exact:true}).waitFor()
+  assert.equal((await engine('/pty')).length, 2)
+  assert.equal(report.terminalRequests.length, 2)
+  await terminalPanel.getByRole('button', {name:'Close terminal',exact:true}).last().click()
+  for(let attempt=0;attempt<100 && (await engine('/pty')).length!==1;attempt++) await wait(100)
+  assert.deepEqual((await engine('/pty')).map(row=>row.id), [firstTerminal])
   await page.unroute('**/pty')
+  const otherTerminalChat = await create('QA terminal retained ownership')
+  await open(otherTerminalChat); await open(files)
+  await page.locator('.bb-panel-tabs').getByRole('tab', {name:'Terminal',exact:true}).click()
+  await page.locator('.bb-panel-content:visible textarea').first().waitFor({state:'attached'})
+  assert.deepEqual((await engine('/pty')).map(row=>row.id), [firstTerminal])
+  assert.equal(report.terminalRequests.length, 2)
+  check('Shared workspace terminal creates one initial PTY, permits a deliberate second and retains the first across chat navigation')
   await plus.click(); await page.getByRole('menuitem',{name:'Code review',exact:true}).click(); await page.getByRole('tab',{name:'Code review',exact:true,selected:true}).waitFor()
   const browser=await call('browser.open',{sessionID:files.id,url:url+'/browser'}); const inspection=await call('browser.inspect',{id:browser.id}); assert.ok(inspection.page.controls.some(control=>control.label==='Example')); await call('browser.click',{id:browser.id,ref:inspection.page.controls[0].ref}); await call('browser.close',{id:browser.id}); await page.getByRole('tab',{name:'QA browser',exact:true}).waitFor({state:'detached'})
   check('Code output opens the retained file viewer; native terminal, review tab and isolated browser remain usable')
@@ -136,7 +157,7 @@ try {
   const stalled=await create('QA stalled goal'); await open(stalled); await call('runs.goal-draft',{sessionID:stalled.id,enabled:true}); await submit(stalled,'No progress objective')
   for(let i=0;i<100;i++){if((await call('runs.get',{sessionID:stalled.id})).goal?.status==='blocked')break; await wait(300)}
   assert.equal((await call('runs.get',{sessionID:stalled.id})).goal.status,'blocked')
-  await main.getByRole('button',{name:'Goal actions',exact:true}).click(); await page.getByRole('menuitem',{name:'Edit',exact:true}).click(); await page.locator('.bb-panel-content:visible').getByText('No further progress was detected.',{exact:false}).waitFor(); await page.locator('.bb-panel-content:visible').getByRole('button',{name:'Edit',exact:true}).click(); await page.locator('.bb-run-panel input[type=number]').fill('1'); await page.locator('.bb-panel-content:visible').getByRole('button',{name:'Save',exact:true}).click(); await main.getByRole('button',{name:'Resume',exact:true}).click(); await main.getByText('The goal has reached its token budget.',{exact:false}).waitFor(); await page.screenshot({path:root+'/.tools/qa/results/'+tag+'-goal.png'})
+  await main.locator('.bb-goal-row').getByRole('button',{name:'Edit',exact:true}).click(); await page.locator('.bb-panel-content:visible').getByText('No further progress was detected.',{exact:false}).waitFor(); await page.locator('.bb-run-panel input[type=number]').first().fill('1'); await page.locator('.bb-panel-content:visible').getByRole('button',{name:'Save',exact:true}).click(); await main.getByRole('button',{name:'Resume',exact:true}).click(); await main.getByText('The goal has reached its token budget.',{exact:false}).waitFor(); await captureHidden(app, page, root+'/.tools/qa/results/'+tag+'-goal.png')
   await call('runs.stop',{sessionID:stalled.id}); assert.equal((await call('runs.get',{sessionID:stalled.id})).paused,true)
   check('Goal chip, evidence callback and Achieved row work; status-only continuation stalls; Stop pauses saved work')
 
@@ -162,7 +183,7 @@ try {
   assert.equal(JSON.parse(parts.join('')).text,source)
   const refreshed=await bridge('inspect_artifact',{path:sourcePath},recovery.id);assert.equal(refreshed.text,'Changed after first inspection')
   check('Host inspection returns bounded source parts, preserves the original snapshot and refreshes changed files explicitly')
-  await page.screenshot({path:root+'/.tools/qa/results/'+tag+'.png'})
+  await captureHidden(app, page, root+'/.tools/qa/results/'+tag+'.png')
   assert.equal(report.errors.length,0,report.errors.join('\n'))
-} catch(error) { report.failure=String(error);console.error('FAIL',String(error));if(page){console.log((await page.locator('body').innerText()).slice(0,1800));await page.screenshot({path:root+'/.tools/qa/results/'+tag+'-failure.png'})}process.exitCode=1 }
+} catch(error) { report.failure=error.stack || String(error); report.cause=error.cause?.stack; console.error('FAIL',report.failure,report.cause || '');if(call && engine){report.failureState=await Promise.allSettled(sessions.map(async id=>({id,run:await call('runs.get',{sessionID:id}),messages:await engine('/session/'+id+'/message')})))}if(page){console.log((await page.locator('body').innerText()).slice(0,1800));await captureHidden(app, page, root+'/.tools/qa/results/'+tag+'-failure.png')}process.exitCode=1 }
 finally { firstSlow.release.resolve(); report.requests=requests.map(request=>({model:request.model,tools:request.tools?.map(tool=>tool.function?.name),messages:request.messages?.length}));await writeFile(root+'/.tools/qa/results/'+tag+'.json',JSON.stringify(report,null,2));await app.close();fixture.close() }

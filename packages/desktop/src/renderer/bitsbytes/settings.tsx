@@ -25,7 +25,7 @@ export function BitsBytesSettings(props: { page: "audio" | "tools" | "chatgpt" }
     } catch (error) { setStore("error", bbError(error)) }
     finally { setStore("busy", "") }
   }
-  const save = () => run("settings.save", props.page === "audio" ? { engine: store.values.engine, microphone: store.values.microphone, acceleration: store.values.acceleration } : { browserControl: store.values.browserControl, computerControl: store.values.computerControl })
+  const save = () => run("settings.save", props.page === "audio" ? { engine: store.values.engine, microphone: store.values.microphone, acceleration: store.values.acceleration } : { browserControl: store.values.browserControl, computerControl: store.values.computerControl, questionAutoResolve: store.values.questionAutoResolve !== false })
   onMount(() => {
     void refresh().catch(error => setStore("error", bbError(error)))
     const unsubscribe = api.subscribe(event => { if (event.type === "refresh") void refresh().catch(error => setStore("error", bbError(error))) })
@@ -58,6 +58,7 @@ export function BitsBytesSettings(props: { page: "audio" | "tools" | "chatgpt" }
         </Show>
           <Show when={props.page === "tools"}>
             <McpSettings />
+            <h3>{bbt("questionTimer")}</h3><p class="bb-subtle">{bbt("questionTimerHint")}</p><label class="bb-check"><input type="checkbox" checked={store.values.questionAutoResolve !== false} onChange={event => setStore("values", "questionAutoResolve", event.currentTarget.checked)} />{bbt("enable")}</label>
             <h3>{bbt("artifactsRuntime")}</h3><p class="bb-subtle">{bbt("artifactsHint")}</p><ButtonV2 disabled={!!store.busy} onClick={() => void run("artifact.setup")}>{bbt("installArtifacts")}</ButtonV2>
           <h3>{bbt("browserControl")}</h3><p class="bb-subtle">{bbt("browserHint")}</p><label class="bb-check"><input type="checkbox" checked={store.values.browserControl} onChange={event => setStore("values", "browserControl", event.currentTarget.checked)} />{bbt("enableBrowser")}</label>
           <h3>{bbt("computerControl")}</h3><p class="bb-subtle">{bbt("computerHint")}</p><label class="bb-check"><input type="checkbox" checked={store.values.computerControl} onChange={event => setStore("values", "computerControl", event.currentTarget.checked)} />{bbt("enable")}</label><div class="bb-actions"><ButtonV2 disabled={!!store.busy} onClick={() => void save()}>{bbt("save")}</ButtonV2><ButtonV2 variant="neutral" disabled={!!store.busy} onClick={() => void run("setup", { computer: true })}>{bbt("installComputer")}</ButtonV2></div>

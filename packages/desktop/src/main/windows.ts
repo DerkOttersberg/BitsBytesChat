@@ -16,6 +16,7 @@ import { nativeT } from "./native-translations"
 import { createWindowRegistry } from "./window-registry"
 import { safeWindowURL } from "./window-state"
 import { resolveExternalURL, resolveLocalFilePath } from "./external-url"
+import { hiddenQA, offscreenQA, suppressNativeUI } from "./qa-mode"
 
 const root = dirname(fileURLToPath(import.meta.url))
 const rendererRoot = join(root, "../renderer")
@@ -201,9 +202,12 @@ export function createMainWindow(id: string = randomUUID()) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      ...(hiddenQA() ? { backgroundThrottling: false } : {}),
+      ...(offscreenQA() ? { offscreen: true } : {}),
     },
   })
 
+  if (offscreenQA()) win.webContents.setFrameRate(10)
   allowRendererPermissions(win)
   wireWindowRecovery(win, id)
   wireNavigationPolicy(win)
@@ -227,7 +231,7 @@ export function createMainWindow(id: string = randomUUID()) {
   wireZoom(win)
 
   win.once("ready-to-show", () => {
-    win.show()
+    if (!hiddenQA()) win.show()
   })
 
   return win
@@ -239,7 +243,7 @@ export function openExternalURL(value: string) {
     writeLog("window", "blocked external target", { url: value }, "warn")
     return
   }
-  void shell.openExternal(url)
+  if (!suppressNativeUI("open-external", url)) void shell.openExternal(url)
 }
 
 export function openLocalFileURL(value: string) {
@@ -248,6 +252,7 @@ export function openLocalFileURL(value: string) {
     writeLog("window", "blocked local file target", { url: value }, "warn")
     return
   }
+  if (suppressNativeUI("open-file", path)) return
   void shell.openPath(path).then((error) => {
     if (error) writeLog("window", "failed to open local file", { path, error }, "error")
   })
@@ -367,6 +372,7 @@ function wireWindowRecovery(win: BrowserWindow, name: string) {
   }
 
   const show = async (message: string, detail: string, wait: boolean) => {
+    if (suppressNativeUI("recovery-dialog", message)) return
     if (showing || win.isDestroyed()) return
     showing = true
     try {
@@ -482,6 +488,7 @@ function allowRendererPermissions(win: BrowserWindow) {
   const webContentsId = win.webContents.id
 
   win.webContents.session.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    if (hiddenQA() && permission === notificationPermission) { callback(false); return }
     callback(
       rendererPermissions.has(permission) &&
         isTrustedRendererUrl(details.requestingUrl) &&
@@ -489,6 +496,7 @@ function allowRendererPermissions(win: BrowserWindow) {
     )
   })
   win.webContents.session.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
+    if (hiddenQA() && permission === notificationPermission) return false
     if (!rendererPermissions.has(permission)) return false
     if (webContents && webContents.id !== webContentsId) return false
     return isTrustedRendererUrl(details.requestingUrl) || isTrustedRendererUrl(requestingOrigin)

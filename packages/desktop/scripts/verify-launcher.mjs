@@ -27,13 +27,16 @@ const check = text => { report.checks.push(text); console.log('PASS', text) }
 const before = await processes()
 const live = before.filter(process => process.command && !process.command.includes('--type='))
 let fixture
+let guard
 let launchedID
 try {
   await mkdir(join(profile, 'BitsBytesChat'), { recursive: true })
   await symlink(join(process.env.LOCALAPPDATA, 'BitsBytesChat/runtime'), join(profile, 'BitsBytesChat/runtime'), 'junction')
-  const env = { ...process.env, BB_QA_ISOLATED: "1", LOCALAPPDATA: profile, ELECTRON_RUN_AS_NODE: '1', ELECTRON_NO_ASAR: '1' }
+  const env = { ...process.env, BB_QA_ISOLATED: "1", BB_QA_HIDDEN: "1", LOCALAPPDATA: profile, ELECTRON_RUN_AS_NODE: '1', ELECTRON_NO_ASAR: '1' }
   // This disposable headless Electron helper exercises recovery without touching the user's app.
   fixture = spawn(executable, ['-e', 'setInterval(() => {}, 1000)'], { env, windowsHide: true, stdio: 'ignore' })
+  guard = spawn(executable, ['-e', 'setInterval(() => {}, 1000)'], { env: { ...env, LOCALAPPDATA: profile + '-unrelated' }, windowsHide: true, stdio: 'ignore' })
+  env.BB_QA_OWNED_PIDS = String(fixture.pid)
   await new Promise(resolve => setTimeout(resolve, 1200))
   assert.equal(fixture.exitCode, null)
   // Always test decline against our own profile, including when other QA apps
@@ -54,22 +57,25 @@ try {
   const main = after.find(process => children.some(child => child.parent === process.id) && process.path === executable)
   assert.ok(main, 'No isolated application process found')
   launchedID = main.id
-  assert.ok(main.window > 0, 'No visible application window')
-  check('Confirmed recovery closes only the disposable headless helper and launches a real ' + version + ' window')
+  assert.equal(main.window, 0, 'QA must stay hidden')
+  assert.equal(guard.exitCode, null, 'Unrelated profile-less helper was closed')
+  check('Confirmed recovery closes only the explicitly owned helper and launches a hidden real ' + version + ' app')
+  check('An unrelated profile-less helper remains running throughout hidden recovery')
   check('Actual CMD works from another folder and clears inherited Electron CLI/ASAR flags')
   const forward = await launch(env)
   assert.equal(forward.code, 0, forward.output)
-  assert.ok((await processes()).some(process => process.id === main.id && process.window > 0))
-  check('Reopening the CMD brings the same current-version window forward')
+  assert.ok((await processes()).some(process => process.id === main.id && process.window === 0))
+  check('Reopening the CMD forwards to the same current-version instance while QA stays hidden')
   const mobile = await launch(env, 'N', join(root, 'Start BitsBytes Mobile.cmd'))
   assert.equal(mobile.code, 0, mobile.output)
-  assert.ok((await processes()).some(process => process.id === main.id && process.window > 0))
+  assert.ok((await processes()).some(process => process.id === main.id && process.window === 0))
   check('Mobile CMD forwards to the same application instance and release')
   for (const process of live) assert.ok((await processes()).some(item => item.id === process.id))
   check('All original user app processes remain alive throughout testing')
 } finally {
   // Only disposable QA processes created by this script can be cleaned up.
   if (fixture?.exitCode === null) fixture.kill()
+  if (guard?.exitCode === null) guard.kill()
   if (launchedID) {
     const current = await processes()
     assert.ok(current.some(process => process.parent === launchedID && process.command?.includes(join(profile, 'BitsBytesChat/desktop'))))

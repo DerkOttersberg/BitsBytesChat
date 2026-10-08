@@ -88,6 +88,17 @@ export const TextStart = Schema.Struct({
 }).annotate({ identifier: "LLM.Event.TextStart" })
 export type TextStart = Schema.Schema.Type<typeof TextStart>
 
+export const Source = Schema.Struct({
+  type: Schema.tag("source"),
+  id: Schema.String,
+  sourceType: Schema.Literals(["url", "document"]),
+  url: Schema.optional(Schema.String),
+  title: Schema.optional(Schema.String),
+  filename: Schema.optional(Schema.String),
+  mediaType: Schema.optional(Schema.String),
+}).annotate({ identifier: "LLM.Event.Source" })
+export type Source = Schema.Schema.Type<typeof Source>
+
 export const TextDelta = Schema.Struct({
   type: Schema.tag("text-delta"),
   id: ContentBlockID,
@@ -207,6 +218,7 @@ export const ProviderErrorEvent = Schema.Struct({
 export type ProviderErrorEvent = Schema.Schema.Type<typeof ProviderErrorEvent>
 
 const llmEventTagged = Schema.Union([
+  Source,
   StepStart,
   TextStart,
   TextDelta,
@@ -239,6 +251,7 @@ const toolCallID = (value: ToolCallID | string) => ToolCallID.make(value)
  * `events.filter(LLMEvent.guards["tool-call"])`.
  */
 export const LLMEvent = Object.assign(llmEventTagged, {
+  source: (input: Omit<Source, "type">) => Source.make(input),
   stepStart: StepStart.make,
   textStart: (input: WithID<TextStart, ContentBlockID>) => TextStart.make({ ...input, id: contentBlockID(input.id) }),
   textDelta: (input: WithID<TextDelta, ContentBlockID>) => TextDelta.make({ ...input, id: contentBlockID(input.id) }),

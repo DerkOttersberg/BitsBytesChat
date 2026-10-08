@@ -5,7 +5,7 @@ const root = resolve('../..')
 const { _electron } = createRequire(join(root, '.tools/qa/package.json'))('playwright')
 const version = JSON.parse(await readFile(join(root, 'packages/desktop/package.json'), 'utf8')).version
 if (!process.env.BB_QA_PROFILE) throw Error('Set BB_QA_PROFILE to an isolated QA profile; never benchmark the user profile.')
-const app = await _electron.launch({ executablePath: process.env.BB_QA_EXECUTABLE || join(root, `packages/desktop/dist/${version}/win-unpacked/BitsBytesChat.exe`), ...(process.env.BB_QA_MAIN ? { args: [process.env.BB_QA_MAIN] } : {}), env: { ...process.env, BB_QA_ISOLATED: "1", LOCALAPPDATA: process.env.BB_QA_PROFILE }, timeout: 90000 })
+const app = await _electron.launch({ executablePath: process.env.BB_QA_EXECUTABLE || join(root, `packages/desktop/dist/${version}/win-unpacked/BitsBytesChat.exe`), ...(process.env.BB_QA_MAIN ? { args: [process.env.BB_QA_MAIN] } : {}), env: { ...process.env, BB_QA_ISOLATED: "1", BB_QA_HIDDEN: "1", LOCALAPPDATA: process.env.BB_QA_PROFILE }, timeout: 90000 })
 let clean
 try {
   const page = await app.firstWindow()
@@ -34,14 +34,24 @@ try {
       const start = performance.now()
       node.textContent = 'A recorded conversation. '.repeat(2200)
       node.dispatchEvent(new InputEvent('input', { bubbles: true }))
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      // Hidden windows can throttle animation frames to 1 Hz even with Electron
+      // background throttling disabled. Measure input work and settled layout,
+      // without making the QA window visible or measuring that frame policy.
+      await new Promise(resolve => {
+        const channel = new MessageChannel()
+        channel.port1.onmessage = () => { channel.port1.close(); channel.port2.close(); resolve() }
+        channel.port2.postMessage(null)
+      })
+      node.getBoundingClientRect()
       times.push(performance.now() - start)
     }
     node.innerHTML = original
     node.dispatchEvent(new InputEvent('input', { bubbles: true }))
     return times
   })
-  const report = { settled: process.argv.includes('--settled'), isolated: Boolean(process.env.BB_QA_PROFILE), hiddenWithThrottlingDisabled: true, samplesMs: timing, medianMs: [...timing].sort((a,b) => a-b)[2], characters: 55000 }
+  const visible = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(window => window.isVisible()))
+  if (visible) throw Error('QA window became visible')
+  const report = { metric: 'input-task-and-layout', settled: process.argv.includes('--settled'), isolated: Boolean(process.env.BB_QA_PROFILE), hiddenFromCreation: true, samplesMs: timing, medianMs: [...timing].sort((a,b) => a-b)[2], characters: 55000 }
   await writeFile(root + '/.tools/qa/results/composer-' + (process.argv[2] ?? 'before') + '.json', JSON.stringify(report, null, 2))
   console.log(JSON.stringify(report))
-} finally { await clean?.(); await app.close() }
+} finally { try { await clean?.() } finally { await app.close() } }

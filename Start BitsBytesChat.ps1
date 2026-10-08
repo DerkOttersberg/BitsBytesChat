@@ -5,6 +5,10 @@ $bitsExe = Join-Path $bitsProject "packages\desktop\dist\$bitsBuild\win-unpacked
 $bitsRoot = Join-Path $env:LOCALAPPDATA 'BitsBytesChat'
 $bitsDesktop = Join-Path $bitsRoot 'desktop'
 $bitsLogFolder = Join-Path $bitsRoot 'launcher'
+$bitsHiddenQA = $env:BB_QA_ISOLATED -eq '1' -and $env:BB_QA_HIDDEN -eq '1'
+$bitsQAOwned = @($env:BB_QA_OWNED_PIDS -split ',' | Where-Object { $_ -match '^\d+$' })
+$bitsStartOptions = @{}
+if ($bitsHiddenQA) { $bitsStartOptions.WindowStyle = 'Hidden' }
 
 function Get-BitsInstances {
   $processes = @(Get-CimInstance Win32_Process -Filter "Name = 'BitsBytesChat.exe' OR Name = 'BitsBytesChat-Mobile.exe'")
@@ -21,6 +25,9 @@ function Get-BitsInstances {
     })
     # Different local-data profiles can run together, as in an isolated test.
     if ($profiles.Count -gt 0 -and -not ($profiles -contains $bitsDesktop)) { continue }
+    # A profile-less helper cannot be attributed to this QA run by its name.
+    # Only an explicitly owned PID may participate in a hidden recovery check.
+    if ($bitsHiddenQA -and $profiles.Count -eq 0 -and -not ($bitsQAOwned -contains [string]$entry.ProcessId)) { continue }
     if (-not (Test-Path -LiteralPath $entry.ExecutablePath)) { continue }
     if ([Diagnostics.FileVersionInfo]::GetVersionInfo($entry.ExecutablePath).ProductName -notmatch '^BitsBytesChat(?:-Mobile)?$') { continue }
     $entry
@@ -37,9 +44,9 @@ try {
     $process = Get-Process -Id $entry.ProcessId -ErrorAction SilentlyContinue
     if (-not $process) { continue }
     $process.Refresh()
-    if ($entry.ExecutablePath -eq $bitsExe -and $process.MainWindowHandle -ne 0) {
+    if ($entry.ExecutablePath -eq $bitsExe -and ($process.MainWindowHandle -ne 0 -or ($bitsHiddenQA -and -not ($bitsQAOwned -contains [string]$entry.ProcessId)))) {
       # Electron forwards this launch to the existing window.
-      Start-Process -FilePath $bitsExe -WorkingDirectory (Split-Path $bitsExe)
+      Start-Process -FilePath $bitsExe -WorkingDirectory (Split-Path $bitsExe) @bitsStartOptions
       exit 0
     }
     $version = [Diagnostics.FileVersionInfo]::GetVersionInfo($entry.ExecutablePath).FileVersion
@@ -79,7 +86,7 @@ try {
   Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
   Remove-Item Env:ELECTRON_NO_ASAR -ErrorAction SilentlyContinue
   Write-Host "Opening Bits & Bytes Chat v$bitsVersion..."
-  $started = Start-Process -FilePath $bitsExe -WorkingDirectory (Split-Path $bitsExe) -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+  $started = Start-Process -FilePath $bitsExe -WorkingDirectory (Split-Path $bitsExe) -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr @bitsStartOptions
   $deadline = (Get-Date).AddSeconds(25)
   while ((Get-Date) -lt $deadline) {
     $started.Refresh()
@@ -90,6 +97,7 @@ try {
       throw "The app exited before opening (code $($started.ExitCode)). Startup log: $stderr. App logs: $(Join-Path $bitsDesktop 'logs')."
     }
     if ($started.MainWindowHandle -ne 0) { exit 0 }
+    if ($bitsHiddenQA -and @(Get-BitsInstances | Where-Object { $_.ProcessId -eq $started.Id }).Count -gt 0) { exit 0 }
     Start-Sleep -Milliseconds 250
   }
   Write-Host "The app is still starting, but no window has appeared. Startup log: $stderr"

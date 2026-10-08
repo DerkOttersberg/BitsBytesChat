@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import {
   createQueuedEditGuard,
   moveQueuedInput,
+  reorderQueuedInput,
   queuedEditCancelAction,
   queuedEditSelection,
   type QueuedEditComposer,
@@ -23,6 +24,23 @@ test("hidden, missing and boundary rows cannot move an unrelated durable input",
   expect(moveQueuedInput(queue, "first", -1)).toBeUndefined()
   expect(moveQueuedInput(queue, "last", 1)).toBeUndefined()
   expect(moveQueuedInput([{ id: "editing", editing: true }], "editing", -1)).toBeUndefined()
+})
+
+test("drag reordering preserves hidden edit and sending slots and refuses stale targets", () => {
+  const queue = [{ id: "first" }, { id: "editing", editing: true }, { id: "second" }, { id: "sending", status: "sending" }, { id: "third" }]
+  expect(reorderQueuedInput(queue, "third", "first")).toEqual(["third", "editing", "first", "sending", "second"])
+  expect(reorderQueuedInput(queue, "editing", "first")).toBeUndefined()
+  expect(reorderQueuedInput(queue, "first", "sending")).toBeUndefined()
+  expect(reorderQueuedInput(queue, "first", "deleted")).toBeUndefined()
+  expect(queue.map(row => row.id)).toEqual(["first", "editing", "second", "sending", "third"])
+})
+
+test("keyboard reordering uses the same visible neighbors while preserving sending and transcript slots", () => {
+  const queue = [{ id: "first" }, { id: "sending", status: "sending" }, { id: "in-chat", presentation: "transcript" }, { id: "last" }]
+  expect(moveQueuedInput(queue, "last", -1)).toEqual(["last", "sending", "in-chat", "first"])
+  expect(moveQueuedInput(queue, "first", 1)).toEqual(["last", "sending", "in-chat", "first"])
+  expect(moveQueuedInput(queue, "sending", 1)).toBeUndefined()
+  expect(moveQueuedInput(queue, "in-chat", -1)).toBeUndefined()
 })
 
 const draft: FollowupDraft = {

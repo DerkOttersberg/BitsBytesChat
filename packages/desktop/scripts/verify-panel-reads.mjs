@@ -91,7 +91,7 @@ try {
   app = await _electron.launch({
     executablePath: process.env.BB_QA_EXECUTABLE || join(desktop, "node_modules/electron/dist/electron.exe"),
     args: [shim],
-    env: { ...process.env, BB_QA_ISOLATED: "1", LOCALAPPDATA: profile },
+    env: { ...process.env, BB_QA_ISOLATED: "1", BB_QA_HIDDEN: "1", LOCALAPPDATA: profile },
     timeout: 90000,
   })
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach((window) => window.hide()))

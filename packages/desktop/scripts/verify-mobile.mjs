@@ -83,7 +83,7 @@ const app = await _electron.launch({
   executablePath:
     process.env.BB_MOBILE_EXECUTABLE || join(root, "packages/desktop/node_modules/electron/dist/electron.exe"),
   ...(process.env.BB_MOBILE_EXECUTABLE ? {} : { args: [join(root, "packages/desktop")] }),
-  env: { ...process.env, BB_QA_ISOLATED: "1", LOCALAPPDATA: profile },
+  env: { ...process.env, BB_QA_ISOLATED: "1", BB_QA_HIDDEN: "1", LOCALAPPDATA: profile },
   timeout: 90000,
 })
 const startup = []

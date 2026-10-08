@@ -14,11 +14,14 @@ const ReplyPayload = Schema.Struct({
     description: "User answers in order of questions (each answer is an array of selected labels)",
   }),
 })
+export const ActivityPayload = Schema.Struct({ sessionID: Question.Request.fields.sessionID, kind: Schema.Literals(["foreground", "background", "conversation", "snooze"]) })
 
 export const QuestionApi = HttpApi.make("question")
   .add(
     HttpApiGroup.make("question")
       .add(
+        HttpApiEndpoint.post("configure", `${root}/settings`, { payload: Schema.Struct({ enabled: Schema.Boolean }), success: Schema.Boolean }),
+        HttpApiEndpoint.post("activity", `${root}/:requestID/activity`, { params: { requestID: QuestionID }, query: WorkspaceRoutingQuery, payload: ActivityPayload, success: Schema.Boolean, error: QuestionNotFoundError }),
         HttpApiEndpoint.get("list", root, {
           query: WorkspaceRoutingQuery,
           success: described(Schema.Array(Question.Request), "List of pending questions"),

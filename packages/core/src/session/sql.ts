@@ -14,9 +14,13 @@ import { Timestamps } from "../database/schema.sql"
 import type { SystemContext } from "../system-context/index"
 import { AgentV2 } from "../agent"
 import type { Revert } from "@opencode-ai/schema/revert"
+import type { DeepMutable } from "../schema"
 
 type SessionMessageData = Omit<(typeof SessionMessage.Message)["Encoded"], "type" | "id">
-type V1MessageData = Omit<SessionV1.Info, "id" | "sessionID">
+type V1StoredMessage = DeepMutable<(typeof SessionV1.Event.MessageUpdated.Type)["data"]["info"]>
+type V1MessageData =
+  | Omit<Extract<V1StoredMessage, { role: "user" }>, "id" | "sessionID">
+  | Omit<Extract<V1StoredMessage, { role: "assistant" }>, "id" | "sessionID">
 type V1PartData = Omit<SessionV1.Part, "id" | "sessionID" | "messageID">
 
 export const SessionTable = sqliteTable(

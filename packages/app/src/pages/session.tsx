@@ -1930,7 +1930,20 @@ export default function Page(props: { embedded?: boolean } = {}) {
     download()
   }
 
-  const actions = { revert, openAttachment }
+  const branching = new Set<string>()
+  const fork = async (input: { sessionID: string; messageID: string }) => {
+    const key = input.sessionID + ":" + input.messageID
+    if (branching.has(key)) return
+    branching.add(key)
+    const directory = sdk().directory, selected = local.session.selection()
+    try {
+      const child = platform.bitsbytes ? await platform.bitsbytes.call<{ id: string }>("branch.open", { ...input, directory }) : await sdk().api.session.fork(input)
+      if (selected) local.session.promote(directory, child.id, selected)
+      if (params.id === input.sessionID && sdk().directory === directory) navigate(`/${base64Encode(directory)}/session/${child.id}`)
+    } catch (error) { showToast({ variant: "error", title: language.t("common.requestFailed"), description: String(error) }) }
+    finally { branching.delete(key) }
+  }
+  const actions = { revert, openAttachment, fork }
 
   createEffect(() => {
     const sessionID = params.id
@@ -2409,7 +2422,8 @@ export default function Page(props: { embedded?: boolean } = {}) {
 
 // Explicit identity with an independent router, draft, model selection and command scope.
 function EmbeddedSession(props: { sessionID: string; directory: string }) {
+  const language = useLanguage()
   const history = createMemoryHistory()
   history.set({ value: `/${base64Encode(props.directory)}/session/${props.sessionID}`, replace: true })
-  return <div class="bb-embedded-chat" data-bb-chat={props.sessionID}><MemoryRouter history={history}><Route path="/:dir/session/:id" component={() => <CommandProvider scopeID={props.sessionID}><ModelsProvider directory={() => props.directory}><SDKProvider directory={() => props.directory}><DirectoryDataProvider directory={() => props.directory}><SessionPage embedded /></DirectoryDataProvider></SDKProvider></ModelsProvider></CommandProvider>} /></MemoryRouter></div>
+  return <div class="bb-embedded-chat" data-bb-chat={props.sessionID}><ErrorBoundary fallback={(_, reset) => <div class="bb-side-state" role="alert"><span>{language.t("common.requestFailed")}</span><button onClick={reset}>{language.t("bitsbytes.retry")}</button></div>}><Suspense fallback={<div class="bb-side-state" role="status">{language.t("common.loading")}</div>}><MemoryRouter history={history}><Route path="/:dir/session/:id" component={() => <CommandProvider scopeID={props.sessionID}><ModelsProvider directory={() => props.directory}><SDKProvider directory={() => props.directory}><DirectoryDataProvider directory={() => props.directory}><SessionPage embedded /></DirectoryDataProvider></SDKProvider></ModelsProvider></CommandProvider>} /></MemoryRouter></Suspense></ErrorBoundary></div>
 }

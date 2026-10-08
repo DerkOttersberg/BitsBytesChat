@@ -43,10 +43,12 @@ import { Truncate } from "@/tool/truncate"
 import { Image } from "@/image/image"
 import { decodeDataUrl } from "@/util/data-url"
 import { Process } from "@/util/process"
-import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
+import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Types, SynchronizedRef } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
 import { SessionRunState } from "./run-state"
+import { inputFingerprint } from "./input-fingerprint"
+import { diagnosticSession, diagnosticInstruction } from "./diagnostic"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
@@ -102,12 +104,14 @@ function isOrphanedInterruptedTool(part: SessionV1.ToolPart) {
 
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
-  readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
+  readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error | InputError>
   readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts>
   readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
-  readonly command: (input: CommandInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
+  readonly command: (input: CommandInput) => Effect.Effect<SessionV1.WithParts, Image.Error | InputError>
   readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
 }
+
+export class InputError extends Schema.TaggedErrorClass<InputError>()("PromptInputError", { message: Schema.String }) {}
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionPrompt") {}
 
@@ -142,6 +146,7 @@ const layer = Layer.effect(
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
     const { db } = database
+    const admissions = new Map<SessionID, SynchronizedRef.SynchronizedRef<undefined>>()
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       return {
         cancel: (sessionID: SessionID) => cancel(sessionID),
@@ -702,8 +707,13 @@ const layer = Layer.effect(
       )(function* (part) {
         if (part.type === "file") {
           if (part.url.startsWith("bitsbytes://") && DesktopBridge.enabled()) {
-            const resolved = yield* Effect.promise(() => DesktopBridge.call<{ text: string }>("attachment.resolve", { uri: part.url, sessionID: input.sessionID }))
-            return [{ ...part, messageID: info.id, sessionID: input.sessionID }, { type: "text", text: resolved.text, synthetic: true, messageID: info.id, sessionID: input.sessionID }]
+            const resolved = yield* Effect.promise(() =>
+              DesktopBridge.call<{ text: string }>("attachment.resolve", { uri: part.url, sessionID: input.sessionID }),
+            )
+            return [
+              { ...part, messageID: info.id, sessionID: input.sessionID },
+              { type: "text", text: resolved.text, synthetic: true, messageID: info.id, sessionID: input.sessionID },
+            ]
           }
           if (part.source?.type === "resource") {
             const { clientName, uri } = part.source
@@ -1048,18 +1058,88 @@ const layer = Layer.effect(
         })
       }
 
-      yield* sessions.updateMessage(info)
-      for (const part of parts) yield* sessions.updatePart(part)
+      yield* Effect.gen(function* () {
+        // The first durable row owns the fully resolved parts. A process crash
+        // midway through projection can repair these exact bytes and part IDs,
+        // rather than rereading changed files or admitting another user input.
+        info.execution = {
+          inputID: info.id,
+          revision: input.revision ?? 1,
+          stage: "preparing",
+          fingerprint: inputFingerprint(input),
+          preparedParts: parts,
+        }
+        yield* sessions.updateExecution(info)
+        for (const part of parts) yield* sessions.updatePart(part)
+        info.execution = {
+          inputID: info.id,
+          revision: input.revision ?? 1,
+          stage: "admitted",
+          fingerprint: inputFingerprint(input),
+        }
+        yield* sessions.updateExecution(info)
+      }).pipe(Effect.uninterruptible)
 
       return { info, parts }
     }, Effect.scoped)
 
-    const prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error> = Effect.fn(
+    const prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error | InputError> = Effect.fn(
       "SessionPrompt.prompt",
     )(function* (input: PromptInput) {
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      if (diagnosticSession(session)) {
+        if (input.tools || input.parts.some((part) => part.type === "subtask"))
+          return yield* Effect.fail(
+            new InputError({ message: "Diagnostic side chats cannot override tool access or delegate tasks" }),
+          )
+        input = { ...input, system: diagnosticInstruction }
+      }
       yield* revert.cleanup(session)
-      const message = yield* createUserMessage(input)
+      const lock = admissions.get(input.sessionID) ?? SynchronizedRef.makeUnsafe<undefined>(undefined)
+      admissions.set(input.sessionID, lock)
+      const message = yield* SynchronizedRef.modifyEffect(
+        lock,
+        Effect.fnUntraced(function* () {
+          const existing = input.messageID
+            ? yield* MessageV2.get({ sessionID: input.sessionID, messageID: input.messageID }).pipe(
+                Effect.provideService(Database.Service, database),
+                Effect.catchTag("NotFoundError", () => Effect.succeed(undefined)),
+              )
+            : undefined
+          if (existing) {
+            if (
+              existing.info.role !== "user" ||
+              existing.info.execution?.fingerprint !== inputFingerprint(input) ||
+              existing.info.execution.revision !== (input.revision ?? 1)
+            )
+              return yield* Effect.fail(new InputError({ message: "Conflicting prompt message ID" }))
+            if (existing.info.execution.stage === "preparing") {
+              const user = existing.info
+              const parts = (user.execution?.preparedParts ?? []).map((part) => decodeMessagePart(part))
+              if (
+                !user.execution?.preparedParts ||
+                parts.some(
+                  (part) =>
+                    Exit.isFailure(part) ||
+                    part.value.sessionID !== input.sessionID ||
+                    part.value.messageID !== user.id,
+                )
+              )
+                return yield* Effect.fail(new InputError({ message: "Incomplete prompt admission needs recovery" }))
+              const repaired = parts.flatMap((part) => (Exit.isSuccess(part) ? [part.value] : [])) as SessionV1.Part[]
+              yield* Effect.gen(function* () {
+                for (const part of repaired) yield* sessions.updatePart(part)
+                user.execution = { ...user.execution!, stage: "admitted", preparedParts: undefined }
+                yield* sessions.updateExecution(user)
+              }).pipe(Effect.uninterruptible)
+              return [{ info: user, parts: repaired }, undefined] as const
+            }
+            return [existing, undefined] as const
+          }
+          if (input.resume) return yield* Effect.fail(new InputError({ message: "Cannot resume an unadmitted input" }))
+          return [yield* createUserMessage(input), undefined] as const
+        }),
+      )
       yield* sessions.touch(input.sessionID)
 
       const permissions: PermissionV1.Rule[] = []
@@ -1072,7 +1152,8 @@ const layer = Layer.effect(
       }
 
       if (input.noReply === true) return message
-      return yield* loop({ sessionID: input.sessionID })
+      if (message.info.role === "user" && message.info.execution?.stage === "completed") return message
+      return yield* loop({ sessionID: input.sessionID, resume: input.resume })
     })
 
     const lastAssistant = Effect.fnUntraced(function* (sessionID: SessionID) {
@@ -1083,8 +1164,11 @@ const layer = Layer.effect(
       throw new Error("Impossible")
     })
 
-    const runLoop: (sessionID: SessionID) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.run")(
-      function* (sessionID: SessionID) {
+    const runLoop: (sessionID: SessionID, resume?: boolean) => Effect.Effect<SessionV1.WithParts> = Effect.fn(
+      "SessionPrompt.run",
+    )(function* (sessionID: SessionID, resume = false) {
+      const turns = new Set<string>()
+      return yield* Effect.gen(function* () {
         const ctx = yield* InstanceState.context
         let structured: unknown
         let step = 0
@@ -1096,6 +1180,9 @@ const layer = Layer.effect(
 
           let msgs = yield* MessageV2.filterCompactedEffect(sessionID).pipe(
             Effect.provideService(Database.Service, database),
+            Effect.map((rows) =>
+              rows.filter((row) => row.info.role !== "user" || row.info.execution?.stage !== "preparing"),
+            ),
           )
 
           const { user: lastUser, assistant: lastAssistant, finished: lastFinished, tasks } = MessageV2.latest(msgs)
@@ -1114,6 +1201,7 @@ const layer = Layer.effect(
             ) ?? false
 
           if (
+            !(resume && step === 0) &&
             lastAssistant?.finish &&
             !["tool-calls", "unknown"].includes(lastAssistant.finish) &&
             !hasToolCalls &&
@@ -1204,6 +1292,24 @@ const layer = Layer.effect(
             sessionID,
           }
           yield* sessions.updateMessage(msg)
+          turns.add(msg.id)
+          // These are the inputs actually present at this provider boundary.
+          // A Steer admitted during the stream remains admitted until the next.
+          for (const row of msgs) {
+            if (
+              row.info.role !== "user" ||
+              !row.info.execution ||
+              ["completed", "preparing"].includes(row.info.execution.stage)
+            )
+              continue
+            const latest = yield* MessageV2.get({ sessionID, messageID: row.info.id }).pipe(
+              Effect.provideService(Database.Service, database),
+              Effect.orDie,
+            )
+            if (latest.info.role !== "user" || !latest.info.execution) continue
+            latest.info.execution = { ...latest.info.execution, stage: "applied", turnID: msg.id, error: undefined }
+            yield* sessions.updateExecution(latest.info)
+          }
 
           const finalizeInterruptedAssistant = Effect.gen(function* () {
             if (msg.time.completed) return
@@ -1342,23 +1448,55 @@ const layer = Layer.effect(
 
         yield* compaction.prune({ sessionID }).pipe(Effect.ignore, Effect.forkIn(scope))
         return yield* lastAssistant(sessionID)
-      },
-    )
+      }).pipe(
+        Effect.onExit((exit) =>
+          Effect.gen(function* () {
+            const interrupted = Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)
+            const assistant = Exit.isSuccess(exit) && exit.value.info.role === "assistant" ? exit.value.info : undefined
+            const error = assistant?.error
+              ? JSON.stringify(assistant.error)
+              : Exit.isFailure(exit) && !interrupted
+                ? Cause.pretty(exit.cause)
+                : undefined
+            const rows = yield* sessions.messages({ sessionID }).pipe(Effect.orDie)
+            for (const row of rows) {
+              if (row.info.role !== "user" || !row.info.execution || row.info.execution.stage === "completed") continue
+              const receipt = row.info.execution
+              if (receipt.turnID ? !turns.has(receipt.turnID) : !interrupted) continue
+              row.info.execution = {
+                ...receipt,
+                stage: interrupted ? "interrupted" : error ? "failed" : "completed",
+                error,
+              }
+              yield* sessions.updateExecution(row.info)
+            }
+          }),
+        ),
+      )
+    })
 
     const loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.loop")(function* (
       input: LoopInput,
     ) {
-      return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), runLoop(input.sessionID))
+      return yield* state.ensureRunning(
+        input.sessionID,
+        lastAssistant(input.sessionID),
+        runLoop(input.sessionID, input.resume),
+      )
     })
 
     const shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError> = Effect.fn(
       "SessionPrompt.shell",
     )(function* (input: ShellInput) {
+      if (diagnosticSession(yield* sessions.get(input.sessionID).pipe(Effect.orDie)))
+        throw new Error("Diagnostic side chats cannot execute shell commands")
       const ready = yield* Latch.make()
       return yield* state.startShell(input.sessionID, lastAssistant(input.sessionID), shellImpl(input, ready), ready)
     })
 
     const command = Effect.fn("SessionPrompt.command")(function* (input: CommandInput) {
+      if (diagnosticSession(yield* sessions.get(input.sessionID).pipe(Effect.orDie)))
+        throw new Error("Diagnostic side chats cannot execute commands")
       yield* Effect.logInfo("command", {
         "session.id": input.sessionID,
         command: input.command,
@@ -1507,6 +1645,8 @@ export const PromptInput = Schema.Struct({
   model: Schema.optional(ModelRef),
   agent: Schema.optional(Schema.String),
   noReply: Schema.optional(Schema.Boolean),
+  resume: Schema.optional(Schema.Boolean),
+  revision: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(1))),
   tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)).annotate({
     description:
       "@deprecated tools and permissions have been merged, you can set permissions on the session itself now",
@@ -1527,6 +1667,7 @@ export type PromptInput = Schema.Schema.Type<typeof PromptInput>
 
 export class LoopInput extends Schema.Class<LoopInput>("SessionPrompt.LoopInput")({
   sessionID: SessionID,
+  resume: Schema.optional(Schema.Boolean),
 }) {}
 
 export const ShellInput = Schema.Struct({

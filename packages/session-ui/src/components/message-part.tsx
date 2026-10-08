@@ -1,5 +1,7 @@
 import { ProposedPlan, proposedPlan } from "./proposed-plan"
 import { ArtifactCards } from "./artifact-cards"
+import { MessageSources } from "./message-sources"
+import { recordedSources } from "./message-source"
 import {
   Component,
   createEffect,
@@ -194,6 +196,7 @@ export type UserMessageComment = {
 }
 
 export interface MessagePartProps {
+  actions?: UserActions
   part: PartType
   message: MessageType
   hideDetails?: boolean
@@ -210,7 +213,7 @@ export interface MessagePartProps {
 
 function MessageActionButton(
   props: Pick<ComponentProps<"button">, "disabled" | "onMouseDown" | "onClick" | "aria-label"> & {
-    icon: "check" | "copy" | "reset"
+    icon: "check" | "copy" | "reset" | "branch"
     label: JSX.Element
     useV2?: boolean
   },
@@ -718,7 +721,7 @@ export function renderable(part: PartType, showReasoningSummaries = true) {
     if (part.tool === "question") return part.state.status !== "pending" && part.state.status !== "running"
     return true
   }
-  if (part.type === "text") return !!part.text?.trim()
+  if (part.type === "text") return !!part.text?.trim() || recordedSources(part.metadata).length > 0
   if (part.type === "reasoning") return showReasoningSummaries && !!part.text?.trim()
   return !!PART_MAPPING[part.type]
 }
@@ -726,6 +729,7 @@ export function renderable(part: PartType, showReasoningSummaries = true) {
 export { partDefaultOpen } from "./part-default-open"
 
 export function AssistantParts(props: {
+  actions?: UserActions
   messages: AssistantMessage[]
   showAssistantCopyPartID?: string | null
   turnDurationMs?: number
@@ -765,73 +769,85 @@ export function AssistantParts(props: {
   const last = createMemo(() => grouped().at(-1)?.key)
 
   return (
-    <><Index each={grouped()}>
-      {(entryAccessor) => {
-        const entryType = createMemo(() => entryAccessor().type)
+    <>
+      <Index each={grouped()}>
+        {(entryAccessor) => {
+          const entryType = createMemo(() => entryAccessor().type)
 
-        return (
-          <Switch>
-            <Match when={entryType() === "context"}>
-              {(() => {
-                const parts = createMemo(
-                  () => {
-                    const entry = entryAccessor()
-                    if (entry.type !== "context") return emptyTools
-                    return entry.refs
-                      .map((ref) => part().get(ref.messageID)?.get(ref.partID))
-                      .filter((part): part is ToolPart => !!part && isContextGroupTool(part))
-                  },
-                  emptyTools,
-                  { equals: same },
-                )
-                const busy = createMemo(() => props.working && last() === entryAccessor().key)
+          return (
+            <Switch>
+              <Match when={entryType() === "context"}>
+                {(() => {
+                  const parts = createMemo(
+                    () => {
+                      const entry = entryAccessor()
+                      if (entry.type !== "context") return emptyTools
+                      return entry.refs
+                        .map((ref) => part().get(ref.messageID)?.get(ref.partID))
+                        .filter((part): part is ToolPart => !!part && isContextGroupTool(part))
+                    },
+                    emptyTools,
+                    { equals: same },
+                  )
+                  const busy = createMemo(() => props.working && last() === entryAccessor().key)
 
-                return (
-                  <Show when={parts().length > 0}>
-                    <ContextToolGroup parts={parts()} busy={busy()} />
-                  </Show>
-                )
-              })()}
-            </Match>
-            <Match when={entryType() === "part"}>
-              {(() => {
-                const message = createMemo(() => {
-                  const entry = entryAccessor()
-                  if (entry.type !== "part") return
-                  return msgs().get(entry.ref.messageID)
-                })
-                const item = createMemo(() => {
-                  const entry = entryAccessor()
-                  if (entry.type !== "part") return
-                  return part().get(entry.ref.messageID)?.get(entry.ref.partID)
-                })
-
-                return (
-                  <Show when={message()}>
-                    <Show when={item()}>
-                      <Part
-                        part={item()!}
-                        message={message()!}
-                        showAssistantCopyPartID={props.showAssistantCopyPartID}
-                        turnDurationMs={props.turnDurationMs}
-                        useV2Actions={props.useV2Actions}
-                        defaultOpen={partDefaultOpen(item()!, props.shellToolDefaultOpen, props.editToolDefaultOpen)}
-                      />
+                  return (
+                    <Show when={parts().length > 0}>
+                      <ContextToolGroup parts={parts()} busy={busy()} />
                     </Show>
-                  </Show>
-                )
-              })()}
-            </Match>
-          </Switch>
-        )
-      }}
-    </Index><Show when={props.messages[0]}><ArtifactCards sessionID={props.messages[0].sessionID} messageIDs={props.messages.map(message => message.id)} /></Show></>
+                  )
+                })()}
+              </Match>
+              <Match when={entryType() === "part"}>
+                {(() => {
+                  const message = createMemo(() => {
+                    const entry = entryAccessor()
+                    if (entry.type !== "part") return
+                    return msgs().get(entry.ref.messageID)
+                  })
+                  const item = createMemo(() => {
+                    const entry = entryAccessor()
+                    if (entry.type !== "part") return
+                    return part().get(entry.ref.messageID)?.get(entry.ref.partID)
+                  })
+
+                  return (
+                    <Show when={message()}>
+                      <Show when={item()}>
+                        <Part
+                          part={item()!}
+                          message={message()!}
+                          showAssistantCopyPartID={props.showAssistantCopyPartID}
+                          actions={props.actions}
+                          turnDurationMs={props.turnDurationMs}
+                          useV2Actions={props.useV2Actions}
+                          defaultOpen={partDefaultOpen(item()!, props.shellToolDefaultOpen, props.editToolDefaultOpen)}
+                        />
+                      </Show>
+                    </Show>
+                  )
+                })()}
+              </Match>
+            </Switch>
+          )
+        }}
+      </Index>
+      <Show when={props.messages[0]}>
+        <ArtifactCards
+          sessionID={props.messages[0].sessionID}
+          messageIDs={props.messages.map((message) => message.id)}
+        />
+      </Show>
+    </>
   )
 }
 
 function isContextGroupTool(part: PartType): part is ToolPart {
-  return part.type === "tool" && CONTEXT_GROUP_TOOLS.has(part.tool)
-    && (part.tool !== "read" || readToolImages(part.state).length === 0)
+  return (
+    part.type === "tool" &&
+    CONTEXT_GROUP_TOOLS.has(part.tool) &&
+    (part.tool !== "read" || readToolImages(part.state).length === 0)
+  )
 }
 
 function contextToolDetail(part: ToolPart): string | undefined {
@@ -956,6 +972,7 @@ export function Message(props: MessageProps) {
       <Match when={props.message.role === "assistant" && props.message}>
         {(assistantMessage) => (
           <AssistantMessageDisplay
+            actions={props.actions}
             message={assistantMessage() as AssistantMessage}
             parts={props.parts}
             showAssistantCopyPartID={props.showAssistantCopyPartID}
@@ -969,6 +986,7 @@ export function Message(props: MessageProps) {
 }
 
 export function AssistantMessageDisplay(props: {
+  actions?: UserActions
   message: AssistantMessage
   parts: PartType[]
   showAssistantCopyPartID?: string | null
@@ -1033,6 +1051,7 @@ export function AssistantMessageDisplay(props: {
                       part={item()!}
                       message={props.message}
                       showAssistantCopyPartID={props.showAssistantCopyPartID}
+                      actions={props.actions}
                       useV2Actions={props.useV2Actions}
                     />
                   </Show>
@@ -1291,7 +1310,12 @@ export function UserMessageDisplay(props: {
                     title={type === "file" ? name : undefined}
                     onClick={() => {
                       if (type === "image") openImagePreview(file.url, name)
-                      if (file.url.startsWith("bitsbytes://")) window.dispatchEvent(new CustomEvent("bitsbytes:attachment", { detail: { uri: file.url, name, sessionID: props.message.sessionID } }))
+                      if (file.url.startsWith("bitsbytes://"))
+                        window.dispatchEvent(
+                          new CustomEvent("bitsbytes:attachment", {
+                            detail: { uri: file.url, name, sessionID: props.message.sessionID },
+                          }),
+                        )
                     }}
                   >
                     <Show
@@ -1312,7 +1336,15 @@ export function UserMessageDisplay(props: {
                   title={getFilename(name)}
                   hover={name}
                   clickable={file.url.startsWith("bitsbytes://") || !!props.actions?.openAttachment}
-                  onClick={() => file.url.startsWith("bitsbytes://") ? window.dispatchEvent(new CustomEvent("bitsbytes:attachment", { detail: { uri: file.url, name, sessionID: props.message.sessionID } })) : props.actions?.openAttachment?.(file)}
+                  onClick={() =>
+                    file.url.startsWith("bitsbytes://")
+                      ? window.dispatchEvent(
+                          new CustomEvent("bitsbytes:attachment", {
+                            detail: { uri: file.url, name, sessionID: props.message.sessionID },
+                          }),
+                        )
+                      : props.actions?.openAttachment?.(file)
+                  }
                 >
                   {typeLabel(name, file.mime, i18n.t("ui.common.file"))}
                 </AttachmentCardV2>
@@ -1349,7 +1381,7 @@ export function UserMessageDisplay(props: {
         </div>
       </Show>
       <Show when={props.useV2Actions}>{renderAttachments()}</Show>
-      <Show when={text() || (props.useV2Actions && messageComments().length > 0)}>
+      <Show when={text() || attachments().length > 0 || (props.useV2Actions && messageComments().length > 0)}>
         <div data-slot="user-message-copy-wrapper">
           <Show when={metaHead() || metaTail()}>
             <span data-slot="user-message-meta-wrap">
@@ -1382,6 +1414,20 @@ export function UserMessageDisplay(props: {
                 revert()
               }}
               aria-label={i18n.t("ui.message.revertMessage")}
+            />
+          </Show>
+          <Show when={props.actions?.fork}>
+            <MessageActionButton
+              icon="branch"
+              label={i18n.t("ui.message.branchChat")}
+              useV2={props.useV2Actions}
+              disabled={!!busy()}
+              aria-label={i18n.t("ui.message.branchChat")}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={(event) => {
+                event.stopPropagation()
+                void props.actions?.fork?.({ sessionID: props.message.sessionID, messageID: props.message.id })
+              }}
             />
           </Show>
           <Show when={text()}>
@@ -1458,6 +1504,7 @@ export function Part(props: MessagePartProps) {
         virtualizeDiff={props.virtualizeDiff}
         onContentRendered={props.onContentRendered}
         showAssistantCopyPartID={props.showAssistantCopyPartID}
+        actions={props.actions}
         turnDurationMs={props.turnDurationMs}
         useV2Actions={props.useV2Actions}
       />
@@ -1747,10 +1794,20 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
   }
 
   return (
-    <Show when={text()}>
+    <Show when={text() || recordedSources(part().metadata).length}>
       <div data-component="text-part" data-timeline-part-id={part().id}>
+        <MessageSources metadata={part().metadata} sessionID={props.message.sessionID} />
         <div data-slot="text-part-body">
-          <Show when={props.message.role === "assistant" && (props.message as AssistantMessage).agent === "plan" && proposedPlan(text())} fallback={<PacedMarkdown text={text()} cacheKey={part().id} streaming={streaming()} />}><ProposedPlan text={text()} sessionID={props.message.sessionID} streaming={streaming()} /></Show>
+          <Show
+            when={
+              props.message.role === "assistant" &&
+              (props.message as AssistantMessage).agent === "plan" &&
+              proposedPlan(text())
+            }
+            fallback={<PacedMarkdown text={text()} cacheKey={part().id} streaming={streaming()} />}
+          >
+            <ProposedPlan text={text()} sessionID={props.message.sessionID} streaming={streaming()} />
+          </Show>
         </div>
         <Show when={showCopy()}>
           <div data-slot="text-part-copy-wrapper" data-interrupted={interrupted() ? "" : undefined}>
@@ -1762,6 +1819,18 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
               onClick={handleCopy}
               aria-label={copied() ? i18n.t("ui.message.copied") : i18n.t("ui.message.copyResponse")}
             />
+            <Show when={props.actions?.fork && !streaming()}>
+              <MessageActionButton
+                icon="branch"
+                label={i18n.t("ui.message.branchChat")}
+                useV2={props.useV2Actions}
+                aria-label={i18n.t("ui.message.branchChat")}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() =>
+                  void props.actions?.fork?.({ sessionID: props.message.sessionID, messageID: props.message.id })
+                }
+              />
+            </Show>
             <Show when={meta()}>
               <span data-slot="text-part-meta" class="text-12-regular text-text-weak cursor-default">
                 {meta()}
@@ -1796,12 +1865,13 @@ function ReadImageAttachments(props: {
   filename?: string
   onContentRendered?: () => void
 }) {
-  const dialog = useDialog(), i18n = useI18n()
+  const dialog = useDialog(),
+    i18n = useI18n()
   return (
     <Show when={props.images.length}>
       <div data-component="read-image-attachments">
         <For each={props.images}>
-          {image => {
+          {(image) => {
             const filename = () => getFilename(image.filename || props.filename || i18n.t("ui.imagePreview.alt"))
             return (
               <button

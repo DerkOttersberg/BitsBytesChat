@@ -1,3 +1,4 @@
+import { captureHidden } from "./qa-capture.mjs"
 import assert from "node:assert/strict"
 import { randomUUID } from "node:crypto"
 import { createServer } from "node:http"
@@ -11,6 +12,8 @@ const profile = join(root, ".tools/qa/todo-polish-" + randomUUID())
 const data = join(profile, "BitsBytesChat")
 const directory = join(data, "workspace")
 const report = { checks: [], errors: [], observations: [] }
+const reportName = process.env.BB_QA_REPORT || "todo-polish"
+const resultPath = (suffix = "") => join(root, ".tools/qa/results", reportName + suffix)
 const requests = []
 const holds = new Map()
 const delay = (ms) => new Promise((done) => setTimeout(done, ms))
@@ -57,6 +60,7 @@ const fixture = createServer(async (req, res) => {
     calls.push({
       name: named("goal_progress"),
       args: {
+        goalID: JSON.stringify(input).match(/goal \(ID ([a-f0-9]+)\)/i)?.[1],
         status: "complete",
         reason: "Fixture complete",
         evidence: "The controlled local response completed this test objective.",
@@ -100,14 +104,6 @@ await mkdir(join(data, "config/opencode"), { recursive: true })
 await mkdir(directory, { recursive: true })
 await symlink(join(process.env.LOCALAPPDATA, "BitsBytesChat/runtime"), join(data, "runtime"), "junction")
 await writeFile(
-  pngPath,
-  // Validated 8×8 RGB PNG; malformed image data is intentionally omitted by the engine.
-  Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGNUSFjAgA0wYRUdtBIA5UgBMGHyow0AAAAASUVORK5CYII=",
-    "base64",
-  ),
-)
-await writeFile(
   mcpPath,
   `const readline = require("node:readline");
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
@@ -144,7 +140,7 @@ const app = await _electron.launch({
   executablePath:
     process.env.BB_QA_EXECUTABLE || join(root, `packages/desktop/dist/${version}/win-unpacked/BitsBytesChat.exe`),
   ...(process.env.BB_QA_MAIN ? { args: [process.env.BB_QA_MAIN] } : {}),
-  env: { ...process.env, BB_QA_ISOLATED: "1", LOCALAPPDATA: profile },
+  env: { ...process.env, BB_QA_ISOLATED: "1", BB_QA_HIDDEN: "1", BB_QA_CAPTURE: "1", LOCALAPPDATA: profile },
   timeout: 90000,
 })
 let page
@@ -160,6 +156,23 @@ try {
     }),
   )
   page = await app.firstWindow()
+  // A fresh, deterministic 640×400 fixture makes enlargement visible. Generate
+  // it inside this owned Electron process; no user image or image editor is used.
+  const pngFixture = await app.evaluate(({ nativeImage }) => {
+    const width = 640, height = 400
+    const bitmap = Buffer.alloc(width * height * 4)
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+      const offset = (y * width + x) * 4
+      const grid = x % 80 < 3 || y % 80 < 3
+      bitmap[offset] = grid ? 240 : 180 + Math.floor(y / 8)
+      bitmap[offset + 1] = grid ? 240 : 70 + Math.floor(x / 8)
+      bitmap[offset + 2] = grid ? 240 : 30
+      bitmap[offset + 3] = 255
+    }
+    return nativeImage.createFromBitmap(bitmap, { width, height }).toPNG().toString("base64")
+  })
+  await writeFile(pngPath, Buffer.from(pngFixture, "base64"))
+  assert.ok(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().every(window => !window.isVisible() && !window.isFocused())), "QA must be hidden from creation")
   page.setDefaultTimeout(30000)
   page.on("pageerror", (error) => report.errors.push(error.message))
   await page.locator("[contenteditable=true]").first().waitFor({ timeout: 90000 })
@@ -246,7 +259,9 @@ try {
   await open(chat)
   await alive("Ctrl+W leaves the native window alive in a chat composer")
   await page.locator(".bb-nav [aria-label=Settings]").click()
+  await page.getByRole("tab", { name: "Tools & permissions", exact: true }).waitFor()
   await alive("Ctrl+W leaves the native window alive while Settings suspends chat commands")
+  if (!await page.getByRole("tab", { name: "Tools & permissions", exact: true }).isVisible()) await page.locator(".bb-nav [aria-label=Settings]").click()
   await page.getByRole("tab", { name: "Tools & permissions", exact: true }).click()
   const mcp = page.locator(".bb-mcp-settings")
   await mcp.waitFor()
@@ -311,8 +326,10 @@ try {
   const row = page.locator(".bb-queue-row").filter({ hasText: "queued editable source" })
   await row.waitFor()
   const bounds = await page.locator(".bb-run-queue").boundingBox()
-  assert.ok(bounds.width <= 521 && bounds.height < 150, JSON.stringify(bounds))
-  await page.screenshot({ path: join(root, ".tools/qa/results/todo-queue.png") })
+  const composerBounds = await main().locator('[data-component="prompt-input"]').boundingBox()
+  const viewport = page.viewportSize() || await page.evaluate(() => ({ width: innerWidth, height: innerHeight }))
+  assert.ok(Math.abs(bounds.width - composerBounds.width) <= 2 && bounds.height < viewport.height * .3, JSON.stringify({ bounds, composerBounds, viewport }))
+  await captureHidden(app, page, resultPath("-queue.png"))
   await editor().fill("Unsent draft before editing")
   await row.getByRole("button", { name: "Queued message actions" }).click()
   await page.getByRole("menuitem", { name: "Edit", exact: true }).click()
@@ -322,9 +339,11 @@ try {
   )
   assert.equal(await row.count(), 0)
   assert.ok((await call("runs.get", { sessionID: chat.id })).queue.some((item) => item.editing))
+  await captureHidden(app, page, resultPath("-queue-edit.png"))
   await page.getByRole("button", { name: "Cancel edit", exact: true }).click()
   await row.waitFor()
   assert.equal(await editor().innerText(), "Unsent draft before editing")
+  await captureHidden(app, page, resultPath("-queue-cancel.png"))
   await editor().fill("")
   await row.getByRole("button", { name: "Queued message actions" }).click()
   await page.getByRole("menuitem", { name: "Edit", exact: true }).click()
@@ -368,6 +387,7 @@ try {
   await editor().press("Enter")
   slow.release.resolve()
   await idle(chat)
+  await captureHidden(app, page, resultPath("-queue-sent.png"))
   const history = await engine("/session/" + chat.id + "/message")
   assert.equal(
     history.filter(
@@ -394,11 +414,14 @@ try {
   await page.locator(".bb-panel-tabs").getByRole("button", { name: "Close tab", exact: true }).first().click()
 
   await main().getByRole("button", { name: "More options", exact: true }).last().click()
-  await page.getByRole("menuitem", { name: "Fork from message", exact: true }).click()
-  await page.getByRole("dialog").waitFor()
-  assert.ok((await page.getByRole("dialog").innerText()).includes("Fork"))
-  await alive("Persistent Fork is offered in More options; Ctrl+W leaves its modal alive")
-  await page.getByRole("dialog").locator('[data-slot="list-item"][data-key]').first().click()
+  assert.equal(await page.getByRole("menuitem", { name: "Fork from message", exact: true }).count(), 0)
+  await page.keyboard.press("Escape")
+  const selectedText = history.findLast(row => row.info.role === "assistant").parts.filter(part => part.type === "text").map(part => part.text).join("\n")
+  assert.ok(selectedText)
+  const selectedResponse = main().locator('[data-component="text-part"]').filter({ hasText: selectedText }).last()
+  await selectedResponse.waitFor()
+  await selectedResponse.hover()
+  await selectedResponse.getByRole("button", { name: "Branch in new chat", exact: true }).click()
   await eventually(async () => {
     const current = await main().getAttribute("data-bb-chat")
     return current && current !== chat.id
@@ -406,7 +429,8 @@ try {
   const forkedID = await main().getAttribute("data-bb-chat")
   assert.ok((await engine("/session/" + forkedID)).id === forkedID)
   assert.equal(await page.locator(".bb-embedded-chat").count(), 0)
-  check("Selecting Fork from message opens a durable independent main chat")
+  assert.ok((await engine("/session/" + forkedID + "/message")).some(row => row.parts.some(part => part.type === "text" && part.text === selectedText)), "The hovered response must be included in its branch")
+  check("Hover Branch includes the selected response in a durable independent main chat; the top-right Fork action is removed")
   await open(chat)
 
   await admit(chat, "long-plan", { prompt: { mode: "plan", agent: "plan" } })
@@ -421,7 +445,7 @@ try {
     max: Math.min(280, innerHeight * 0.35),
   }))
   assert.ok(bounded.height <= bounded.max + 1 && bounded.full > bounded.height, JSON.stringify(bounded))
-  await page.screenshot({ path: join(root, ".tools/qa/results/todo-plan.png") })
+  await captureHidden(app, page, resultPath("-plan.png"))
   await plan.getByRole("button", { name: "Expand plan", exact: true }).click()
   assert.equal(await body.getAttribute("data-expanded"), "true")
   assert.ok((await body.boundingBox()).height > bounded.height)
@@ -467,8 +491,8 @@ try {
     const status = await engine("/session/status")
     return run.paused && run.goal.status === "paused" && status[resumeGoal.id]?.type !== "busy"
   }, "Goal Stop did not settle its owned provider turn")
-  // V1 publishes idle before persisting cancellation metadata. Resume at that
-  // boundary, then verify the real stopped assistant after its finalization.
+  // Resume immediately after Stop settles. Cancellation metadata must already
+  // belong to the stopped turn, even when another provider turn starts now.
   await call("runs.goal-resume", { sessionID: resumeGoal.id })
   resumeHold.release.resolve()
   await eventually(async () => {
@@ -586,6 +610,7 @@ try {
     await page.locator("[data-component=image-preview] [data-slot=image-preview-image]").getAttribute("src"),
     recorded,
   )
+  await captureHidden(app, page, resultPath("-image-enlarged.png"))
   await page.keyboard.press("Escape")
   check("PNG read uses its recorded image attachment and opens an enlarged preview")
 
@@ -595,32 +620,32 @@ try {
     prompt: { legacyParts: [{ type: "file", mime: "image/png", filename: "QA-only-attachment.png", url: recorded }] },
   })
   await idle(attachmentOnly)
-  await main().getByRole("button", { name: "More options", exact: true }).last().click()
-  await page.getByRole("menuitem", { name: "Fork from message", exact: true }).click()
-  await page.getByRole("dialog").getByText("QA-only-attachment.png", { exact: true }).waitFor()
-  await page.getByRole("dialog").locator('[data-slot="list-item"][data-key]').first().click()
+  const attachmentUser = main().locator('[data-component="user-message"]').first()
+  await attachmentUser.hover()
+  await attachmentUser.getByRole("button", { name: "Branch in new chat", exact: true }).click()
   await eventually(async () => {
     const current = await main().getAttribute("data-bb-chat")
     return current && current !== attachmentOnly.id
   }, "Attachment-only boundary did not open an independent fork")
   assert.ok((await engine("/session/" + (await main().getAttribute("data-bb-chat")))).id)
-  await main().locator('[data-slot="prompt-attachments"] img[alt="QA-only-attachment.png"]').waitFor()
+  await main().getByAltText("QA-only-attachment.png", { exact: true }).first().waitFor()
   check("Attachment-only user messages remain available as persistent Fork boundaries")
 
   assert.equal(report.errors.length, 0, report.errors.join("\n"))
-  await page.screenshot({ path: join(root, ".tools/qa/results/todo-polish.png") })
+  assert.ok(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().every(window => !window.isVisible() && !window.isFocused())), "QA became visible or focused")
+  await captureHidden(app, page, resultPath(".png"))
 } catch (error) {
   report.failure = String(error)
   console.error("FAIL", String(error))
   if (page) {
     console.log((await page.locator("body").innerText()).slice(0, 1800))
-    await page.screenshot({ path: join(root, ".tools/qa/results/todo-polish-failure.png") }).catch(() => {})
+    await captureHidden(app, page, resultPath("-failure.png")).catch(() => {})
   }
   process.exitCode = 1
 } finally {
   for (const value of holds.values()) value.release.resolve()
   report.observations.push({ providerRequests: requests.length, syntheticProvider: true, profile })
-  await writeFile(join(root, ".tools/qa/results/todo-polish.json"), JSON.stringify(report, null, 2))
+  await writeFile(resultPath(".json"), JSON.stringify(report, null, 2))
   await app.close()
   fixture.closeAllConnections()
   fixture.close()

@@ -16,6 +16,7 @@ const state = {
   busy: false,
   messages: "",
   interactions: "",
+  questionRequests: [],
   files: [],
   preview: null,
   page: 1,
@@ -422,8 +423,134 @@ function fileCard(item, revision) {
   )
   return card
 }
+const questionDrafts = new Map()
+const questionKey = (sessionID, requestID) => `bb.question.${sessionID}.${requestID}`
+function questionActivity(request, kind, sessionID = state.chat) {
+  return api("question-activity", { sessionID, id: request.id, kind }).catch(() => undefined)
+}
+function questionWizard(request, sessionID) {
+  const key = questionKey(sessionID, request.id)
+  const stored = (() => { try { return JSON.parse(localStorage.getItem(key) || "null") } catch { return null } })()
+  const draft = questionDrafts.get(key) || {
+    tab: Number.isInteger(stored?.tab) ? stored.tab : 0,
+    answers: request.questions.map((_, i) => Array.isArray(stored?.answers?.[i]) ? stored.answers[i].filter(value => typeof value === "string") : []),
+    custom: request.questions.map((_, i) => typeof stored?.custom?.[i] === "string" ? stored.custom[i] : ""),
+    customOn: request.questions.map((_, i) => stored?.customOn?.[i] === true),
+    minimised: stored?.minimised === true,
+  }
+  draft.tab = Math.max(0, Math.min(request.questions.length - 1, draft.tab))
+  questionDrafts.set(key, draft)
+  if (questionDrafts.size > 64) questionDrafts.delete(questionDrafts.keys().next().value)
+  const row = node("section", undefined, "interaction question-wizard")
+  row.dataset.request = request.id
+  let busy = false, advance
+  const save = () => { try { localStorage.setItem(key, JSON.stringify(draft)) } catch {} }
+  const submit = async (dismiss = false) => {
+    if (busy) return
+    busy = true; render()
+    try {
+      if (dismiss && request.isBlocking !== false) await api("stop", { sessionID })
+      else await api("question", { sessionID, id: request.id, answers: request.questions.map((_, i) => dismiss ? [] : draft.answers[i] || []) })
+      localStorage.removeItem(key); questionDrafts.delete(key)
+      if (state.chat === sessionID) await refresh()
+    } catch (error) { notice(error.message); busy = false; render() }
+  }
+  const next = () => {
+    if (draft.tab === request.questions.length - 1) return void submit()
+    draft.tab++; save(); render()
+  }
+  const render = () => {
+    clearTimeout(advance)
+    const question = request.questions[draft.tab]
+    row.replaceChildren()
+    const header = node("div", undefined, "question-header")
+    header.append(node("strong", question.question))
+    const steps = node("div", undefined, "question-steps")
+    const back = button("‹", () => { draft.tab--; save(); render() })
+    back.setAttribute("aria-label", C.previous); back.disabled = busy || draft.tab === 0
+    const forward = button("›", () => { draft.tab++; save(); render() })
+    forward.setAttribute("aria-label", C.next); forward.disabled = busy || draft.tab === request.questions.length - 1
+    steps.append(back, node("span", `${draft.tab + 1}/${request.questions.length}`), forward)
+    const minimise = button(draft.minimised ? "+" : "−", () => { draft.minimised = !draft.minimised; save(); render() })
+    minimise.setAttribute("aria-label", draft.minimised ? C.expandQuestion : C.minimiseQuestion)
+    steps.append(minimise); header.append(steps); row.append(header)
+    if (!draft.minimised) {
+      const choices = node("div", undefined, "question-choices")
+      choices.setAttribute("role", question.multiple ? "group" : "radiogroup")
+      ;(question.options || []).forEach((option, i) => {
+        const picked = (draft.answers[draft.tab] || []).includes(option.label)
+        const choice = button(undefined, () => {
+          if (busy) return
+          draft.answers[draft.tab] = question.multiple
+            ? picked ? draft.answers[draft.tab].filter(answer => answer !== option.label) : [...(draft.answers[draft.tab] || []), option.label]
+            : [option.label]
+          if (!question.multiple) draft.customOn[draft.tab] = false
+          save(); render()
+          if (!question.multiple) advance = setTimeout(() => { if (row.isConnected && state.chat === sessionID) next() }, 180)
+        }, "question-choice")
+        choice.setAttribute("role", question.multiple ? "checkbox" : "radio")
+        choice.setAttribute("aria-checked", String(picked)); choice.disabled = busy
+        choice.dataset.picked = String(picked)
+        choice.append(node("span", String(i + 1), "question-number"))
+        const label = node("span", undefined, "question-label")
+        label.append(node("span", option.label.replace(/ \(Recommended\)$/, "")))
+        if (option.label.endsWith(" (Recommended)")) label.append(node("span", C.recommended, "question-recommended"))
+        if (option.description) label.append(node("small", option.description))
+        choice.append(label); choices.append(choice)
+      })
+      const custom = node("input")
+      custom.placeholder = C.otherAnswer; custom.setAttribute("aria-label", C.otherAnswer)
+      custom.value = draft.custom[draft.tab] || ""; custom.disabled = busy
+      custom.oninput = () => {
+        const previous = (draft.custom[draft.tab] || "").trim()
+        draft.custom[draft.tab] = custom.value; draft.customOn[draft.tab] = true
+        const answers = question.multiple ? (draft.answers[draft.tab] || []).filter(answer => answer !== previous) : []
+        draft.answers[draft.tab] = [...answers, ...(custom.value.trim() ? [custom.value.trim()] : [])]
+        save()
+        row.querySelector("[data-next]").textContent = draft.answers[draft.tab].length ? (draft.tab === request.questions.length - 1 ? C.submitAnswer : C.next) : C.skipQuestion
+      }
+      custom.onkeydown = event => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); next() } }
+      choices.append(custom); row.append(choices)
+    }
+    const footer = node("div", undefined, "question-footer")
+    const countdown = node("span", undefined, "question-countdown"); countdown.dataset.countdown = request.id
+    const dismiss = button(C.dismissQuestion, () => void submit(true)); dismiss.disabled = busy
+    const proceed = button((draft.answers[draft.tab] || []).length ? (draft.tab === request.questions.length - 1 ? C.submitAnswer : C.next) : C.skipQuestion, next)
+    proceed.dataset.next = ""; proceed.disabled = busy
+    footer.append(countdown, dismiss, proceed); row.append(footer)
+  }
+  row.addEventListener("pointerdown", () => void questionActivity(request, "snooze", sessionID))
+  row.addEventListener("keydown", event => {
+    void questionActivity(request, "snooze", sessionID)
+    if (event.isComposing || event.repeat || event.target instanceof HTMLInputElement) return
+    if (/^[1-9]$/.test(event.key)) { const choice = row.querySelectorAll(".question-choice")[Number(event.key) - 1]; if (choice) { event.preventDefault(); choice.click() } }
+  })
+  render(); void questionActivity(request, document.visibilityState === "visible" && document.hasFocus() ? "foreground" : "background", sessionID)
+  return row
+}
+setInterval(() => {
+  for (const request of state.questionRequests) {
+    const countdown = document.querySelector(`[data-countdown="${CSS.escape(request.id)}"]`)
+    if (!countdown) continue
+    const seconds = Math.max(0, Math.ceil(((request.autoResolution?.expiresAt || 0) - Date.now()) / 1000))
+    countdown.textContent = request.autoResolution?.phase === "countdown" && seconds <= 60 ? C.autoResolveQuestion.replace("{seconds}", String(seconds)) : ""
+  }
+}, 1000)
+document.addEventListener("visibilitychange", () => { for (const request of state.questionRequests) void questionActivity(request, document.visibilityState === "visible" ? "foreground" : "background") })
+window.addEventListener("focus", () => { for (const request of state.questionRequests) void questionActivity(request, "foreground") })
+window.addEventListener("blur", () => { for (const request of state.questionRequests) void questionActivity(request, "background") })
+let questionConversationAt = 0
+const questionConversation = event => {
+  if (event.type !== "pointermove" && event.target.closest?.(".question-wizard") || Date.now() - questionConversationAt < 1000) return
+  questionConversationAt = Date.now()
+  for (const request of state.questionRequests) void questionActivity(request, "conversation")
+}
+document.addEventListener("pointerdown", questionConversation)
+document.addEventListener("pointermove", questionConversation)
+document.addEventListener("keydown", questionConversation)
 function interactions(chat) {
-  const hash = JSON.stringify([chat.permissions, chat.questions])
+  state.questionRequests = chat.questions
+  const hash = JSON.stringify([state.chat, chat.permissions, chat.questions.map(({ id, questions, isBlocking }) => ({ id, questions, isBlocking }))])
   if (hash === state.interactions) return
   state.interactions = hash
   const root = $("#interactions")
@@ -445,23 +572,7 @@ function interactions(chat) {
     root.append(row)
   }
   for (const request of chat.questions) {
-    const row = node("form", undefined, "interaction"),
-      inputs = []
-    for (const question of request.questions) {
-      row.append(node("strong", question.question))
-      const input = node("input")
-      input.placeholder = C.answer
-      row.append(input)
-      for (const option of question.options || []) row.append(button(option.label, () => (input.value = option.label)))
-      inputs.push(input)
-    }
-    row.append(
-      button(C.submitAnswer, async () => {
-        await api("question", { sessionID: state.chat, id: request.id, answers: inputs.map((input) => [input.value]) })
-        await refresh()
-      }),
-    )
-    root.append(row)
+    root.append(questionWizard(request, state.chat))
   }
 }
 async function refresh() {
@@ -486,8 +597,9 @@ async function refresh() {
   const queue = $("#queue-status")
   queue.replaceChildren()
   if (chat.run.error) queue.append(node("span", chat.run.error))
-  if (chat.run.queue.length) {
-    queue.append(node("span", `${C.queued} · ${chat.run.queue.length}`))
+  const queued = chat.run.queue.filter(item => !item.editing && item.status !== "sending" && item.presentation !== "transcript")
+  if (queued.length) {
+    queue.append(node("span", `${C.queued} · ${queued.length}`))
     if (chat.run.paused)
       queue.append(
         button(C.resume, async () => {
@@ -530,6 +642,7 @@ async function send(delivery = "queue") {
     model: JSON.parse(model),
     variant: $("#variant").value,
     delivery,
+    immediate: !state.busy,
   }
   persist({ pending })
   state.sending = true
