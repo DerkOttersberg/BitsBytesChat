@@ -14,7 +14,7 @@ If a Python environment points at an absent installation, startup repairs its ho
 
 ## New in the 0.3.5 candidate
 
-The `todo-polish` candidate implements the requested queue, question, Goal and side-chat changes. [Draft PR #2](https://github.com/DerkOttersberg/BitsBytesChat/pull/2) contains the reviewable patch. The published installer remains **v0.3.4**; building this candidate does not install it or replace a running app. The active checkout is `D:\Codex\BitsBytesChat-20261007`.
+The current `main` branch contains the newest candidate, including the requested queue, question, Goal and side-chat changes and their follow-up fixes. The former draft branches and PRs have been consolidated into `main`. The published installer remains **v0.3.4**; building this candidate does not install it or replace a running app. The active checkout is `D:\Codex\BitsBytesChat-20261007`.
 
 - Idle Send appears directly in the transcript. A new Send after Stop releases preserved follow-ups in order after cancellation finishes; the stopped Goal stays paused. Durable receipts reconcile exact retries and refuse conflicting message IDs. Steer applies at the next safe provider/tool boundary.
 - The queue uses a compact rail across the composer, capped at 30dvh. Edit hides and reserves its row, restores the complete request to the composer, and replaces that reservation on Send. Cancel/Undo and renderer reload preserve the previous draft and attachments.

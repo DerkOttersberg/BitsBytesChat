@@ -1,5 +1,7 @@
 # Bits & Bytes Chat — verification
 
+All source follow-up work is consolidated on `main`. Former branch names below identify historical verification runs; they are no longer active development branches. The published `v0.3.4` release remains unchanged.
+
 ## Follow-up fixes — 8 October 2026
 
 This follow-up supersedes the Goal editor and queued-edit banner in the earlier candidate. `/goal` keeps a composer chip and reads explicit duration/token-budget constraints from the prompt; there is no hours form or Goal panel. Saved Goal panel tabs are retired. Queued editing uses the ordinary composer without the editing banner, Undo or Cancel buttons, retaining the durable message identity on Send.
@@ -20,7 +22,7 @@ Reproduce the native checks from `packages/desktop` with `node scripts/verify-fo
 
 ## 0.3.5 candidate — 8 October 2026
 
-The candidate implements the accepted follow-up for all 18 `todo.txt` items. [TODO_RESOLUTION.txt](TODO_RESOLUTION.txt) maps each item to the shipped behavior, and [REFERENCE_ANALYSIS.md](REFERENCE_ANALYSIS.md) records the interaction research, step-by-step contract and reference limits. Work stays on `todo-polish` and [draft PR #2](https://github.com/DerkOttersberg/BitsBytesChat/pull/2). Published `v0.3.4` remains unchanged. The user's app, original checkout, credentials, recordings and models were not replaced, restarted or committed.
+The candidate implements the accepted follow-up for all 18 `todo.txt` items. [TODO_RESOLUTION.txt](TODO_RESOLUTION.txt) maps each item to the shipped behavior, and [REFERENCE_ANALYSIS.md](REFERENCE_ANALYSIS.md) records the interaction research, step-by-step contract and reference limits. This work is now incorporated into `main`. Published `v0.3.4` remains unchanged. The user's app, original checkout, credentials, recordings and models were not replaced, restarted or committed.
 
 The queue now distinguishes durable admission from application and completion. Idle Send uses one transcript identity; a stale renderer busy flag is reconciled against the engine. Stop joins cancellation before later work can run, and a subsequent ordinary Send releases user-stopped follow-ups in order while preserving a paused Goal. Edit hides a durable reservation and restores its original composer state; Send preserves identity with a new revision. Keyboard and drag reorder use the same visible neighbors. Delivery uncertainty is retained for explicit recovery.
 
