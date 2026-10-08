@@ -1,5 +1,11 @@
 # Interface research and implementation
 
+## Supplied queue screenshot — 8 October 2026
+
+The user supplied a 750×156 reference image and a comparison image from this fork. This enables a direct comparison of the collapsed queue state: 13px composer inset, 32px row, 33px exposed strip, 16px queue corners, an overlapping 20px composer, bold message text, and Steer/trash/more controls. The fork uses Segoe UI to match the Windows capture. Sampled dark fills are `#2d2d2d` for the queue and `#363636` for the composer, with a `#3b3b3b` queue border and `#969696` actions. The implementation replaces the separated card and count heading with that arrangement. Actual [dark](docs/screenshots/035-queue-reference-dark.png) and [light](docs/screenshots/035-queue-reference-light.png) renders retain this fork's model, access and microphone controls.
+
+This supersedes the queue appearance described below and the earlier lack of a reference screenshot for this particular state. The supplied images do not show the reference's open menu or editing transitions, so those continue to follow the existing verified interaction contract. Font rasterization can differ between native renderers; measured geometry and colors, rather than whole-image pixel identity, are verified.
+
 ## User-directed simplification — 8 October 2026
 
 The follow-up removes the Goal hours form and Goal panel, including restored panel tabs. `/goal` keeps a composer chip and the prompt supplies the objective and constraints. The compact status row keeps Pause/Resume/Clear. Queued editing restores the request in the ordinary composer without an editing banner, Undo or Cancel buttons; Send still replaces the same durable reservation.

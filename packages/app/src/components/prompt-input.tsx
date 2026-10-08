@@ -1435,7 +1435,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     props.ref?.(el)
   }
   return (
-    <div class="relative size-full flex flex-col gap-0">
+    <div class="bb-composer-stack relative size-full flex flex-col gap-0">
       <ChatRuns />
       {(promptReady(), null)}
       <PromptPopover

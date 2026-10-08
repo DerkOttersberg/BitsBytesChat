@@ -2,39 +2,107 @@
   gap: 4px;
   font-size: 12px;
 }
+.bb-composer-stack {
+  gap: 0;
+}
 .bb-run-queue {
+  /* The composer covers the lower edge, as in the supplied queue reference. */
   align-self: stretch;
-  width: 100%;
+  width: calc(100% - 26px);
   max-width: none;
+  margin-inline: 13px;
+  margin-bottom: -13px;
   border-radius: 16px;
-  padding: 4px 12px;
-  background: var(--background-strong);
+  padding: 0 10px 12px;
+  background: var(--background-weak);
+  color: var(--text-strong);
 }
 .bb-queue-list {
   max-height: 30dvh;
   scrollbar-width: thin;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 0;
 }
 .bb-queue-row {
+  height: 32px;
   min-height: 32px;
-  gap: 4px;
+  padding: 0;
+  gap: 5px;
+  font-size: 13px;
+  line-height: 20px;
 }
-.bb-queue-row > button {
-  flex-shrink: 0;
+.bb-queue-text {
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-weight: 600;
 }
-.bb-queue-grip {
-  width: 8px;
+.bb-queue-icon {
+  display: grid;
+  place-items: center;
+  width: 16px;
   height: 16px;
   flex-shrink: 0;
-  opacity: 0;
-  background: radial-gradient(circle, currentColor 1px, transparent 1.5px) 0 0 / 4px 5px;
+  color: var(--text-weak);
   cursor: grab;
 }
-.bb-queue-row:hover .bb-queue-grip,
-.bb-queue-row:focus-within .bb-queue-grip {
-  opacity: 0.5;
+.bb-queue-row:active .bb-queue-icon {
+  cursor: grabbing;
+}
+.bb-queue-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 0;
+}
+.bb-run-queue .bb-queue-actions > button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  color: var(--text-weak);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 20px;
+  cursor: pointer;
+}
+.bb-run-queue .bb-queue-actions > .bb-queue-steer {
+  width: auto;
+  min-width: 66px;
+  gap: 2px;
+  padding-inline: 4px;
+}
+.bb-queue-steer > span {
+  transform: translateY(1px);
+}
+.bb-queue-actions > button:hover {
+  background: var(--surface-base-hover);
+}
+.bb-queue-actions > button:focus-visible {
+  outline: 2px solid var(--v2-border-border-focus);
+  outline-offset: -1px;
+}
+.bb-composer-stack:has(.bb-run-queue) :is([data-component="prompt-input-v2"], [data-dock-surface="shell"]) {
+  z-index: 1;
+  border-radius: 20px;
+}
+.bb-composer-stack:has(.bb-run-queue) [data-slot="prompt-controls"] {
+  min-height: 38px;
+}
+:root[data-color-scheme="dark"] .bb-run-queue {
+  background: #2d2d2d;
+  border-color: #3b3b3b;
+  color: #ffffff;
+}
+:root[data-color-scheme="dark"] :is(.bb-queue-icon, .bb-queue-actions > button) {
+  color: #969696;
+}
+:root[data-color-scheme="dark"] .bb-composer-stack:has(.bb-run-queue) :is([data-component="prompt-input-v2"], [data-dock-surface="shell"]) {
+  background: #363636;
+  --dock-shell-border-underlay-background: #363636;
 }
 .bb-goal-row {
   min-height: 32px;
@@ -89,9 +157,6 @@
   }
   .bb-goal-stat {
     font-size: 11px;
-  }
-  .bb-run-queue {
-    padding: 4px 8px;
   }
   .bb-mode-row {
     flex-wrap: wrap;

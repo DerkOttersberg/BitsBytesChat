@@ -61,7 +61,7 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
   const sendLabel = () => language.t(working() ? settings.general.followup() === "queue" ? "bitsbytes.queue" : "bitsbytes.steer" : "bitsbytes.send")
 
   return (
-    <div class="flex flex-col gap-3">
+    <div class="bb-composer-stack flex flex-col gap-3">
       <ChatRuns />
       <PromptInputV2
         controller={props.controller}

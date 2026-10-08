@@ -2,6 +2,16 @@
 
 All source follow-up work is consolidated on `main`. Former branch names below identify historical verification runs; they are no longer active development branches. The published `v0.3.4` release remains unchanged.
 
+## Queue screenshot match — 8 October 2026
+
+The supplied dark queue screenshot is now the direct visual reference. The queue is inset 13px on either side of the composer, uses 32px rows and exposes a 33px strip above the overlapping composer. The count heading is removed, retaining its accessible label. Message typography, queue/Steer/trash/more icons, control order and the measured dark palette are matched to the reference; light mode retains the same geometry with the app's light theme. Existing delivery, retry, editing and reorder operations retain their durable identities. Pause recovery remains available above the strip.
+
+App and desktop typechecks pass, as do 44 existing queue tests / 79 assertions. The production bundles pass seven hidden native checks: reference geometry and action order; actual light/dark captures; 13-row bounded scrolling and menu reordering; a narrow window and long text; targeted deletion retaining neighbors; keyboard Edit and exactly one delivery; and zero renderer errors with every QA window hidden and unfocused. Early harness attempts encountered model-loading timing and ambiguous or unsettled selectors; the corrected complete run passes. No user app was closed, restarted or focused.
+
+The same warm 55,000-character input check records medians of 10.6ms before and 9.5ms after (five samples each, separate isolated profiles and production assets). This small check does not establish a speedup. Reports and the visual harness remain private under `.tools/qa/results/queue-reference*` and `.tools/queue-reference-check.mjs`. Current committed captures: [dark queue](docs/screenshots/035-queue-reference-dark.png), [light queue](docs/screenshots/035-queue-reference-light.png). The earlier captures below document previous candidates.
+
+The final unsigned local 0.3.5 installer is `.tools/qa/queue-reference-package/BitsBytesChat-win-x64.exe`: 175,414,228 bytes, SHA-256 `7df6f67d8fa20a5404ed27993b5de2d39228ced1fe560be10b5b9802675e6d6e`. The package audit matches all 1,834 compiled/runtime files to build output. All seven native checks also pass against its exact unpacked executable, including the accessible queue group. The installer was prepared without replacing or launching the user's installed app; the published release remains `v0.3.4`.
+
 ## Follow-up fixes — 8 October 2026
 
 This follow-up supersedes the Goal editor and queued-edit banner in the earlier candidate. `/goal` keeps a composer chip and reads explicit duration/token-budget constraints from the prompt; there is no hours form or Goal panel. Saved Goal panel tabs are retired. Queued editing uses the ordinary composer without the editing banner, Undo or Cancel buttons, retaining the durable message identity on Send.

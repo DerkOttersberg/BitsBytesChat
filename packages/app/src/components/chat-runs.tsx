@@ -128,26 +128,7 @@ export function ChatRuns() {
   window.addEventListener("bitsbytes:goal-draft", goalRequest)
   onCleanup(() => window.removeEventListener("bitsbytes:goal-draft", goalRequest))
   return <Show when={platform.bitsbytes}><div class="bb-run-controls">
-    <Show when={queued().length}>
-      <div class="bb-run-queue" data-component="durable-queue">
-        <Show when={queued().length}><div class="bb-run-heading"><span>{language.t("bitsbytes.queued", { count: queued().length })}</span>
-          <Show when={run.store.value?.paused}><ButtonV2 size="normal" variant="ghost-muted" onClick={() => action("resume")}>{language.t("bitsbytes.resumeQueue")}</ButtonV2></Show>
-        </div></Show>
-        <div class="bb-queue-list"><For each={queued()}>{(item, index) => <div class="bb-queue-row" draggable={item.status !== "sending"} onDragStart={event => { setStore("dragging", item.id); event.dataTransfer?.setData("text/plain", item.id) }} onDragEnd={() => setStore("dragging", "")} onDragOver={event => { if (store.dragging && store.dragging !== item.id) event.preventDefault() }} onDrop={event => { event.preventDefault(); const ids = reorderQueuedInput(run.store.value?.queue ?? [], store.dragging, item.id); setStore("dragging", ""); if (ids) action("reorder", { ids }) }}>
-          <span class="bb-queue-grip" aria-hidden="true" />
-          <span class="bb-queue-text" title={title(item)}>{title(item)}</span>
-          <Show when={item.error}><span class="bb-queue-error" title={item.error}>{language.t("bitsbytes.deliveryUncertain")}</span></Show>
-          <button disabled={item.status === "sending"} title={language.t(item.error ? "bitsbytes.retry" : "bitsbytes.steer")} aria-label={language.t(item.error ? "bitsbytes.retry" : "bitsbytes.steer")} onClick={() => action(item.error ? "retry" : "steer", { id: item.id })}><ModeIcon kind="steer" /></button>
-          <MenuV2 placement="top-end"><MenuV2.Trigger as={ButtonV2} size="normal" variant="ghost-muted" aria-label={language.t("bitsbytes.queueActions")} disabled={item.status === "sending"}><span aria-hidden="true">⋯</span></MenuV2.Trigger><MenuV2.Portal><MenuV2.Content>
-            <MenuV2.Item disabled={!readQueuedDraft(item.prompt.draft)} onSelect={() => void edit(item).catch(() => undefined)}>{language.t("bitsbytes.edit")}</MenuV2.Item>
-            <MenuV2.Item disabled={!index()} onSelect={() => move(item.id, -1)}>{language.t("bitsbytes.moveUp")}</MenuV2.Item>
-            <MenuV2.Item disabled={index() === queued().length - 1} onSelect={() => move(item.id, 1)}>{language.t("bitsbytes.moveDown")}</MenuV2.Item>
-            <MenuV2.Item onSelect={() => { const draft = readQueuedDraft(item.prompt.draft); window.dispatchEvent(new CustomEvent("bitsbytes:side-chat", { detail: { source: run.identity(), directory: sdk().directory, draft: draft ? restoreQueuedDraft(draft) : undefined, variant: local.model.variant.current() ?? null } })) }}>{language.t("bitsbytes.sideChat")}</MenuV2.Item>
-          </MenuV2.Content></MenuV2.Portal></MenuV2>
-          <button disabled={item.status === "sending"} title={language.t("bitsbytes.delete")} aria-label={language.t("bitsbytes.delete")} onClick={() => action("delete", { id: item.id })}><Icon name="close-small" /></button>
-        </div>}</For></div>
-      </div>
-    </Show>
+    <Show when={queued().length && run.store.value?.paused}><div class="bb-run-heading"><ButtonV2 size="normal" variant="ghost-muted" onClick={() => action("resume")}>{language.t("bitsbytes.resumeQueue")}</ButtonV2></div></Show>
     <Show when={run.store.value?.goal && (run.store.value.goal.status !== "complete" || !run.store.value.goal.summaryDismissed) && run.store.value.goal}>{goal => <div class="bb-goal-row" data-status={goal().status}>
       <div class="bb-goal-summary" title={goal().objective}><ModeIcon kind="goal" /><span>{language.t((`bitsbytes.goal.${goal().status}`) as "bitsbytes.goal.active")}</span><span class="bb-goal-objective">{goal().objective}</span></div>
       <span class="bb-goal-stat">{language.t("bitsbytes.goalElapsed", { minutes: Math.floor(goalElapsed() / 60000) })}<Show when={goal().budget}> · {language.t("bitsbytes.goalTokens", { tokens: goal().tokens, budget: goal().budget! })}</Show></span>
@@ -161,5 +142,24 @@ export function ChatRuns() {
     <Show when={run.store.error}><p class="bb-queue-error" role="alert">{run.store.error}</p></Show>
     <For each={run.store.value?.queue.filter(item => item.presentation === "transcript" && item.error) ?? []}>{item => <div class="bb-run-heading" role="alert"><span class="bb-queue-error">{language.t("bitsbytes.deliveryUncertain")}</span><ButtonV2 size="normal" variant="ghost-muted" onClick={() => action("retry", { id: item.id })}>{language.t("bitsbytes.retry")}</ButtonV2></div>}</For>
     <Show when={store.confirmGoal}><div class="bb-run-heading"><span>{language.t("bitsbytes.replaceGoal")}</span><ButtonV2 size="normal" variant="ghost-muted" onClick={() => setStore("confirmGoal", false)}>{language.t("bitsbytes.cancel")}</ButtonV2><ButtonV2 size="normal" variant="contrast" onClick={() => { action("goal-draft", { enabled: true, replace: true }); setStore("confirmGoal", false) }}>{language.t("bitsbytes.replace")}</ButtonV2></div></Show>
+    <Show when={queued().length}>
+      <div class="bb-run-queue" data-component="durable-queue" role="group" aria-label={language.t("bitsbytes.queued", { count: queued().length })}>
+        <div class="bb-queue-list"><For each={queued()}>{(item, index) => <div class="bb-queue-row" draggable={item.status !== "sending"} onDragStart={event => { setStore("dragging", item.id); event.dataTransfer?.setData("text/plain", item.id) }} onDragEnd={() => setStore("dragging", "")} onDragOver={event => { if (store.dragging && store.dragging !== item.id) event.preventDefault() }} onDrop={event => { event.preventDefault(); const ids = reorderQueuedInput(run.store.value?.queue ?? [], store.dragging, item.id); setStore("dragging", ""); if (ids) action("reorder", { ids }) }}>
+          <span class="bb-queue-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4H2.5v8.5H11v-2M6 5.5h5m-2-2 2 2-2 2" /></svg></span>
+          <span class="bb-queue-text" title={title(item)}>{title(item)}</span>
+          <Show when={item.error}><span class="bb-queue-error" title={item.error}>{language.t("bitsbytes.deliveryUncertain")}</span></Show>
+          <div class="bb-queue-actions">
+          <button class="bb-queue-steer" disabled={item.status === "sending"} title={language.t(item.error ? "bitsbytes.retry" : "bitsbytes.queueSteer")} aria-label={language.t(item.error ? "bitsbytes.retry" : "bitsbytes.queueSteer")} onClick={() => action(item.error ? "retry" : "steer", { id: item.id })}><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5V7a3 3 0 0 0 3 3h6m-2.5-2.5L12 10l-2.5 2.5" /></svg><span>{language.t(item.error ? "bitsbytes.retry" : "bitsbytes.queueSteer")}</span></button>
+          <button disabled={item.status === "sending"} title={language.t("bitsbytes.delete")} aria-label={language.t("bitsbytes.delete")} onClick={() => action("delete", { id: item.id })}><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="0.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5.5h9M7.5 5.5v-3h4v3M6 5.5l.5 8h6l.5-8M8.5 8v3.5M10.5 8v3.5" /></svg></button>
+          <MenuV2 placement="top-end"><MenuV2.Trigger as={ButtonV2} size="normal" variant="ghost-muted" aria-label={language.t("bitsbytes.queueActions")} disabled={item.status === "sending"}><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="5.5" cy="8" r="0.75" /><circle cx="9.5" cy="8" r="0.75" /><circle cx="13" cy="8" r="0.75" /></svg></MenuV2.Trigger><MenuV2.Portal><MenuV2.Content>
+            <MenuV2.Item disabled={!readQueuedDraft(item.prompt.draft)} onSelect={() => void edit(item).catch(() => undefined)}>{language.t("bitsbytes.edit")}</MenuV2.Item>
+            <MenuV2.Item disabled={!index()} onSelect={() => move(item.id, -1)}>{language.t("bitsbytes.moveUp")}</MenuV2.Item>
+            <MenuV2.Item disabled={index() === queued().length - 1} onSelect={() => move(item.id, 1)}>{language.t("bitsbytes.moveDown")}</MenuV2.Item>
+            <MenuV2.Item onSelect={() => { const draft = readQueuedDraft(item.prompt.draft); window.dispatchEvent(new CustomEvent("bitsbytes:side-chat", { detail: { source: run.identity(), directory: sdk().directory, draft: draft ? restoreQueuedDraft(draft) : undefined, variant: local.model.variant.current() ?? null } })) }}>{language.t("bitsbytes.sideChat")}</MenuV2.Item>
+          </MenuV2.Content></MenuV2.Portal></MenuV2>
+          </div>
+        </div>}</For></div>
+      </div>
+    </Show>
   </div></Show>
 }
