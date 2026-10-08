@@ -71,6 +71,11 @@ import { attached, inline, kind, typeLabel } from "./message-file"
 import { readPartText } from "./message-part-text"
 import { readToolImages, type ReadImageState, type RecordedReadImage } from "./read-tool-images"
 import { SessionProgressIndicatorV2 } from "../v2/components/session-progress-indicator-v2"
+import { ReadImageCard } from "./read-image-card"
+import { ownsAssistant, ownsPart, displayedToolStatus } from "./execution-activity"
+import { recoveredToolAttempts } from "./tool-recovery"
+import { ToolDetails } from "./tool-details"
+import { toolPresentationKey } from "./tool-presentation"
 
 async function writeClipboard(text: string): Promise<boolean> {
   const body = typeof document === "undefined" ? undefined : document.body
@@ -196,6 +201,7 @@ export type UserMessageComment = {
 }
 
 export interface MessagePartProps {
+  recoveredTools?: ToolPart[]
   actions?: UserActions
   part: PartType
   message: MessageType
@@ -573,7 +579,7 @@ export function getToolInfo(
     default:
       return {
         icon: "mcp",
-        title: tool,
+        title: toolPresentationKey(tool) ? i18n.t(toolPresentationKey(tool)!) : tool,
       }
   }
 }
@@ -636,6 +642,7 @@ export type PartGroup =
       key: string
       type: "part"
       ref: PartRef
+      recovered?: PartRef[]
     }
   | {
       key: string
@@ -653,7 +660,11 @@ function sameGroup(a: PartGroup, b: PartGroup) {
   if (a.type !== b.type) return false
   if (a.type === "part") {
     if (b.type !== "part") return false
-    return sameRef(a.ref, b.ref)
+    return (
+      sameRef(a.ref, b.ref) &&
+      (a.recovered?.length ?? 0) === (b.recovered?.length ?? 0) &&
+      (a.recovered ?? []).every((ref, index) => sameRef(ref, b.recovered![index]!))
+    )
   }
   if (b.type !== "context") return false
   if (a.refs.length !== b.refs.length) return false
@@ -669,6 +680,7 @@ export function sameGroups(a: readonly PartGroup[] | undefined, b: readonly Part
 
 export function groupParts(parts: { messageID: string; part: PartType }[]) {
   const result: PartGroup[] = []
+  const recovery = recoveredToolAttempts(parts)
   let start = -1
 
   const flush = (end: number) => {
@@ -691,6 +703,10 @@ export function groupParts(parts: { messageID: string; part: PartType }[]) {
   }
 
   parts.forEach((item, index) => {
+    if (recovery.hidden.has(item.part.id)) {
+      flush(index - 1)
+      return
+    }
     if (isContextGroupTool(item.part)) {
       if (start < 0) start = index
       return
@@ -704,6 +720,7 @@ export function groupParts(parts: { messageID: string; part: PartType }[]) {
         messageID: item.messageID,
         partID: item.part.id,
       },
+      ...(recovery.recovered.has(item.part.id) ? { recovered: recovery.recovered.get(item.part.id) } : {}),
     })
   })
 
@@ -816,6 +833,14 @@ export function AssistantParts(props: {
                       <Show when={item()}>
                         <Part
                           part={item()!}
+                          recoveredTools={
+                            entryAccessor().type === "part"
+                              ? (entryAccessor() as Extract<PartGroup, { type: "part" }>).recovered?.flatMap((ref) => {
+                                  const previous = part().get(ref.messageID)?.get(ref.partID)
+                                  return previous?.type === "tool" ? [previous] : []
+                                })
+                              : undefined
+                          }
                           message={message()!}
                           showAssistantCopyPartID={props.showAssistantCopyPartID}
                           actions={props.actions}
@@ -1049,6 +1074,14 @@ export function AssistantMessageDisplay(props: {
                   <Show when={item()}>
                     <Part
                       part={item()!}
+                      recoveredTools={
+                        entryAccessor().type === "part"
+                          ? (entryAccessor() as Extract<PartGroup, { type: "part" }>).recovered?.flatMap((ref) => {
+                              const previous = part().get(ref.partID)
+                              return previous?.type === "tool" ? [previous] : []
+                            })
+                          : undefined
+                      }
                       message={props.message}
                       showAssistantCopyPartID={props.showAssistantCopyPartID}
                       actions={props.actions}
@@ -1073,12 +1106,18 @@ export function ContextToolGroup(props: {
   onSizeChange?: () => void
 }) {
   const i18n = useI18n()
+  const data = useData()
   const [localOpen, setLocalOpen] = createSignal(false)
   const open = () => props.open ?? localOpen()
-  const pending = createMemo(
-    () =>
-      !!props.busy || props.parts.some((part) => part.state.status === "pending" || part.state.status === "running"),
+  const pending = createMemo(() =>
+    props.parts.some(
+      (part) =>
+        (part.state.status === "pending" || part.state.status === "running") &&
+        ownsPart(data.store.session_status[part.sessionID], part),
+    ),
   )
+  const interrupted = () =>
+    !pending() && props.parts.some((part) => part.state.status === "pending" || part.state.status === "running")
   const summary = createMemo(() => contextToolSummary(props.parts))
   const handleOpenChange = (value: boolean) => {
     if (props.open === undefined) setLocalOpen(value)
@@ -1104,7 +1143,7 @@ export function ContextToolGroup(props: {
               <ToolStatusTitle
                 active={pending()}
                 activeText={i18n.t("ui.sessionTurn.status.gatheringContext")}
-                doneText={i18n.t("ui.sessionTurn.status.gatheredContext")}
+                doneText={i18n.t(interrupted() ? "ui.message.interrupted" : "ui.sessionTurn.status.gatheredContext")}
                 split={false}
               />
             </span>
@@ -1140,7 +1179,9 @@ export function ContextToolGroup(props: {
             {(partAccessor) => {
               const trigger = createMemo(() => contextToolTrigger(partAccessor(), i18n))
               const running = createMemo(
-                () => partAccessor().state.status === "pending" || partAccessor().state.status === "running",
+                () =>
+                  (partAccessor().state.status === "pending" || partAccessor().state.status === "running") &&
+                  ownsPart(data.store.session_status[partAccessor().sessionID], partAccessor()),
               )
               return (
                 <div data-slot="context-tool-group-item">
@@ -1151,6 +1192,15 @@ export function ContextToolGroup(props: {
                           <div data-slot="basic-tool-tool-info-main">
                             <span data-slot="basic-tool-tool-title">
                               <TextShimmer text={trigger().title} active={running()} />
+                              <Show
+                                when={
+                                  !running() &&
+                                  (partAccessor().state.status === "pending" ||
+                                    partAccessor().state.status === "running")
+                                }
+                              >
+                                <span class="text-12-regular text-text-weak"> {i18n.t("ui.message.interrupted")}</span>
+                              </Show>
                             </span>
                             <Show when={trigger().subtitle}>
                               <span data-slot="basic-tool-tool-subtitle">{trigger().subtitle}</span>
@@ -1169,6 +1219,9 @@ export function ContextToolGroup(props: {
                     images={partAccessor().tool === "read" ? readToolImages(partAccessor().state) : []}
                     filename={trigger().subtitle}
                     onContentRendered={props.onSizeChange}
+                    sessionID={partAccessor().sessionID}
+                    messageID={partAccessor().messageID}
+                    partID={partAccessor().id}
                   />
                 </div>
               )
@@ -1495,6 +1548,7 @@ export function Part(props: MessagePartProps) {
       <Dynamic
         component={component()}
         part={props.part}
+        recoveredTools={props.recoveredTools}
         message={props.message}
         hideDetails={props.hideDetails}
         defaultOpen={props.defaultOpen}
@@ -1518,6 +1572,8 @@ export interface ToolProps {
   attachments?: FilePart[]
   tool: string
   sessionID?: string
+  messageID?: string
+  partID?: string
   output?: string
   status?: string
   hideDetails?: boolean
@@ -1595,6 +1651,9 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
   const data = useData()
   const i18n = useI18n()
   const part = () => props.part as ToolPart
+  const active = () => ownsAssistant(data.store.session_status[props.message.sessionID], props.message)
+  const displayStatus = () => displayedToolStatus(part().state.status, active())
+  const [recoveryOpen, setRecoveryOpen] = createSignal(false)
   if (part().tool === "todowrite") return null
 
   const hideQuestion = createMemo(
@@ -1651,6 +1710,7 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
                 <ToolErrorCard
                   tool={part().tool}
                   error={error()}
+                  input={input()}
                   title={
                     part().tool === "websearch" ? webSearchProviderLabel(partMetadata().provider, i18n) : undefined
                   }
@@ -1677,11 +1737,13 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
               input={input()}
               tool={part().tool}
               sessionID={part().sessionID}
+              messageID={part().messageID}
+              partID={part().id}
               metadata={partMetadata()}
               attachments={attachments()}
               // @ts-expect-error
               output={part().state.output}
-              status={part().state.status}
+              status={displayStatus()}
               hideDetails={props.hideDetails}
               defaultOpen={props.defaultOpen}
               open={controlledOpen()}
@@ -1692,6 +1754,28 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
             />
           </Match>
         </Switch>
+        <Show when={displayStatus() === "interrupted"}>
+          <span class="text-12-regular text-text-weak">{i18n.t("ui.message.interrupted")}</span>
+        </Show>
+        <Show when={props.recoveredTools?.length}>
+          <details
+            data-component="tool-recovered-attempts"
+            onToggle={(event) => setRecoveryOpen(event.currentTarget.open)}
+          >
+            <summary class="text-12-regular text-text-weak">{i18n.t("ui.tool.recovered")}</summary>
+            <Show when={recoveryOpen()}>
+              <For each={props.recoveredTools}>
+                {(previous) => (
+                  <ToolDetails
+                    tool={previous.tool}
+                    input={previous.state.input}
+                    error={previous.state.status === "error" ? previous.state.error : undefined}
+                  />
+                )}
+              </For>
+            </Show>
+          </details>
+        </Show>
       </div>
     </Show>
   )
@@ -1766,9 +1850,7 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
     return items.filter((x) => !!x).join(" \u00B7 ")
   })
 
-  const streaming = createMemo(
-    () => props.message.role === "assistant" && typeof (props.message as AssistantMessage).time.completed !== "number",
-  )
+  const streaming = createMemo(() => ownsAssistant(data.store.session_status[props.message.sessionID], props.message))
   const text = () => readPartText(data.store.part_text_accum_delta, part())
   const isLastTextPart = createMemo(() => {
     const last = (data.store.part?.[props.message.id] ?? [])
@@ -1847,7 +1929,9 @@ PART_MAPPING["reasoning"] = function ReasoningPartDisplay(props) {
   const data = useData()
   const part = () => props.part as ReasoningPart
   const streaming = createMemo(
-    () => props.message.role === "assistant" && typeof (props.message as AssistantMessage).time.completed !== "number",
+    () =>
+      ownsAssistant(data.store.session_status[props.message.sessionID], props.message) &&
+      typeof part().time?.end !== "number",
   )
   const text = () => readPartText(data.store.part_text_accum_delta, part())
 
@@ -1864,31 +1948,11 @@ function ReadImageAttachments(props: {
   images: readonly RecordedReadImage[]
   filename?: string
   onContentRendered?: () => void
+  sessionID?: string
+  messageID?: string
+  partID?: string
 }) {
-  const dialog = useDialog(),
-    i18n = useI18n()
-  return (
-    <Show when={props.images.length}>
-      <div data-component="read-image-attachments">
-        <For each={props.images}>
-          {(image) => {
-            const filename = () => getFilename(image.filename || props.filename || i18n.t("ui.imagePreview.alt"))
-            return (
-              <button
-                type="button"
-                data-slot="read-image-thumbnail"
-                aria-label={i18n.t("ui.tool.enlargeImage", { filename: filename() })}
-                title={filename()}
-                onClick={() => dialog.show(() => <ImagePreview src={image.url} alt={filename()} />)}
-              >
-                <img src={image.url} alt={filename()} loading="lazy" onLoad={() => props.onContentRendered?.()} />
-              </button>
-            )
-          }}
-        </For>
-      </div>
-    </Show>
-  )
+  return <ReadImageCard {...props} />
 }
 
 ToolRegistry.register({
@@ -1921,6 +1985,9 @@ ToolRegistry.register({
           images={images()}
           filename={typeof props.input.filePath === "string" ? getFilename(props.input.filePath) : undefined}
           onContentRendered={props.onContentRendered}
+          sessionID={props.sessionID}
+          messageID={props.messageID}
+          partID={props.partID}
         />
         <For each={loaded()}>
           {(filepath) => (

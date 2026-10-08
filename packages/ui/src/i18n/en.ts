@@ -1,4 +1,6 @@
 export const dict: Record<string, string> = {
+  "ui.imageRead.open": "Open image",
+  "ui.imageRead.dimensions": "{{width}} × {{height}} px",
   "ui.artifact.revision": "Revision {{revision}}", "ui.artifact.preparing": "Preparing preview…", "ui.artifact.error": "Preview unavailable",
   "ui.plan.writing": "Writing plan…", "ui.plan.title": "Proposed plan", "ui.plan.export": "Export", "ui.plan.open": "Open plan", "ui.plan.implement": "Implement this plan", "ui.plan.expand": "Expand plan", "ui.plan.collapse": "Collapse plan",
   "ui.sessionReview.title": "Session changes",
@@ -172,6 +174,17 @@ export const dict: Record<string, string> = {
   "ui.tool.skill": "Skill",
 
   "ui.basicTool.called": "Called `{{tool}}`",
+  "ui.tool.artifact.create": "Create document",
+  "ui.tool.artifact.script": "Run document script",
+  "ui.tool.artifact.publish": "Publish document",
+  "ui.tool.artifact.pages": "View document pages",
+  "ui.tool.artifact.inspect": "Inspect document",
+  "ui.tool.image.generate": "Generate image",
+  "ui.tool.details": "Details",
+  "ui.tool.arguments": "Arguments",
+  "ui.tool.output": "Output",
+  "ui.tool.rawName": "Tool name",
+  "ui.tool.recovered": "Recovered after retry",
   "ui.toolErrorCard.failed": "Failed",
   "ui.toolErrorCard.copyError": "Copy error",
 

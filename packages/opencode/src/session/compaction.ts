@@ -22,6 +22,7 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { buildPrompt } from "@opencode-ai/core/session/compaction"
 import { SessionCompactionEvent } from "@opencode-ai/schema/session-compaction-event"
+import { applyContextWindow } from "./context-window"
 
 export const Event = SessionCompactionEvent
 
@@ -356,10 +357,11 @@ const layer = Layer.effect(
       }
 
       const agent = yield* agents.get("compaction")
-      const model = agent.model
+      const originalModel = agent.model
         ? yield* provider.getModel(agent.model.providerID, agent.model.modelID).pipe(Effect.orDie)
         : yield* provider.getModel(userMessage.model.providerID, userMessage.model.modelID).pipe(Effect.orDie)
       const cfg = yield* config.get()
+      const model = applyContextWindow(originalModel, agent.model ? undefined : userMessage.model.contextWindow, cfg.compaction?.reserved)
       const history = compactionPart && messages.at(-1)?.info.id === input.parentID ? messages.slice(0, -1) : messages
       const prior = completedCompactions(history)
       const hidden = new Set(prior.flatMap((item) => [item.userIndex, item.assistantIndex]))
@@ -398,6 +400,7 @@ const layer = Layer.effect(
         mode: "compaction",
         agent: "compaction",
         variant: userMessage.model.variant,
+        contextWindow: model.contextWindow,
         summary: true,
         path: {
           cwd: ctx.directory,

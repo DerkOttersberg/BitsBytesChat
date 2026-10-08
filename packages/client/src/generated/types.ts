@@ -21,10 +21,6 @@ export type InvalidRequestError = {
 export const isInvalidRequestError = (value: unknown): value is InvalidRequestError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "InvalidRequestError"
 
-export type InvalidCursorError = { readonly _tag: "InvalidCursorError"; readonly message: string }
-export const isInvalidCursorError = (value: unknown): value is InvalidCursorError =>
-  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "InvalidCursorError"
-
 export type SessionNotFoundError = {
   readonly _tag: "SessionNotFoundError"
   readonly sessionID: string
@@ -32,6 +28,10 @@ export type SessionNotFoundError = {
 }
 export const isSessionNotFoundError = (value: unknown): value is SessionNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "SessionNotFoundError"
+
+export type InvalidCursorError = { readonly _tag: "InvalidCursorError"; readonly message: string }
+export const isInvalidCursorError = (value: unknown): value is InvalidCursorError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "InvalidCursorError"
 
 export type ConflictError = {
   readonly _tag: "ConflictError"
@@ -103,6 +103,223 @@ export const isProjectCopyError = (value: unknown): value is ProjectCopyError =>
 
 export type HealthGetOutput = { readonly healthy: true }
 
+export type OrganizationProjectsOutput = ReadonlyArray<{
+  readonly id: string
+  readonly name: string
+  readonly directory?: string
+  readonly pinned: boolean
+  readonly order: number
+  readonly created: number
+  readonly updated: number
+  readonly count: number
+}>
+
+export type OrganizationCreateInput = {
+  readonly name: { readonly name: string; readonly directory?: string }["name"]
+  readonly directory?: { readonly name: string; readonly directory?: string }["directory"]
+}
+
+export type OrganizationCreateOutput = {
+  readonly id: string
+  readonly name: string
+  readonly directory?: string
+  readonly pinned: boolean
+  readonly order: number
+  readonly created: number
+  readonly updated: number
+  readonly count: number
+}
+
+export type OrganizationUpdateInput = {
+  readonly id: { readonly id: string }["id"]
+  readonly name?: {
+    readonly name?: string
+    readonly directory?: string | null
+    readonly pinned?: boolean
+    readonly order?: number
+  }["name"]
+  readonly directory?: {
+    readonly name?: string
+    readonly directory?: string | null
+    readonly pinned?: boolean
+    readonly order?: number
+  }["directory"]
+  readonly pinned?: {
+    readonly name?: string
+    readonly directory?: string | null
+    readonly pinned?: boolean
+    readonly order?: number
+  }["pinned"]
+  readonly order?: {
+    readonly name?: string
+    readonly directory?: string | null
+    readonly pinned?: boolean
+    readonly order?: number
+  }["order"]
+}
+
+export type OrganizationUpdateOutput = {
+  readonly id: string
+  readonly name: string
+  readonly directory?: string
+  readonly pinned: boolean
+  readonly order: number
+  readonly created: number
+  readonly updated: number
+  readonly count: number
+}
+
+export type OrganizationRemoveInput = { readonly id: { readonly id: string }["id"] }
+
+export type OrganizationRemoveOutput = void
+
+export type OrganizationChatsInput = {
+  readonly limit?: {
+    readonly limit?: number
+    readonly cursor?: string
+    readonly projectID?: string | null
+    readonly archived?: boolean
+    readonly pinned?: boolean
+    readonly search?: string
+    readonly sort?: "updated" | "created"
+  }["limit"]
+  readonly cursor?: {
+    readonly limit?: number
+    readonly cursor?: string
+    readonly projectID?: string | null
+    readonly archived?: boolean
+    readonly pinned?: boolean
+    readonly search?: string
+    readonly sort?: "updated" | "created"
+  }["cursor"]
+  readonly projectID?: {
+    readonly limit?: number
+    readonly cursor?: string
+    readonly projectID?: string | null
+    readonly archived?: boolean
+    readonly pinned?: boolean
+    readonly search?: string
+    readonly sort?: "updated" | "created"
+  }["projectID"]
+  readonly archived?: {
+    readonly limit?: number
+    readonly cursor?: string
+    readonly projectID?: string | null
+    readonly archived?: boolean
+    readonly pinned?: boolean
+    readonly search?: string
+    readonly sort?: "updated" | "created"
+  }["archived"]
+  readonly pinned?: {
+    readonly limit?: number
+    readonly cursor?: string
+    readonly projectID?: string | null
+    readonly archived?: boolean
+    readonly pinned?: boolean
+    readonly search?: string
+    readonly sort?: "updated" | "created"
+  }["pinned"]
+  readonly search?: {
+    readonly limit?: number
+    readonly cursor?: string
+    readonly projectID?: string | null
+    readonly archived?: boolean
+    readonly pinned?: boolean
+    readonly search?: string
+    readonly sort?: "updated" | "created"
+  }["search"]
+  readonly sort?: {
+    readonly limit?: number
+    readonly cursor?: string
+    readonly projectID?: string | null
+    readonly archived?: boolean
+    readonly pinned?: boolean
+    readonly search?: string
+    readonly sort?: "updated" | "created"
+  }["sort"]
+}
+
+export type OrganizationChatsOutput = {
+  readonly data: ReadonlyArray<{
+    readonly id: string
+    readonly title: string
+    readonly directory: string
+    readonly projectID?: string
+    readonly projectName?: string
+    readonly pinned: boolean
+    readonly order: number
+    readonly created: number
+    readonly updated: number
+    readonly archived?: number
+  }>
+  readonly next?: string
+}
+
+export type OrganizationChatInput = {
+  readonly sessionID: { readonly sessionID: string }["sessionID"]
+  readonly title?: {
+    readonly title?: string
+    readonly projectID?: string | null
+    readonly pinned?: boolean
+    readonly order?: number
+    readonly archived?: boolean
+  }["title"]
+  readonly projectID?: {
+    readonly title?: string
+    readonly projectID?: string | null
+    readonly pinned?: boolean
+    readonly order?: number
+    readonly archived?: boolean
+  }["projectID"]
+  readonly pinned?: {
+    readonly title?: string
+    readonly projectID?: string | null
+    readonly pinned?: boolean
+    readonly order?: number
+    readonly archived?: boolean
+  }["pinned"]
+  readonly order?: {
+    readonly title?: string
+    readonly projectID?: string | null
+    readonly pinned?: boolean
+    readonly order?: number
+    readonly archived?: boolean
+  }["order"]
+  readonly archived?: {
+    readonly title?: string
+    readonly projectID?: string | null
+    readonly pinned?: boolean
+    readonly order?: number
+    readonly archived?: boolean
+  }["archived"]
+}
+
+export type OrganizationChatOutput = {
+  readonly id: string
+  readonly title: string
+  readonly directory: string
+  readonly projectID?: string
+  readonly projectName?: string
+  readonly pinned: boolean
+  readonly order: number
+  readonly created: number
+  readonly updated: number
+  readonly archived?: number
+}
+
+export type OrganizationMigrateInput = {
+  readonly projects: {
+    readonly projects: ReadonlyArray<{ readonly directory: string; readonly name?: string }>
+    readonly defaultDirectory?: string
+  }["projects"]
+  readonly defaultDirectory?: {
+    readonly projects: ReadonlyArray<{ readonly directory: string; readonly name?: string }>
+    readonly defaultDirectory?: string
+  }["defaultDirectory"]
+}
+
+export type OrganizationMigrateOutput = void
+
 export type LocationGetInput = {
   readonly location?: {
     readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
@@ -129,7 +346,12 @@ export type AgentsListOutput = {
   }
   readonly data: ReadonlyArray<{
     readonly id: string
-    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly model?: {
+      readonly id: string
+      readonly providerID: string
+      readonly variant?: string
+      readonly contextWindow?: number
+    }
     readonly request: {
       readonly headers: { readonly [x: string]: string }
       readonly body: { readonly [x: string]: JsonValue }
@@ -237,7 +459,12 @@ export type SessionsListOutput = {
     readonly parentID?: string
     readonly projectID: string
     readonly agent?: string
-    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly model?: {
+      readonly id: string
+      readonly providerID: string
+      readonly variant?: string
+      readonly contextWindow?: number
+    }
     readonly cost: number
     readonly tokens: {
       readonly input: number
@@ -270,25 +497,45 @@ export type SessionsCreateInput = {
   readonly id?: {
     readonly id?: string | null
     readonly agent?: string | null
-    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+    readonly model?: {
+      readonly id: string
+      readonly providerID: string
+      readonly variant?: string
+      readonly contextWindow?: number
+    } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
   }["id"]
   readonly agent?: {
     readonly id?: string | null
     readonly agent?: string | null
-    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+    readonly model?: {
+      readonly id: string
+      readonly providerID: string
+      readonly variant?: string
+      readonly contextWindow?: number
+    } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
   }["agent"]
   readonly model?: {
     readonly id?: string | null
     readonly agent?: string | null
-    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+    readonly model?: {
+      readonly id: string
+      readonly providerID: string
+      readonly variant?: string
+      readonly contextWindow?: number
+    } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
   }["model"]
   readonly location?: {
     readonly id?: string | null
     readonly agent?: string | null
-    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+    readonly model?: {
+      readonly id: string
+      readonly providerID: string
+      readonly variant?: string
+      readonly contextWindow?: number
+    } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
   }["location"]
 }
@@ -299,7 +546,12 @@ export type SessionsCreateOutput = {
     readonly parentID?: string
     readonly projectID: string
     readonly agent?: string
-    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly model?: {
+      readonly id: string
+      readonly providerID: string
+      readonly variant?: string
+      readonly contextWindow?: number
+    }
     readonly cost: number
     readonly tokens: {
       readonly input: number
@@ -327,7 +579,14 @@ export type SessionsCreateOutput = {
   }
 }["data"]
 
-export type SessionsActiveOutput = { readonly data: { readonly [x: string]: { readonly type: "running" } } }["data"]
+export type SessionsActiveOutput = {
+  readonly data: {
+    readonly [x: string]: {
+      readonly type: "running"
+      readonly owner?: { readonly runEpoch: string; readonly inputID: string; readonly assistantID?: string }
+    }
+  }
+}["data"]
 
 export type SessionsGetInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
@@ -337,7 +596,12 @@ export type SessionsGetOutput = {
     readonly parentID?: string
     readonly projectID: string
     readonly agent?: string
-    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly model?: {
+      readonly id: string
+      readonly providerID: string
+      readonly variant?: string
+      readonly contextWindow?: number
+    }
     readonly cost: number
     readonly tokens: {
       readonly input: number
@@ -375,7 +639,12 @@ export type SessionsSwitchAgentOutput = void
 export type SessionsSwitchModelInput = {
   readonly sessionID: { readonly sessionID: string }["sessionID"]
   readonly model: {
-    readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly model: {
+      readonly id: string
+      readonly providerID: string
+      readonly variant?: string
+      readonly contextWindow?: number
+    }
   }["model"]
 }
 
@@ -540,7 +809,12 @@ export type SessionsContextOutput = {
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
         readonly type: "model-switched"
-        readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+        readonly model: {
+          readonly id: string
+          readonly providerID: string
+          readonly variant?: string
+          readonly contextWindow?: number
+        }
       }
     | {
         readonly id: string
@@ -590,7 +864,12 @@ export type SessionsContextOutput = {
         readonly time: { readonly created: number; readonly completed?: number }
         readonly type: "assistant"
         readonly agent: string
-        readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+        readonly model: {
+          readonly id: string
+          readonly providerID: string
+          readonly variant?: string
+          readonly contextWindow?: number
+        }
         readonly content: ReadonlyArray<
           | { readonly type: "text"; readonly id: string; readonly text: string }
           | {
@@ -711,7 +990,12 @@ export type SessionsHistoryOutput = {
           readonly timestamp: number
           readonly sessionID: string
           readonly messageID: string
-          readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+          readonly model: {
+            readonly id: string
+            readonly providerID: string
+            readonly variant?: string
+            readonly contextWindow?: number
+          }
         }
       }
     | {
@@ -845,7 +1129,12 @@ export type SessionsHistoryOutput = {
           readonly sessionID: string
           readonly assistantMessageID: string
           readonly agent: string
-          readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+          readonly model: {
+            readonly id: string
+            readonly providerID: string
+            readonly variant?: string
+            readonly contextWindow?: number
+          }
           readonly snapshot?: string
         }
       }
@@ -1169,7 +1458,12 @@ export type SessionsEventsOutput =
         readonly timestamp: number
         readonly sessionID: string
         readonly messageID: string
-        readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+        readonly model: {
+          readonly id: string
+          readonly providerID: string
+          readonly variant?: string
+          readonly contextWindow?: number
+        }
       }
     }
   | {
@@ -1303,7 +1597,12 @@ export type SessionsEventsOutput =
         readonly sessionID: string
         readonly assistantMessageID: string
         readonly agent: string
-        readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+        readonly model: {
+          readonly id: string
+          readonly providerID: string
+          readonly variant?: string
+          readonly contextWindow?: number
+        }
         readonly snapshot?: string
       }
     }
@@ -1618,7 +1917,12 @@ export type SessionsMessageOutput = {
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
         readonly type: "model-switched"
-        readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+        readonly model: {
+          readonly id: string
+          readonly providerID: string
+          readonly variant?: string
+          readonly contextWindow?: number
+        }
       }
     | {
         readonly id: string
@@ -1668,7 +1972,12 @@ export type SessionsMessageOutput = {
         readonly time: { readonly created: number; readonly completed?: number }
         readonly type: "assistant"
         readonly agent: string
-        readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+        readonly model: {
+          readonly id: string
+          readonly providerID: string
+          readonly variant?: string
+          readonly contextWindow?: number
+        }
         readonly content: ReadonlyArray<
           | { readonly type: "text"; readonly id: string; readonly text: string }
           | {
@@ -1790,7 +2099,12 @@ export type MessagesListOutput = {
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
         readonly type: "model-switched"
-        readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+        readonly model: {
+          readonly id: string
+          readonly providerID: string
+          readonly variant?: string
+          readonly contextWindow?: number
+        }
       }
     | {
         readonly id: string
@@ -1840,7 +2154,12 @@ export type MessagesListOutput = {
         readonly time: { readonly created: number; readonly completed?: number }
         readonly type: "assistant"
         readonly agent: string
-        readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+        readonly model: {
+          readonly id: string
+          readonly providerID: string
+          readonly variant?: string
+          readonly contextWindow?: number
+        }
         readonly content: ReadonlyArray<
           | { readonly type: "text"; readonly id: string; readonly text: string }
           | {
@@ -2516,7 +2835,12 @@ export type CommandsListOutput = {
     readonly template: string
     readonly description?: string
     readonly agent?: string
-    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly model?: {
+      readonly id: string
+      readonly providerID: string
+      readonly variant?: string
+      readonly contextWindow?: number
+    }
     readonly subtask?: boolean
   }>
 }

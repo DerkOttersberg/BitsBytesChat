@@ -1,0 +1,11 @@
+{
+  "name": "Bits & Bytes Chat",
+  "short_name": "Bits & Bytes",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "icons": [{ "src": "/bitsbytes-icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }],
+  "theme_color": "#080808",
+  "background_color": "#080808",
+  "display": "standalone"
+}

@@ -6,6 +6,7 @@ import { SessionsCursor } from "@opencode-ai/protocol/groups/session"
 import {
   ConflictError,
   InvalidCursorError,
+  InvalidRequestError,
   MessageNotFoundError,
   ServiceUnavailableError,
   SessionNotFoundError,
@@ -74,16 +75,17 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
               agent: ctx.payload.agent,
               model: ctx.payload.model,
               location: ctx.payload.location ?? { directory: AbsolutePath.make(process.cwd()) },
-            }),
+            }).pipe(Effect.catchTag("SessionRunnerModel.ContextWindowUnavailableError", error => Effect.fail(new InvalidRequestError({ message: error.message })))),
           }
         }),
       )
       .handle(
         "session.active",
         Effect.fn(function* () {
+          const owners = yield* session.ownership ?? Effect.succeed(new Map())
           return {
             data: Object.fromEntries(
-              Array.from(yield* session.active, (sessionID) => [sessionID, { type: "running" as const }]),
+              Array.from(yield* session.active, (sessionID) => [sessionID, { type: "running" as const, ...(owners.get(sessionID) ? { owner: owners.get(sessionID) } : {}) }]),
             ),
           }
         }),
@@ -125,6 +127,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         "session.switchModel",
         Effect.fn(function* (ctx) {
           yield* session.switchModel({ sessionID: ctx.params.sessionID, model: ctx.payload.model }).pipe(
+            Effect.catchTag("SessionRunnerModel.ContextWindowUnavailableError", error => Effect.fail(new InvalidRequestError({ message: error.message }))),
             Effect.catchTag("Session.NotFoundError", (error) =>
               Effect.fail(
                 new SessionNotFoundError({
@@ -150,6 +153,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                 resume: ctx.payload.resume,
               })
               .pipe(
+                Effect.catchTag("SessionRunnerModel.ContextWindowUnavailableError", error => Effect.fail(new InvalidRequestError({ message: error.message }))),
                 Effect.catchTag("Session.NotFoundError", (error) =>
                   Effect.fail(
                     new SessionNotFoundError({

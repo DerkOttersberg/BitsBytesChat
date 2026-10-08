@@ -1,4 +1,4 @@
-import { For, Show, Switch, Match, createEffect, onCleanup, onMount, untrack, type JSX } from "solid-js"
+import { For, Show, Switch, Match, createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type JSX } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
 import { Icon } from "@opencode-ai/ui/icon"
@@ -20,7 +20,9 @@ import { usePrompt } from "../../context/prompt"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { sampledChecksum } from "@opencode-ai/core/util/encode"
 import type { FollowupDraft } from "../../components/prompt-input/submit"
-import { readPanelState, savePanelState, type PanelTab } from "./chat-workspace-state"
+import { readPanelState, savePanelState, workspacePanelLayout, type PanelTab } from "./chat-workspace-state"
+import { isMarkdownName, MarkdownArtifactPanel } from "./markdown-panel"
+import { RecordedImagePanel } from "./recorded-image-panel"
 import "./chat-workspace.css"
 
 type SideChatSource = {
@@ -51,6 +53,16 @@ export function ChatWorkspace(props: {
     menu: false,
     width: 520,
     busy: false,
+  })
+  let workspace!: HTMLDivElement
+  const [workspaceWidth, setWorkspaceWidth] = createSignal(0)
+  const panelLayout = createMemo(() => workspacePanelLayout(workspaceWidth(), store.width))
+  onMount(() => {
+    const update = () => setWorkspaceWidth(workspace.getBoundingClientRect().width)
+    const observer = new ResizeObserver(update)
+    observer.observe(workspace)
+    update()
+    onCleanup(() => observer.disconnect())
   })
   const catalog = new Map<
     string,
@@ -95,8 +107,7 @@ export function ChatWorkspace(props: {
         .bitsbytes!.call("side.close", { sessionID: tab.id, ownerID: tab.owner || workspaceOwner })
         .then(() => {
           if (token !== generation) return
-          setStore("tabs", (rows) => rows.filter((row) => row.id !== tab.id))
-          if (store.active === tab.id) setStore("active", store.tabs.at(-1)?.id ?? "")
+          remove(tab.id)
         })
         .catch((error) => {
           if (token === generation) fail(error)
@@ -105,9 +116,17 @@ export function ChatWorkspace(props: {
     }
     if (tab.kind === "file") session.tabs().close(tab.id)
     if (tab.kind === "browser") void platform.bitsbytes!.call("browser.close", { id: tab.id }).catch(fail)
-    setStore("tabs", (rows) => rows.filter((row) => row.id !== tab.id))
-    if (store.active === tab.id) setStore("active", store.tabs.at(-1)?.id ?? "")
+    remove(tab.id)
     if (tab.kind === "terminal") session.view().terminal.close()
+  }
+  const remove = (id: string) => {
+    const index = store.tabs.findIndex((tab) => tab.id === id)
+    const tabs = store.tabs.filter((tab) => tab.id !== id)
+    setStore({
+      tabs,
+      active: store.active === id ? (tabs[Math.min(index, tabs.length - 1)]?.id ?? "") : store.active,
+      ...(!tabs.length ? { active: "", collapsed: true, menu: false } : {}),
+    })
   }
   let savedKey = ""
   let savedWritable = true
@@ -121,13 +140,14 @@ export function ChatWorkspace(props: {
       if (tab.kind === "chat" && tab.owner)
         void platform.bitsbytes!.call("side.close", { sessionID: tab.id, ownerID: tab.owner }).catch(() => undefined)
     savedKey = key
-    const stored = readPanelState(localStorage, key, Math.max(400, window.innerWidth * 0.7))
+    const stored = readPanelState(localStorage, key)
     savedWritable = stored.writable
     const tabs = stored.value.tabs.filter((tab) => tab.kind !== "chat")
     setStore(
       reconcile({
         ...stored.value,
         tabs,
+        collapsed: !tabs.length || stored.value.collapsed,
         active: tabs.some((tab) => tab.id === stored.value.active) ? stored.value.active : (tabs.at(-1)?.id ?? ""),
         menu: false,
         busy: false,
@@ -174,6 +194,31 @@ export function ChatWorkspace(props: {
     )
   }
   onMount(() => {
+    const recordedImage = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (!detail || detail.handled || typeof detail.sessionID !== "string") return
+      const imageOwner = detail.sessionID
+      const belongs = () => imageOwner === owner() || store.tabs.some(tab => tab.kind === "chat" && tab.id === imageOwner && tab.owner === owner())
+      if (!belongs()) return
+      detail.handled = true
+      const token = generation,
+        identity = owner()
+      void platform
+        .bitsbytes!.call<{ id: string }>("image.snapshot", detail)
+        .then((image) => {
+          if (generation !== token || owner() !== identity || !belongs() || !/^[a-f0-9]{64}$/.test(image.id)) return
+          add({
+            id: "read-image:" + image.id,
+            kind: "image",
+            title: String(detail.filename || language.t("organization.image")),
+            owner: imageOwner,
+            uri: image.id,
+          })
+        })
+        .catch(fail)
+    }
+    window.addEventListener("bitsbytes:open-recorded-image", recordedImage)
+    onCleanup(() => window.removeEventListener("bitsbytes:open-recorded-image", recordedImage))
     const unsubscribe = platform.bitsbytes!.subscribe((event) => {
       if (event.type === "artifact")
         artifact(event.artifact as Parameters<typeof artifact>[0], event.published === true)
@@ -182,8 +227,7 @@ export function ChatWorkspace(props: {
         (event.sessionID === owner() || store.tabs.some((tab) => tab.kind === "chat" && tab.id === event.sessionID))
       ) {
         if (event.closed) {
-          setStore("tabs", (rows) => rows.filter((tab) => tab.id !== event.id))
-          if (store.active === event.id) setStore("active", store.tabs.at(-1)?.id ?? "")
+          remove(String(event.id))
           return
         }
         const existing = store.tabs.some((tab) => tab.id === event.id)
@@ -526,26 +570,37 @@ export function ChatWorkspace(props: {
     </MenuV2>
   )
   const panelToggle = () => (
-    <PanelToggle expanded={!store.collapsed} onToggle={() => setStore({ collapsed: !store.collapsed, menu: false })} />
+    <PanelToggle
+      expanded={!store.collapsed}
+      onToggle={() => setStore({ collapsed: !store.collapsed, menu: !store.tabs.length && store.collapsed })}
+    />
   )
   return (
-    <div class="bb-workspace">
-      <div class="bb-workspace-chat" data-bb-chat={owner()}>
+    <div class="bb-workspace" ref={workspace}>
+      <div
+        class="bb-workspace-chat"
+        data-bb-chat={owner()}
+        inert={panelLayout().overlay && !store.collapsed}
+        aria-hidden={panelLayout().overlay && !store.collapsed ? true : undefined}
+      >
         {props.chat(panelToggle())}
       </div>
       <Show when={store.tabs.length || !store.collapsed}>
         <aside
           class="bb-workspace-panel"
-          style={{ width: store.collapsed ? "0px" : `${store.width}px`, display: store.collapsed ? "none" : "flex" }}
+          classList={{ "bb-workspace-panel-overlay": panelLayout().overlay }}
+          style={{ width: `${panelLayout().width}px`, display: store.collapsed ? "none" : "flex" }}
         >
-          <ResizeHandle
-            direction="horizontal"
-            edge="start"
-            size={store.width}
-            min={340}
-            max={Math.max(400, window.innerWidth * 0.7)}
-            onResize={(width) => setStore("width", width)}
-          />
+          <Show when={!panelLayout().overlay}>
+            <ResizeHandle
+              direction="horizontal"
+              edge="start"
+              size={panelLayout().width}
+              min={340}
+              max={panelLayout().maximum}
+              onResize={(width) => setStore("width", width)}
+            />
+          </Show>
           <div class="bb-panel-header">
             <div class="bb-panel-tabs" role="tablist">
               <For each={store.tabs}>
@@ -579,6 +634,9 @@ export function ChatWorkspace(props: {
             <Show when={!store.collapsed}>
               <div class="bb-panel-add">{panelMenu()}</div>
             </Show>
+            <Show when={panelLayout().overlay}>
+              <div class="bb-panel-collapse">{panelToggle()}</div>
+            </Show>
           </div>
           <div class="bb-panel-body">
             <For each={store.tabs}>
@@ -594,7 +652,21 @@ export function ChatWorkspace(props: {
                       <SessionFileView tab={tab.path ? file.tab(tab.path) : tab.id} />
                     </Match>
                     <Match when={tab.kind === "code"}>
-                      <ArtifactCodePanel id={tab.id} name={tab.title} revision={tab.previewRevision} />
+                      <Show
+                        when={isMarkdownName(tab.title)}
+                        fallback={<ArtifactCodePanel id={tab.id} name={tab.title} revision={tab.previewRevision} />}
+                      >
+                        <MarkdownArtifactPanel
+                          id={tab.id}
+                          name={tab.title}
+                          revision={tab.previewRevision}
+                          path={tab.path}
+                          sessionID={tab.owner}
+                        />
+                      </Show>
+                    </Match>
+                    <Match when={tab.kind === "image" && tab.uri}>
+                      <RecordedImagePanel id={tab.uri!} name={tab.title} sessionID={tab.owner} />
                     </Match>
                     <Match when={tab.kind === "document" && platform.documentPanel}>
                       <Dynamic component={platform.documentPanel} id={tab.id} revision={tab.previewRevision} />

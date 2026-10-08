@@ -32,7 +32,7 @@ Follow-up: editing restores the queued request in the ordinary composer without 
 Implemented using the accepted Codex-style refinement: full composer width, 16px rail corners, compact grip/Steer/menu/delete controls and a scrolling list capped at 30dvh. This supersedes the earlier 520px/half-height suggestion. Narrow windows remain within the composer. Edit removes the row from this rail until Send or Cancel.
 
 7. Viewed PNG, thumbnail and enlargement
-Implemented. Successful recorded PNG/JPEG/GIF/WebP reads show Viewed image and an accessible 64×48 thumbnail opening the existing preview dialog. The preview uses bytes recorded in the tool result. Changing the file afterward does not change historical evidence. A filename, failed call or unsupported attachment alone does not create a viewed-image claim.
+Implemented. Successful recorded PNG/JPEG/GIF/WebP reads show Viewed image, decoded dimensions, an accessible thumbnail and Open image. Opening creates a recorded-image side-panel tab and retains the preceding document tab. Reading alone does not change the current panel. The preview uses bytes recorded in the tool result; changing the original does not change historical evidence. A filename, failed call or unsupported attachment alone does not create a viewed-image claim.
 
 8. Ctrl+W closing the whole Windows app
 Implemented. The Windows/Linux native menu fallback no longer binds Ctrl+W to closing the app. Renderer tab shortcuts remain responsible for their own tabs/dialogs. Native checks exercise draft, chat, Settings and side-panel focus states with the app retained.
@@ -72,4 +72,16 @@ The engine exposes only read, glob, grep and parent_progress in diagnostic sessi
 Implemented. Successful ordinary admission dismisses the completed compact summary using a marker tied to that Goal ID. Failed/uncertain admission keeps it visible. Full objective, status, evidence and history remain available; dismissal does not delete them or affect a replacement Goal.
 
 Verification and delivery
-See VERIFICATION.md for exact package/typecheck counts, real-engine API regressions, hidden desktop/paired phone checks, retained performance samples, endurance results and installer identity. The candidate is prepared on todo-polish and the existing draft PR #2. It does not publish a release or install/restart the user's app. Credentials, recordings, model weights and private QA profiles remain excluded from Git.
+See VERIFICATION.md for exact package/typecheck counts, real-engine API regressions, hidden desktop/paired phone checks, retained performance samples, endurance results and installer identity. The candidate is consolidated on the existing main branch. It does not publish a release or install/restart the user's app. Credentials, recordings, model weights and private QA profiles remain excluded from Git.
+
+Latest accepted interface plan
+1. Separate encrypted image API connection, explicitly billed real-PNG verification, capability-aware tool discovery, durable cancellation/polling and saved artifact provenance. Conversational model discovery does not enable it.
+2. Readable translated tool summaries and expandable technical details; verified operation/retry identity; Preparing for bounded pinned-revision document rendering.
+3. Markdown Preview/Source for artifacts and workspace files, independent scroll, exact historical text and saved relative raster resources. Working files use bounded authorized transient resources.
+4. Immutable recorded image cards, dimensions and explicit Open image into another panel tab.
+5. Fresh authoritative execution ownership for animations; historical interrupted/unfinished actions remain static after reconnect.
+6. Central final-tab removal closes the right panel while retaining its width.
+7. Per-chat/provider/model context budgets, Recommended parity, frozen queue/branch snapshots, actual compaction and visible unsupported-budget recovery.
+8. Bits & Bytes startup, local OAuth callbacks, loading/error surfaces and Windows assets. Required legal/internal compatibility identity and issuer-controlled consent are preserved.
+9. Minimal browser navigation/address/overflow controls, independent typed URL, modal hiding and correct native bounds at page zoom.
+10. Reference-style 332px sidebar, expandable projects, durable membership independent of execution folders, migration, archive/restore, indexed title search and stable cursor pagination.

@@ -12,7 +12,7 @@ import { createLLMEventPublisher } from "@opencode-ai/core/session/runner/publis
 const sessionID = SessionV2.ID.make("ses_tool_event_test")
 const base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"
 
-const capture = () => {
+const capture = (onAssistantStart?: (assistantID: SessionMessage.ID) => Effect.Effect<void>) => {
   const published: Array<{ readonly type: string; readonly data: unknown }> = []
   const events = EventV2.Service.of({
     publish: (definition, data) =>
@@ -40,6 +40,7 @@ const capture = () => {
     published,
     publisher: createLLMEventPublisher(events, {
       sessionID,
+      onAssistantStart,
       agent: "build",
       model: {
         id: ModelV2.ID.make("model"),
@@ -48,6 +49,35 @@ const capture = () => {
     }),
   }
 }
+
+test("publisher claims only its actual newly persisted assistant, once per provider turn", async () => {
+  const owners: string[] = []
+  const first = capture((id) =>
+    Effect.sync(() => {
+      owners.push(id)
+    }),
+  )
+  expect(owners).toEqual([])
+  await Effect.runPromise(first.publisher.publish(LLMEvent.stepStart({ index: 0 })))
+  await Effect.runPromise(first.publisher.publish(call))
+  expect(owners).toHaveLength(1)
+  const startedType = SessionEvent.Step.Started.durable
+    ? EventV2.versionedType(SessionEvent.Step.Started.type, SessionEvent.Step.Started.durable.version)
+    : SessionEvent.Step.Started.type
+  const started = first.published.find((event) => event.type === startedType)
+  expect(started?.data).toMatchObject({ assistantMessageID: owners[0] })
+  expect(started?.data).not.toHaveProperty("onAssistantStart")
+  const second = capture((id) =>
+    Effect.sync(() => {
+      owners.push(id)
+    }),
+  )
+  await Effect.runPromise(second.publisher.publish(LLMEvent.stepStart({ index: 0 })))
+  expect(owners).toHaveLength(1)
+  await Effect.runPromise(second.publisher.publish(call))
+  expect(owners).toHaveLength(2)
+  expect(owners[1]).not.toBe(owners[0])
+})
 
 const call = LLMEvent.toolCall({ id: "call-image", name: "read", input: { path: "pixel.png" } })
 const result = LLMEvent.toolResult({

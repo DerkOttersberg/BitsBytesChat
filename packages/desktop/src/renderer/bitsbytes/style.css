@@ -16,7 +16,7 @@
   display: flex;
   height: 100dvh;
   width: 100%;
-  padding-top: 40px;
+  padding-top: 0;
   overflow: hidden;
   background: var(--bb-bg);
   color: var(--bb-text);
@@ -32,7 +32,7 @@
   position: absolute;
   top: 0;
   left: 0;
-  height: 40px;
+  height: 0;
   width: calc(100% - 140px);
   -webkit-app-region: drag;
 }
@@ -209,6 +209,7 @@ form:has(.bb-audio-active) [data-action="prompt-submit"] { display: none; }
 .bb-nav > button { width: 40px; height: 40px; padding: 0 !important; display: grid; place-items: center; border-radius: 10px; }
 .bb-nav > .bb-nav-settings { margin-top: auto; }
 .bb-nav > button:focus-visible { outline: 2px solid var(--icon-interactive-base, #78a6ff); outline-offset: 2px; }
+.bb-browser-toolbar{position:relative!important;min-height:36px;padding:4px 6px!important;gap:2px!important;background:var(--background-base)}.bb-browser-toolbar button{display:grid;place-items:center;width:26px;height:26px;padding:0!important;background:transparent;border:0;color:var(--text-weak)}.bb-browser-toolbar button:hover:not(:disabled){background:var(--surface-raised-base-hover);color:var(--text-strong)}.bb-browser-toolbar button:disabled{opacity:.35}.bb-browser-toolbar input{margin:0 4px;background:var(--surface-base);border-color:transparent!important;height:27px}.bb-browser-toolbar input:focus{outline:1px solid var(--border-focus)}.bb-browser-loading{position:absolute;bottom:-1px;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--icon-interactive-base),transparent);animation:bb-browser-progress 1.2s ease-in-out infinite}.bb-browser-error{display:flex;gap:8px;align-items:center;font-size:12px;padding:8px 10px;color:var(--text-danger-base)}.bb-browser-error span{flex:1}.bb-browser-error button{text-decoration:underline}@keyframes bb-browser-progress{50%{opacity:.25}}@media(prefers-reduced-motion:reduce){.bb-browser-loading{animation:none}}
 .bb-settings-panel .settings-v2-tab-body { display: flex; flex-direction: column; gap: 16px; }
 .bb-settings-panel label { display: flex; flex-direction: column; gap: 7px; font-size: 13px; }
 .bb-settings-panel label.bb-check { flex-direction: row; align-items: center; }

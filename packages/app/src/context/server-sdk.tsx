@@ -302,6 +302,8 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
             })
           }
         } finally {
+          flush()
+          emitter.emit("global", { type: "server.disconnected", properties: {} } as unknown as ServerEvent)
           abort.signal.removeEventListener("abort", onAbort)
           attempt = undefined
         }

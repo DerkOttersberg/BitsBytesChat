@@ -100,6 +100,17 @@ describe("active session query", () => {
       next: 10,
     })
   })
+  test("attachment loss retires all old owners and a fresh snapshot restores only live work", () => {
+    const session = createServerSession({} as OpencodeClient)
+    const owner = { runEpoch: "old-process", inputID: "user", assistantID: "assistant" }
+    session.set("session_status", "old-chat", { type: "busy", ...{ owner } })
+    expect(session.data.session_status["old-chat"]).toMatchObject({ owner })
+    session.clearExecutionOwnership()
+    expect(session.data.session_status).toEqual({})
+    seedActiveSessionStatuses(session, { "live-chat": { type: "running", owner: { ...owner, runEpoch: "fresh-process" } } } as unknown as Parameters<typeof seedActiveSessionStatuses>[1])
+    expect(session.data.session_status["old-chat"]).toBeUndefined()
+    expect(session.data.session_status["live-chat"]).toMatchObject({ type: "busy", owner: { runEpoch: "fresh-process" } })
+  })
 })
 
 describe("pickDirectoriesToEvict", () => {

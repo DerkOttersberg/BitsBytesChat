@@ -1,5 +1,18 @@
 import type {
   HealthGetOutput,
+  OrganizationProjectsOutput,
+  OrganizationCreateInput,
+  OrganizationCreateOutput,
+  OrganizationUpdateInput,
+  OrganizationUpdateOutput,
+  OrganizationRemoveInput,
+  OrganizationRemoveOutput,
+  OrganizationChatsInput,
+  OrganizationChatsOutput,
+  OrganizationChatInput,
+  OrganizationChatOutput,
+  OrganizationMigrateInput,
+  OrganizationMigrateOutput,
   LocationGetInput,
   LocationGetOutput,
   AgentsListInput,
@@ -256,6 +269,109 @@ export function make(options: ClientOptions) {
           requestOptions,
         ),
     },
+    organization: {
+      projects: (requestOptions?: RequestOptions) =>
+        request<OrganizationProjectsOutput>(
+          {
+            method: "GET",
+            path: `/api/organization/projects`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      create: (input: OrganizationCreateInput, requestOptions?: RequestOptions) =>
+        request<OrganizationCreateOutput>(
+          {
+            method: "POST",
+            path: `/api/organization/projects`,
+            body: { name: input["name"], directory: input["directory"] },
+            successStatus: 200,
+            declaredStatuses: [400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      update: (input: OrganizationUpdateInput, requestOptions?: RequestOptions) =>
+        request<OrganizationUpdateOutput>(
+          {
+            method: "PATCH",
+            path: `/api/organization/projects/${encodeURIComponent(input.id)}`,
+            body: {
+              name: input["name"],
+              directory: input["directory"],
+              pinned: input["pinned"],
+              order: input["order"],
+            },
+            successStatus: 200,
+            declaredStatuses: [400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      remove: (input: OrganizationRemoveInput, requestOptions?: RequestOptions) =>
+        request<OrganizationRemoveOutput>(
+          {
+            method: "DELETE",
+            path: `/api/organization/projects/${encodeURIComponent(input.id)}`,
+            successStatus: 204,
+            declaredStatuses: [401, 400],
+            empty: true,
+          },
+          requestOptions,
+        ),
+      chats: (input?: OrganizationChatsInput, requestOptions?: RequestOptions) =>
+        request<OrganizationChatsOutput>(
+          {
+            method: "POST",
+            path: `/api/organization/chats/query`,
+            body: {
+              limit: input?.["limit"],
+              cursor: input?.["cursor"],
+              projectID: input?.["projectID"],
+              archived: input?.["archived"],
+              pinned: input?.["pinned"],
+              search: input?.["search"],
+              sort: input?.["sort"],
+            },
+            successStatus: 200,
+            declaredStatuses: [400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      chat: (input: OrganizationChatInput, requestOptions?: RequestOptions) =>
+        request<OrganizationChatOutput>(
+          {
+            method: "PATCH",
+            path: `/api/organization/chats/${encodeURIComponent(input.sessionID)}`,
+            body: {
+              title: input["title"],
+              projectID: input["projectID"],
+              pinned: input["pinned"],
+              order: input["order"],
+              archived: input["archived"],
+            },
+            successStatus: 200,
+            declaredStatuses: [400, 404, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      migrate: (input: OrganizationMigrateInput, requestOptions?: RequestOptions) =>
+        request<OrganizationMigrateOutput>(
+          {
+            method: "POST",
+            path: `/api/organization/migrate`,
+            body: { projects: input["projects"], defaultDirectory: input["defaultDirectory"] },
+            successStatus: 204,
+            declaredStatuses: [401, 400],
+            empty: true,
+          },
+          requestOptions,
+        ),
+    },
     location: {
       get: (input?: LocationGetInput, requestOptions?: RequestOptions) =>
         request<LocationGetOutput>(
@@ -318,7 +434,7 @@ export function make(options: ClientOptions) {
               location: input?.["location"],
             },
             successStatus: 200,
-            declaredStatuses: [401, 400],
+            declaredStatuses: [400, 401],
             empty: false,
           },
           requestOptions,

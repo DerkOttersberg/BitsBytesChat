@@ -4,6 +4,7 @@ import { useParams } from "@solidjs/router"
 import { Iterable, pipe } from "effect"
 import { createEffect, createMemo, type Accessor } from "solid-js"
 import { selectProviderCatalog } from "./provider-catalog"
+import { usePlatform } from "@/context/platform"
 
 export const popularProviders = [
   "opencode",
@@ -18,6 +19,7 @@ export const popularProviders = [
 const popularProviderSet = new Set(popularProviders)
 
 export function useProviders(directory: Accessor<string | undefined>) {
+  const platform = usePlatform()
   const serverSync = useServerSync()
   const params = useParams()
   const dir = () => (directory ? directory() : decode64(params.dir))
@@ -38,13 +40,20 @@ export function useProviders(directory: Accessor<string | undefined>) {
     })
   }
 
+  const offered = () => {
+    const catalog = providers()
+    if (!platform.bitsbytes) return catalog.all
+    const connected = new Set(catalog.connected)
+    return new Map([...catalog.all].filter(([id]) => !["opencode", "opencode-go"].includes(id) || connected.has(id)))
+  }
   return {
     all: () => providers().all,
+    offered,
     default: () => providers().default,
     defaultModel: () => providers().defaultModel,
     popular: () =>
       pipe(
-        providers().all,
+        offered(),
         Iterable.map(([, p]) => p),
         Iterable.filter((p) => popularProviderSet.has(p.id)),
         (v) => Array.from(v),

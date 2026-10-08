@@ -7,9 +7,10 @@ import type { MessageV2 } from "./message-v2"
 
 const COMPACTION_BUFFER = 20_000
 
-export function usable(input: { cfg: ConfigV1.Info; model: Provider.Model; outputTokenMax?: number }) {
+export function usable(input: { cfg: ConfigV1.Info; model: Provider.Model & { contextWindow?: number }; outputTokenMax?: number }) {
   const context = input.model.limit.context
   if (context === 0) return 0
+  if (input.model.contextWindow !== undefined) return Math.max(0, Math.min(input.model.limit.input ?? context, context) - Math.max(input.model.limit.output, input.cfg.compaction?.reserved ?? COMPACTION_BUFFER))
 
   const reserved =
     input.cfg.compaction?.reserved ??

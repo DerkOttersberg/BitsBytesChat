@@ -7,6 +7,16 @@ import {
 } from "@modelcontextprotocol/sdk/types.js"
 import { dynamicTool, jsonSchema, type JSONSchema7, type Tool } from "ai"
 import { Effect } from "effect"
+import { ToolOperation } from "@opencode-ai/schema/tool-operation"
+
+export class ToolError extends Error {
+  constructor(
+    message: string,
+    readonly operation?: ToolOperation.Info,
+  ) {
+    super(message)
+  }
+}
 
 const DEFAULT_TIMEOUT = 30_000
 const MAX_LIST_PAGES = 1_000
@@ -39,7 +49,14 @@ export function defs(client: Client, timeout?: number) {
   return listTools(client, timeout ?? DEFAULT_TIMEOUT).pipe(Effect.catch(() => Effect.void))
 }
 
-export function convertTool(mcpTool: MCPToolDef, client: Client, timeout?: number, sessionID?: string): Tool {
+export function convertTool(
+  mcpTool: MCPToolDef,
+  client: Client,
+  timeout?: number,
+  sessionID?: string,
+  inputID?: string,
+  agent?: string,
+): Tool {
   const inputSchema: JSONSchema7 = {
     ...(mcpTool.inputSchema as JSONSchema7),
     type: "object",
@@ -54,7 +71,7 @@ export function convertTool(mcpTool: MCPToolDef, client: Client, timeout?: numbe
       const result = await client.callTool(
         {
           name: mcpTool.name,
-          _meta: sessionID ? { sessionID } : undefined,
+          _meta: sessionID ? { sessionID, ...(inputID ? { inputID } : {}), ...(agent ? { agent } : {}) } : undefined,
           arguments: (args || {}) as Record<string, unknown>,
         },
         CallToolResultSchema,
@@ -67,11 +84,12 @@ export function convertTool(mcpTool: MCPToolDef, client: Client, timeout?: numbe
         },
       )
       if (result.isError)
-        throw new Error(
+        throw new ToolError(
           result.content
             .flatMap((item) => (item.type === "text" ? [item.text] : []))
             .filter((text) => text.trim())
             .join("\n\n") || "MCP tool returned an error",
+          ToolOperation.metadata(result._meta),
         )
       if (result.content.length > 0 || result.structuredContent === undefined || result.structuredContent === null)
         return result

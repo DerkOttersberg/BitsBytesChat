@@ -253,7 +253,7 @@ export async function dispatchEngine(
           method: "POST",
           signal: options.signal,
           body: JSON.stringify({
-            model: { id: prompt.model.modelID, providerID: prompt.model.providerID, variant: prompt.variant },
+            model: { id: prompt.model.modelID, providerID: prompt.model.providerID, variant: prompt.variant, contextWindow: prompt.model.contextWindow },
           }),
         },
         prompt.directory,

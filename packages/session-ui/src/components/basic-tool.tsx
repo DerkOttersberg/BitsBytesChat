@@ -5,6 +5,8 @@ import { createStore } from "solid-js/store"
 import { Collapsible } from "@opencode-ai/ui/collapsible"
 import type { IconProps } from "@opencode-ai/ui/icon"
 import { TextShimmer } from "@opencode-ai/ui/text-shimmer"
+import { toolPresentationKey } from "./tool-presentation"
+import { ToolDetails } from "./tool-details"
 
 export type TriggerTitle = {
   title: string
@@ -325,6 +327,11 @@ export function GenericTool(props: {
   status?: string
   hideDetails?: boolean
   input?: Record<string, unknown>
+  output?: string
+  defaultOpen?: boolean
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  deferContent?: boolean
 }) {
   const i18n = useI18n()
 
@@ -333,11 +340,20 @@ export function GenericTool(props: {
       icon="mcp"
       status={props.status}
       trigger={{
-        title: i18n.t("ui.basicTool.called", { tool: props.tool }),
+        title: toolPresentationKey(props.tool)
+          ? i18n.t(toolPresentationKey(props.tool)!)
+          : i18n.t("ui.basicTool.called", { tool: props.tool }),
         subtitle: label(props.input),
-        args: args(props.input),
+        args: toolPresentationKey(props.tool) ? undefined : args(props.input),
       }}
       hideDetails={props.hideDetails}
-    />
+      defaultOpen={props.defaultOpen}
+      open={props.open}
+      onOpenChange={props.onOpenChange}
+      defer={props.deferContent ?? true}
+      allowOpenWhilePending
+    >
+      <ToolDetails tool={props.tool} input={props.input} output={props.output} />
+    </BasicTool>
   )
 }

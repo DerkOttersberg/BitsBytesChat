@@ -10,7 +10,7 @@ import { Option, Schema } from "effect"
 import { Binary } from "@opencode-ai/core/util/binary"
 
 const emptyTokens = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
-const emptyModel: { id: string; providerID: string; variant?: string } = { id: "", providerID: "" }
+const emptyModel: { id: string; providerID: string; variant?: string; contextWindow?: number } = { id: "", providerID: "" }
 const decodeToolInput = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
 
 export function compareMessages(a: Pick<Message, "id" | "time">, b: Pick<Message, "id" | "time">) {
@@ -98,7 +98,7 @@ export function normalizeSessionMessages(sessionID: string, source: readonly Ses
         role: "user",
         time: message.time,
         agent,
-        model: { providerID: model.providerID, modelID: model.id, variant: model.variant },
+        model: { ...{ providerID: model.providerID, modelID: model.id, variant: model.variant, contextWindow: model.contextWindow } },
       })
       parts.set(message.id, [textPart(sessionID, message.id, 0, message.description, true)])
       return
@@ -121,6 +121,7 @@ export function normalizeSessionMessages(sessionID: string, source: readonly Ses
           providerID: message.model.providerID,
           modelID: message.model.id,
           variant: message.model.variant,
+          ...{ contextWindow: (message.model as typeof emptyModel).contextWindow },
         }
       }
       messages.push(assistantMessage(sessionID, parentID, message))
@@ -147,7 +148,7 @@ function shellMessages(
   sessionID: string,
   message: SessionMessageShell,
   agent: string,
-  model: { id: string; providerID: string; variant?: string },
+  model: typeof emptyModel,
 ): [UserMessage, AssistantMessage] {
   return [
     {
@@ -156,7 +157,7 @@ function shellMessages(
       role: "user",
       time: { created: message.time.created },
       agent,
-      model: { providerID: model.providerID, modelID: model.id, variant: model.variant },
+      model: { ...{ providerID: model.providerID, modelID: model.id, variant: model.variant, contextWindow: model.contextWindow } },
     },
     {
       id: `${message.id}:assistant`,
@@ -167,6 +168,7 @@ function shellMessages(
       modelID: model.id,
       providerID: model.providerID,
       variant: model.variant,
+      ...{ contextWindow: model.contextWindow },
       mode: agent,
       agent,
       path: { cwd: "", root: "" },
@@ -213,7 +215,7 @@ function userMessage(
   sessionID: string,
   message: SessionMessageUser,
   agent: string,
-  model: { id: string; providerID: string; variant?: string },
+  model: typeof emptyModel,
 ): UserMessage {
   return {
     id: message.id,
@@ -221,7 +223,7 @@ function userMessage(
     role: "user",
     time: message.time,
     agent,
-    model: { providerID: model.providerID, modelID: model.id, variant: model.variant },
+    model: { ...{ providerID: model.providerID, modelID: model.id, variant: model.variant, contextWindow: model.contextWindow } },
   }
 }
 
@@ -277,6 +279,7 @@ function assistantMessage(sessionID: string, parentID: string, message: SessionM
     modelID: message.model.id,
     providerID: message.model.providerID,
     variant: message.model.variant,
+    ...{ contextWindow: (message.model as typeof emptyModel).contextWindow },
     mode: message.agent,
     agent: message.agent,
     path: { cwd: "", root: "" },

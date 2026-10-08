@@ -1421,6 +1421,11 @@ export function createServerSession(
     },
     apply,
     applyV2,
+    clearExecutionOwnership() {
+      // A broken attachment cannot prove that any previously observed run is live.
+      // Transcript/tool state remains intact for explicit recovery and inspection.
+      setData("session_status", reconcile({}))
+    },
   }
 }
 

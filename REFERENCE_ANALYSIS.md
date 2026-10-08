@@ -1,5 +1,21 @@
 # Interface research and implementation
 
+## Interface and reliability patch — 8 October 2026
+
+The supplied sidebar screenshot is the direct visual reference for this patch: a 332px left column, compact utility rows above the history, expandable pinned projects, 28px chat rows, truncated titles, trailing hover/focus menus and fixed footer controls. The implementation allows 260–420px resizing and a drawer on narrow windows. Horizontal conversation tabs and the duplicate utility rail are retired; document and browser tabs stay in the right panel. This is a comparison against the supplied image, not a claim of complete parity with every current Codex screen.
+
+Projects are separate durable chat collections. A collection move preserves the execution folder and conversation identities; deleting a collection unassigns its conversations. Existing workspace names/grouping migrate once. Archive/restore, 50-item cursor pagination and indexed title search replace incomplete actions and full-history scans. Utility navigation keeps conversations mounted to retain drafts and scroll.
+
+The earlier local comparison demonstrated that this fork lacked image generation. The new adapter uses a separate encrypted OpenAI image API credential and an explicit billed test that must return a validated PNG before discovery advertises the tool. A discovered conversational model cannot establish image capability. The public third-party ChatGPT-plan route explicitly excludes image generation; see [OpenAI capability limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations) and [Image API documentation](https://developers.openai.com/api/docs/guides/image-generation). API fixtures verify transport/recovery behavior; they are not evidence of live account access.
+
+Markdown preview is an app improvement supported by the old captures, not a verified description of Codex's default view. Preview and Source retain exact selected revisions. Relative raster images in published Markdown use saved revision snapshots; historical views never reread changed originals. Image-read cards offer a recorded thumbnail, dimensions and Open image without changing the selected panel automatically.
+
+Tool presentation separates readable translated summaries from raw details. Retry grouping requires trusted matching operation/output identity and verified artifacts; incomplete historical provenance remains visible. Preparing document previews use bounded cancellable polling. Activity animations require a fresh executing owner, including input and assistant identities; historical incomplete parts remain static after interruption or disconnect.
+
+Context-window controls use reported capacity, preserve output allowances and compaction buffers, and carry the saved budget through queues and both execution protocols. Recommended retains the catalog default. The browser keeps a typed address separate from navigation events and converts panel CSS geometry into native bounds using page zoom; display scaling is handled by Electron.
+
+Local startup/loading/error assets and OAuth callback pages use the Bits & Bytes identity. Provider-controlled consent names require provider registration changes. Required legal attribution and internal compatibility identifiers remain intact.
+
 ## Supplied queue screenshot — 8 October 2026
 
 The user supplied a 750×156 reference image and a comparison image from this fork. This enables a direct comparison of the collapsed queue state: 13px composer inset, 32px row, 33px exposed strip, 16px queue corners, an overlapping 20px composer, bold message text, and Steer/trash/more controls. The fork uses Segoe UI to match the Windows capture. Sampled dark fills are `#2d2d2d` for the queue and `#363636` for the composer, with a `#3b3b3b` queue border and `#969696` actions. The implementation replaces the separated card and count heading with that arrangement. Actual [dark](docs/screenshots/035-queue-reference-dark.png) and [light](docs/screenshots/035-queue-reference-light.png) renders retain this fork's model, access and microphone controls.

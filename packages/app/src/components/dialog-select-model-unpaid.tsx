@@ -10,11 +10,13 @@ import { useLocal } from "@/context/local"
 import { popularProviders, useProviders } from "@/hooks/use-providers"
 import { ModelTooltip } from "./model-tooltip"
 import { useLanguage } from "@/context/language"
+import { usePlatform } from "@/context/platform"
 import { decode64 } from "@/utils/base64"
 
 type ModelState = ReturnType<typeof useLocal>["model"]
 
 export const DialogSelectModelUnpaid: Component<{ model?: ModelState }> = (props) => {
+  const platform = usePlatform()
   const local = useLocal()
   const model = props.model ?? local.model
   const dialog = useDialog()
@@ -44,7 +46,7 @@ export const DialogSelectModelUnpaid: Component<{ model?: ModelState }> = (props
       title={language.t("dialog.model.select.title")}
       class="overflow-y-auto [&_[data-slot=dialog-body]]:overflow-visible [&_[data-slot=dialog-body]]:flex-none"
     >
-      <div class="flex flex-col gap-3 px-2.5" onKeyDown={handleKeyDown}>
+      <Show when={!platform.bitsbytes}><div class="flex flex-col gap-3 px-2.5" onKeyDown={handleKeyDown}>
         <div class="text-14-medium text-text-base px-2.5">{language.t("dialog.model.unpaid.freeModels.title")}</div>
         <List
           class="px-3 [&_[data-slot=list-scroll]]:overflow-visible"
@@ -85,7 +87,7 @@ export const DialogSelectModelUnpaid: Component<{ model?: ModelState }> = (props
             </div>
           )}
         </List>
-      </div>
+      </div></Show>
       <div class="px-1.5 pb-1.5">
         <div class="w-full rounded-sm border border-border-weak-base bg-surface-raised-base">
           <div class="w-full flex flex-col items-start gap-4 px-1.5 pt-4 pb-4">

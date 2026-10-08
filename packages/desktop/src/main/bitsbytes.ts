@@ -1,7 +1,11 @@
 import { BBArtifacts } from "./bitsbytes-artifacts"
+import { BBImages, imageRequest } from "./bitsbytes-images"
+import { BBReadImages } from "./bitsbytes-read-images"
+import { workingMarkdownResources } from "./bitsbytes-markdown-resources"
+import { BBToolOperations, toolOperationMetadata } from "./bitsbytes-tool-operations"
 import { BBSide } from "./bitsbytes-side"
 import { suppressNativeUI } from "./qa-mode"
-import { BBRuns, type RunPrompt, type Inspection, type InspectionOptions } from "./bitsbytes-runs"
+import { BBRuns, UnsentError, type RunPrompt, type Inspection, type InspectionOptions } from "./bitsbytes-runs"
 import { BBMcpSettings } from "./bitsbytes-mcp"
 import { BBBrowser } from "./bitsbytes-browser"
 import { BBMobile } from "./bitsbytes-mobile"
@@ -22,6 +26,7 @@ import { dispatchEngine, engineRequest, inspectEngine } from "./bitsbytes-engine
 import { readState, stateRecord } from "./bitsbytes-state"
 import { bbt } from "../bitsbytes/copy"
 import type { ServerReadyData } from "../preload/types"
+import { validContextWindow, type ContextCapacity } from "@opencode-ai/core/util/context-window"
 
 export const DEFAULTS: Settings = { shareRoot: "\\\\10.10.1.3\\AdminShare", intakeFolder: "documenten beheer administratief\\2. Intakegesprekken",
   templateName: "Intakegesprek blanco.docx", engine: "parakeet", acceleration: "auto", provider: "chatgpt", model: "", browserControl: true, computerControl: false, microphone: null }
@@ -59,8 +64,23 @@ export class BitsBytes {
   private blocker?: number
   private pending = new Map<string, Promise<unknown>>()
   artifacts = new BBArtifacts(this.root, this.python, this.assets, (artifact, published) => this.emit({ type: "artifact", artifact, published }))
+  readImages = new BBReadImages(this.root)
+  operations = new BBToolOperations(join(this.root, "tool-operations"))
+  images = new BBImages(this.root, {
+    configuration: () => this.provider.credentials.images,
+    saveConfiguration: async value => {
+      const previous = this.provider.credentials.images
+      this.provider.credentials.images = value
+      try { await this.provider.persist() }
+      catch (error) { if (this.provider.credentials.images === value) this.provider.credentials.images = previous; throw error }
+    },
+    validate: path => this.artifacts.runtime.call("validate", { path }),
+    publish: (path, sessionID, image, inputID) => this.artifacts.publish(path, sessionID, `image:${image.jobID}`, inputID, image),
+    changed: () => this.emit({ type: "refresh" }),
+  })
   browser = new BBBrowser(event => this.emit(event))
   runs = new BBRuns(this.root, (prompt, options) => this.inspectRun(prompt, options), (prompt, signal) => this.dispatchRun(prompt, signal), sessionID => this.emit({ type: "run", sessionID }), async prompt => {
+    this.images.cancel(prompt.sessionID)
     const path = prompt.protocol === "v2" ? `/api/session/${encodeURIComponent(prompt.sessionID)}/interrupt` : `/session/${encodeURIComponent(prompt.sessionID)}/abort`
     await engineRequest(await this.engine(), path, { method: "POST" }, prompt.directory)
   })
@@ -117,6 +137,7 @@ export class BitsBytes {
       || (stateRecord(value) && typeof value.providerID === "string" && typeof value.modelID === "string")) ?? undefined
     this.progress("encrypted provider credentials")
     await this.provider.start()
+    await this.images.start()
     const oldAuth = join(process.env.XDG_DATA_HOME!, "opencode/auth.json")
     if (existsSync(oldAuth)) {
       const previous = JSON.parse(await readFile(oldAuth, "utf8"))
@@ -136,9 +157,12 @@ export class BitsBytes {
         const params = JSON.parse(Buffer.concat(buffers).toString())
         const result = params.name.startsWith("runs.") ? await this.runCall(params.name.slice(5), params.arguments ?? {}) : /^(credentials|access|selection)\./.test(params.name)
           ? await this.broker(params.name, params.arguments ?? {})
-          : await this.tool(params.name, params.arguments ?? {}, params._meta?.sessionID ?? "", abort.signal)
+          : await this.tool(params.name, params.arguments ?? {}, params._meta?.sessionID ?? "", abort.signal, false, typeof params._meta?.inputID === "string" ? params._meta.inputID : undefined, typeof params._meta?.agent === "string" ? params._meta.agent : undefined)
         response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(result))
-      })().catch((error: Error) => response.writeHead(500, { "content-type": "application/json" }).end(JSON.stringify({ error: error.message })))
+      })().catch((error: Error) => {
+        if (response.destroyed || response.writableEnded) return
+        response.writeHead(500, { "content-type": "application/json" }).end(JSON.stringify({ error: error.message, _meta: toolOperationMetadata(error) }))
+      })
     })
     await new Promise<void>((done) => this.tools!.listen(0, "127.0.0.1", done))
     const address = this.tools.address()
@@ -350,9 +374,25 @@ export class BitsBytes {
     const origin = (await this.inspectRun(reference).catch(() => undefined))?.messages.findLast(row => row.assistant)
     return this.artifacts.publish(path, sessionID, sourceID, origin?.id ?? reference.id)
   }
-  private async tool(name: string, args: Record<string, unknown>, sessionID = "", signal?: AbortSignal) {
+  private async tool(name: string, args: Record<string, unknown>, sessionID = "", signal?: AbortSignal, tracked = false, inputID?: string, agent?: string): Promise<unknown> {
+    if (name === "images.capabilities") return this.images.capabilities(typeof args.revision === "number" ? args.revision : undefined, signal)
     if (name === "side.progress") return this.side.progress(String(args.sessionID))
     if (sessionID && await this.side.relation(sessionID)) throw new Error("bb.error.sideReadOnly")
+    if (name === "generate_image" && agent === "plan") throw new Error("bb.error.imagePlan")
+    if (!tracked && ["create_artifact", "run_artifact_script", "publish_artifact", "create_word", "create_intake", "generate_image"].includes(name)) {
+      const targets = name === "generate_image" ? [createHash("sha256").update(JSON.stringify(imageRequest(args))).digest("hex")] : name === "create_artifact"
+        ? [stateRecord(args.spec) ? args.spec.filename : undefined] : Array.isArray(args.files) ? args.files : Array.isArray(args.paths) ? args.paths : [args.path ?? args.filename]
+      const valid = targets.length > 0 && targets.every(value => typeof value === "string" && value.length > 0)
+      const outputKey = valid ? createHash("sha256").update(JSON.stringify(targets.map(value => String(value).replaceAll("\\", "/").toLowerCase()).sort())).digest("hex") : undefined
+      return this.operations.run({ sessionID, tool: name, jobID: String(args.job_id ?? inputID ?? this.runs.chats[sessionID]?.last?.id ?? ""), outputKey, retryOf: typeof args.retry_of === "string" ? args.retry_of : undefined }, async () => await this.tool(name, args, sessionID, signal, true, inputID, agent) as Record<string, unknown>)
+    }
+    if (name === "generate_image") {
+      const policy = await this.runCall("permission", { sessionID }) as { plan: boolean }
+      if (policy.plan) throw new Error("bb.error.imagePlan")
+      const result = await this.images.generate(args, sessionID, inputID ?? this.runs.chats[sessionID]?.last?.id ?? "", signal)
+      if (result.status !== "preparing" && result.status !== "ready") throw new Error(result.error ?? "bb.error.imageRequest")
+      return result
+    }
     if (name === "get_goal") return this.runs.get(sessionID).goal ?? null
     if (name === "goal_progress") return this.runCall("goal-progress", { ...args, sessionID })
     if (["create_artifact", "run_artifact_script", "publish_artifact", "create_word", "create_intake"].includes(name)) {
@@ -375,7 +415,7 @@ export class BitsBytes {
       return { artifacts }
     }
     if (name === "inspect_artifact") { if (this.runs.chats[sessionID]?.last?.mode === "plan" && !existsSync(this.artifacts.runtime.python)) throw new Error("bb.error.artifactSetup"); return this.artifacts.runtime.call("inspect_source", { path: args.path, folder: join(this.root, "artifacts/inspection"), source_id: args.source_id, part: args.part }, signal) }
-    if (name === "read_artifact_pages") return this.artifacts.pages(String(args.id), Number(args.start ?? 0))
+    if (name === "read_artifact_pages") return this.artifacts.pages(String(args.id), Number(args.start ?? 0), { revision: args.revision === undefined ? undefined : Number(args.revision), signal })
     if (name === "create_artifact" || name === "run_artifact_script") {
       if (!sessionID) throw new Error("bb.error.invalidRequest")
       const id = args.job_id ? validID(args.job_id) : createHash("sha256").update(sessionID + (this.runs.chats[sessionID]?.last?.id ?? "") + JSON.stringify(args)).digest("hex").slice(0, 32)
@@ -452,14 +492,28 @@ export class BitsBytes {
     return inspectEngine(await this.engine(), prompt, this.protocols, options)
   }
   private async dispatchRun(prompt: RunPrompt, signal?: AbortSignal) {
+    try { await this.validateRunContext(prompt) }
+    catch (error) { throw new UnsentError(error) }
     await this.customMcp?.apply(prompt.directory).catch(() => undefined)
     return dispatchEngine(await this.engine(), prompt, { protocol: this.protocols.get(prompt.sessionID), contextRoot: join(this.root, "run-context"), resolveAttachment: uri => this.resolveAttachment(uri, prompt.sessionID), signal })
+  }
+  private async validateRunContext(prompt?: RunPrompt) {
+    if (prompt?.model?.contextWindow === undefined) return
+    const [providers, config] = await Promise.all([
+      this.engineFetch<{ all: { id: string; models: Record<string, { limit: ContextCapacity }> }[] }>("/provider", {}, prompt.directory),
+      this.engineFetch<{ compaction?: { reserved?: number } }>("/config", {}, prompt.directory),
+    ])
+    const model = providers.all.find(item => item.id === prompt.model?.providerID)?.models[prompt.model.modelID]
+    if (!validContextWindow(prompt.model.contextWindow, model?.limit, config.compaction?.reserved)) throw new Error("bb.error.contextWindowInvalid")
   }
   private async runCall(action: string, args: Record<string, unknown>) {
     const sessionID = String(args.sessionID ?? (args.prompt as RunPrompt | undefined)?.sessionID ?? "")
     const diagnostic = await this.side.relation(sessionID)
     if (diagnostic && ["goal-draft", "goal-progress", "goal-resume", "implement", "mode", "inherit"].includes(action)) throw new Error("bb.error.sideReadOnly")
     if (args.prompt) args = { ...args, prompt: await this.side.prepare(args.prompt as RunPrompt) }
+    if (["prepare", "admit"].includes(action)) {
+      await this.validateRunContext(args.prompt as RunPrompt | undefined)
+    }
     if (action === "permission") {
       const id = String(args.sessionID), chat = this.runs.chats[id]
       if (chat) return { plan: (chat.awaiting ? chat.last?.mode : chat.mode) === "plan" }
@@ -477,6 +531,12 @@ export class BitsBytes {
     return this.stateSaving
   }
   async call(method: string, args: Record<string, unknown> = {}): Promise<unknown> {
+    if (method === "image.snapshot") return this.readImages.snapshot(args)
+    if (method === "image.read") return this.readImages.read(String(args.id), String(args.sessionID))
+    if (method === "images.status") return this.images.status()
+    if (method === "images.configure") return this.images.configure({ key: typeof args.key === "string" ? args.key : undefined, model: typeof args.model === "string" ? args.model : undefined, disconnect: args.disconnect === true })
+    if (method === "images.verify") return this.images.verify()
+    if (method === "images.job") return this.images.job(String(args.id), "")
     if (method === "branch.open") {
       const sessionID = String(args.sessionID), directory = String(args.directory)
       const fork = await this.engineFetch<{ id: string }>(`/session/${encodeURIComponent(sessionID)}/fork`, { method: "POST", body: JSON.stringify({ messageID: args.messageID, inclusive: true }) }, directory)
@@ -702,6 +762,23 @@ export class BitsBytes {
     if (method === "artifacts.list") return this.artifacts.items
     if (method === "artifact.read") return this.artifacts.read(String(args.id), args.revision === undefined ? undefined : Number(args.revision))
     if (method === "artifact.content") return this.artifacts.content(String(args.id), args)
+    if (method === "artifact.resource") return this.artifacts.resource(String(args.id), String(args.href), args.revision === undefined ? undefined : Number(args.revision))
+    if (method === "document.resources") {
+      if (typeof args.sessionID !== "string" || !/^[a-zA-Z0-9_-]{1,160}$/.test(args.sessionID)
+        || typeof args.directory !== "string" || !isAbsolute(args.directory)
+        || typeof args.path !== "string" || typeof args.text !== "string" || args.text.length > 500_000)
+        throw new Error("bb.error.invalidDocument")
+      const server = await this.engine()
+      type Owner = { id: string; directory?: string; location?: { directory?: string } }
+      const result = await engineRequest<Owner | { data: Owner }>(server, `/api/session/${encodeURIComponent(args.sessionID)}`, {}, args.directory)
+        .catch(() => engineRequest<Owner>(server, `/session/${encodeURIComponent(String(args.sessionID))}`, {}, String(args.directory)))
+      const owner = "data" in result ? result.data : result
+      const directory = owner.location?.directory ?? owner.directory
+      if (owner.id !== args.sessionID || typeof directory !== "string") throw new Error("bb.error.invalidDocument")
+      const actual = await realpath(directory)
+      if (relative(actual, await realpath(args.directory)) !== "") throw new Error("bb.error.invalidDocument")
+      return workingMarkdownResources({ directory: actual, path: args.path, text: args.text })
+    }
     if (method === "artifact.save-copy") {
       const item = this.artifacts.items.find(item => item.id === args.id)
       if (!item) throw new Error("bb.error.invalidDocument")

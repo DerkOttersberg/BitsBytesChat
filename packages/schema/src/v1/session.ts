@@ -359,6 +359,7 @@ export const User = Schema.Struct({
     providerID: Provider.ID,
     modelID: Model.ID,
     variant: Schema.optional(Schema.String),
+    contextWindow: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
   }),
   system: Schema.optional(Schema.String),
   tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
@@ -493,6 +494,7 @@ export const Assistant = Schema.Struct({
   }),
   structured: Schema.optional(Schema.Any),
   variant: Schema.optional(Schema.String),
+  contextWindow: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
   finish: Schema.optional(Schema.String),
 }).annotate({ identifier: "AssistantMessage" })
 export type Assistant = Omit<Types.DeepMutable<Schema.Schema.Type<typeof Assistant>>, "error"> & {
@@ -550,6 +552,7 @@ const SessionModel = Schema.Struct({
   id: Model.ID,
   providerID: Provider.ID,
   variant: optional(Schema.String),
+  contextWindow: optional(Schema.Int.check(Schema.isGreaterThan(0))),
 })
 
 export const SessionInfo = Schema.Struct({

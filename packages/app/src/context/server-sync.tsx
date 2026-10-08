@@ -8,6 +8,7 @@ import type {
 } from "@opencode-ai/sdk/v2/client"
 import { showToast } from "@/utils/toast"
 import { getFilename } from "@opencode-ai/core/util/path"
+import { executionOwner } from "@opencode-ai/core/execution-owner"
 import { type Accessor, batch, createMemo, getOwner, onCleanup, onMount, untrack } from "solid-js"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { useLanguage } from "@/context/language"
@@ -172,7 +173,12 @@ export function seedActiveSessionStatuses(
   for (const sessionID of Object.keys(active)) {
     if (session.data.session_status[sessionID] !== undefined) continue
     const status = active[sessionID]
-    session.set("session_status", sessionID, status?.type === "running" ? { type: "busy" } : status)
+    const owner = status && "owner" in status ? executionOwner(status.owner) : undefined
+    session.set(
+      "session_status",
+      sessionID,
+      status?.type === "running" ? { type: "busy", ...(owner ? { owner } : {}) } : status,
+    )
   }
 }
 
@@ -238,11 +244,14 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
   const [configQuery, providerQuery, pathQuery] = useQueries(() => ({
     queries: [queryOptionsApi.globalConfig(), queryOptionsApi.providers(null), queryOptionsApi.path(null)],
   }))
+  let executionGeneration = 0
   const activeSessionsQuery = useQuery(() =>
     loadActiveSessionsQuery(serverSDK.scope, {
       active: async () => {
+        const generation = executionGeneration
         if ((await serverSDK.protocol) === "v1") {
           const statuses = (await serverSDK.client.session.status()).data ?? {}
+          if (generation !== executionGeneration) return {}
           seedActiveSessionStatuses(session, statuses)
           for (const sessionID of Object.keys(statuses)) {
             void session.resolve(sessionID).catch(() => undefined)
@@ -254,6 +263,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
           )
         }
         const active = await serverSDK.api.session.active()
+        if (generation !== executionGeneration) return {}
         seedActiveSessionStatuses(session, active)
         for (const sessionID of Object.keys(active)) {
           void session.resolve(sessionID).catch(() => undefined)
@@ -544,8 +554,11 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     if (eventType === "integration.connection.updated") void refreshProviders()
 
     if (directory === "global") {
-      if (eventType === "server.connected" && activeSessionsQuery.data === undefined && !activeSessionsQuery.isFetching)
-        void activeSessionsQuery.refetch()
+      if (eventType === "server.disconnected") {
+        executionGeneration++
+        session.clearExecutionOwnership()
+      }
+      if (eventType === "server.connected" && !activeSessionsQuery.isFetching) void activeSessionsQuery.refetch()
       applyGlobalEvent({
         event,
         project: globalStore.project,

@@ -27,6 +27,23 @@ describe("tab migration", () => {
     expect(migrateTabs(null, server)).toEqual([])
     expect(migrateTabs({}, server)).toEqual([])
   })
+  test("preserves project intent for drafts and interrupted first-message assignment", () => {
+    const draft: Tab = { type: "draft", draftID: "draft", server, directory: "C:/work", projectID: "cpr_research" }
+    const session: SessionTab = { ...sessionTab("chat"), pendingProjectID: "cpr_research" }
+    expect(migrateTabs([draft, session], server)).toEqual([draft, session])
+    expect(
+      migrateTabs(
+        [
+          { ...draft, projectID: {} },
+          { ...session, pendingProjectID: 7 },
+        ],
+        server,
+      ),
+    ).toEqual([
+      { type: "draft", draftID: "draft", server, directory: "C:/work", worktree: undefined },
+      sessionTab("chat"),
+    ])
+  })
 })
 
 describe("tab memory", () => {

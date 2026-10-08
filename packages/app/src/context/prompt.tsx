@@ -153,6 +153,10 @@ export const { use: usePrompt, provider: PromptProvider } = createSimpleContext(
       model: {
         current: withSuspense(() => session().model.current()),
         set: (model: PromptModel | undefined) => session().model.set(model),
+        context: {
+          get: (key: string) => session().model.context.get(key),
+          set: (key: string, value: number | undefined) => session().model.context.set(key, value),
+        },
       },
       context: {
         items: withSuspense(() => session().context.items()),

@@ -182,12 +182,27 @@ export const make = (dependencies: Dependencies) => {
     const selected = select(input.entries, config.tokens)
     const previousSummary = input.entries.find((entry) => entry.message.type === "compaction")?.message
     if (!selected || (selected.head.length === 0 && previousSummary?.type !== "compaction")) return false
-    const summaryPrompt = buildPrompt({
-      previousSummary: previousSummary?.type === "compaction" ? previousSummary.summary : undefined,
-      context: [previousSummary?.type === "compaction" ? previousSummary.recent : "", selected.head].filter(Boolean),
-    })
     const summaryOutput = Math.min(output || SUMMARY_OUTPUT_TOKENS, SUMMARY_OUTPUT_TOKENS)
-    if (Token.estimate(summaryPrompt) > context - summaryOutput) return false
+    let remaining = [previousSummary?.type === "compaction" ? previousSummary.recent : "", selected.head]
+      .filter(Boolean)
+      .join("\n\n")
+    let summary = previousSummary?.type === "compaction" ? previousSummary.summary : undefined
+    const promptFor = (text: string) => buildPrompt({ previousSummary: summary, context: [text] })
+    // Lowering a budget must not silently drop history or repeatedly send an
+    // oversized summarization request. Fold bounded, complete slices into the
+    // anchored summary while keeping the recent tail untouched.
+    const sliceSize = () => {
+      if (Token.estimate(promptFor(remaining)) <= context - summaryOutput) return remaining.length
+      let low = 0,
+        high = remaining.length
+      while (low < high) {
+        const middle = Math.ceil((low + high) / 2)
+        if (Token.estimate(promptFor(remaining.slice(0, middle))) <= context - summaryOutput) low = middle
+        else high = middle - 1
+      }
+      return low
+    }
+    if (remaining && sliceSize() === 0) return false
     const messageID = SessionMessage.ID.create()
     yield* dependencies.events.publish(SessionEvent.Compaction.Started, {
       sessionID: input.sessionID,
@@ -196,29 +211,38 @@ export const make = (dependencies: Dependencies) => {
       reason: "auto",
     })
 
-    const chunks: string[] = []
-    let failed = false
-    const summarized = yield* dependencies.llm
-      .stream(
-        LLM.request({
-          model: input.model,
-          http: input.request.http,
-          messages: [Message.user(summaryPrompt)],
-          tools: [],
-          generation: { maxTokens: summaryOutput },
-        }),
-      )
-      .pipe(
-        Stream.runForEach((event) => {
-          if (LLMEvent.is.providerError(event)) failed = true
-          if (LLMEvent.is.textDelta(event)) chunks.push(event.text)
-          return Effect.void
-        }),
-        Effect.as(true),
-        Effect.catchTag("LLM.Error", () => Effect.succeed(false)),
-      )
-    const summary = chunks.join("")
-    if (!summarized || failed || !summary.trim()) return false
+    for (let pass = 0; pass < 64; pass++) {
+      const size = sliceSize()
+      if (remaining && size === 0) return false
+      const summaryPrompt = promptFor(remaining.slice(0, size))
+      const chunks: string[] = []
+      let failed = false
+      const summarized = yield* dependencies.llm
+        .stream(
+          LLM.request({
+            model: input.model,
+            http: input.request.http,
+            messages: [Message.user(summaryPrompt)],
+            tools: [],
+            generation: { maxTokens: summaryOutput },
+          }),
+        )
+        .pipe(
+          Stream.runForEach((event) => {
+            if (LLMEvent.is.providerError(event)) failed = true
+            if (LLMEvent.is.textDelta(event)) chunks.push(event.text)
+            return Effect.void
+          }),
+          Effect.as(true),
+          Effect.catchTag("LLM.Error", () => Effect.succeed(false)),
+        )
+      const result = chunks.join("")
+      if (!summarized || failed || !result.trim()) return false
+      summary = result
+      remaining = remaining.slice(size)
+      if (!remaining) break
+    }
+    if (remaining || !summary?.trim()) return false
     yield* dependencies.events.publish(SessionEvent.Compaction.Ended, {
       sessionID: input.sessionID,
       messageID,

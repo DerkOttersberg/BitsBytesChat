@@ -29,6 +29,7 @@ import { useSettings } from "@/context/settings"
 import { WindowsAppMenu } from "./windows-app-menu"
 import { applyPath, backPath, forwardPath } from "./titlebar-history"
 import { TitlebarTabStrip } from "@/components/titlebar-tab-strip"
+import { adjacentTabKey } from "@/components/titlebar-tab-order"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { createMediaQuery } from "@solid-primitives/media"
 import { readSessionTabsRemovedDetail, SESSION_TABS_REMOVED_EVENT } from "@/components/titlebar-session-events"
@@ -262,6 +263,12 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
             })
 
             const openNewTab = () => {
+              if (platform.bitsbytes) {
+                const current = currentTab()
+                const model = current ? tabs.stateValue<PromptSession>(current, "prompt")?.model.current() : undefined
+                const event = new CustomEvent("bitsbytes:new-chat", { cancelable: true, detail: { model } })
+                if (!window.dispatchEvent(event)) return
+              }
               const route = layout.route()
               const activeSession = session()
               if (route.type === "session" && activeSession) {
@@ -318,7 +325,7 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
                 id: "home.toggle",
                 title: language.t("home.title"),
                 category: language.t("command.category.view"),
-                keybind: "mod+b",
+                keybind: platform.bitsbytes ? "mod+shift+h" : "mod+b",
                 hidden: true,
                 onSelect: toggleHome,
               },
@@ -355,6 +362,35 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
                 },
               ].filter((v) => v !== undefined)
             })
+            command.register("organization-tab-navigation", () =>
+              platform.bitsbytes
+                ? [
+                    ...([-1, 1] as const).map((offset) => ({
+                      id: offset === -1 ? "tab.prev" : "tab.next",
+                      category: "tab",
+                      title: "",
+                      hidden: true,
+                      keybind: offset === -1 ? "mod+option+ArrowLeft,ctrl+shift+tab" : "mod+option+ArrowRight,ctrl+tab",
+                      onSelect: () => {
+                        const current = currentTab()
+                        const key = adjacentTabKey(tabsStore.map(tabKey), current ? tabKey(current) : undefined, offset)
+                        const next = tabsStore.find((tab) => tabKey(tab) === key)
+                        if (next) tabs.select(next)
+                      },
+                    })),
+                    ...tabsStore
+                      .slice(0, 9)
+                      .map((tab, index) => ({
+                        id: `tab.${index + 1}`,
+                        category: "tab",
+                        title: "",
+                        keybind: `mod+${index + 1}`,
+                        hidden: true,
+                        onSelect: () => tabs.select(tab),
+                      })),
+                  ]
+                : [],
+            )
 
             const [tabsAreOverflowing, setTabsAreOverflowing] = createSignal(false)
 
@@ -372,63 +408,95 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
                 <Show when={windows() || linux()}>
                   <WindowsAppMenu command={command} platform={platform} variant="v2" />
                 </Show>
-                <TooltipV2
-                  placement="bottom"
-                  value={
+                <Show
+                  when={!platform.bitsbytes}
+                  fallback={
                     <>
-                      {language.t("home.title")}
-                      <KeybindV2 keys={command.keybindParts("home.toggle")} variant="neutral" />
-                    </>
-                  }
-                  class="shrink-0"
-                >
-                  <IconButtonV2
-                    type="button"
-                    variant="ghost-muted"
-                    size="large"
-                    class="!w-9 shrink-0"
-                    icon={<IconV2 name="grid-plus" />}
-                    state={layout.route().type === "home" ? "pressed" : undefined}
-                    onClick={toggleHome}
-                    aria-label={language.t("home.title")}
-                    aria-pressed={layout.route().type === "home"}
-                  />
-                </TooltipV2>
-
-                <TitlebarTabStrip
-                  tabs={tabsStore}
-                  currentTab={currentTab}
-                  forceTruncate={tabsAreOverflowing()}
-                  onOverflowChange={setTabsAreOverflowing}
-                  onNavigate={(tab, el) => {
-                    tabs.select(tab)
-                    el?.scrollIntoView({ behavior: "instant" })
-                  }}
-                  onClose={(tab) => {
-                    const index = tabsStore.findIndex((item) => tabKey(item) === tabKey(tab))
-                    if (index !== -1) tabsStoreActions.closeTab(index)
-                  }}
-                  onReorder={(keys) => tabsStoreActions.reorder(keys)}
-                />
-                <TooltipV2
-                  placement="bottom"
-                  value={
-                    <>
-                      {language.t("command.session.new")}
-                      <KeybindV2 keys={newTabTooltipKeybind(command)} variant="neutral" />
+                      <IconButtonV2
+                        type="button"
+                        variant="ghost-muted"
+                        size="large"
+                        icon={<Icon name="sidebar" />}
+                        aria-label={language.t("organization.toggle")}
+                        onClick={() => window.dispatchEvent(new Event("bitsbytes:sidebar-toggle"))}
+                      />
+                      <IconButtonV2
+                        type="button"
+                        variant="ghost-muted"
+                        size="large"
+                        icon={<Icon name="arrow-left" />}
+                        aria-label={language.t("common.goBack")}
+                        onClick={back}
+                      />
+                      <IconButtonV2
+                        type="button"
+                        variant="ghost-muted"
+                        size="large"
+                        icon={<Icon name="arrow-right" />}
+                        aria-label={language.t("common.goForward")}
+                        onClick={forward}
+                      />
                     </>
                   }
                 >
-                  <IconButtonV2
-                    type="button"
-                    variant="ghost-muted"
-                    size="large"
+                  <TooltipV2
+                    placement="bottom"
+                    value={
+                      <>
+                        {language.t("home.title")}
+                        <KeybindV2 keys={command.keybindParts("home.toggle")} variant="neutral" />
+                      </>
+                    }
                     class="shrink-0"
-                    icon={<IconV2 name="plus" />}
-                    onClick={openNewTab}
-                    aria-label={language.t("command.session.new")}
+                  >
+                    <IconButtonV2
+                      type="button"
+                      variant="ghost-muted"
+                      size="large"
+                      class="!w-9 shrink-0"
+                      icon={<IconV2 name="grid-plus" />}
+                      state={layout.route().type === "home" ? "pressed" : undefined}
+                      onClick={toggleHome}
+                      aria-label={language.t("home.title")}
+                      aria-pressed={layout.route().type === "home"}
+                    />
+                  </TooltipV2>
+
+                  <TitlebarTabStrip
+                    tabs={tabsStore}
+                    currentTab={currentTab}
+                    forceTruncate={tabsAreOverflowing()}
+                    onOverflowChange={setTabsAreOverflowing}
+                    onNavigate={(tab, el) => {
+                      tabs.select(tab)
+                      el?.scrollIntoView({ behavior: "instant" })
+                    }}
+                    onClose={(tab) => {
+                      const index = tabsStore.findIndex((item) => tabKey(item) === tabKey(tab))
+                      if (index !== -1) tabsStoreActions.closeTab(index)
+                    }}
+                    onReorder={(keys) => tabsStoreActions.reorder(keys)}
                   />
-                </TooltipV2>
+                  <TooltipV2
+                    placement="bottom"
+                    value={
+                      <>
+                        {language.t("command.session.new")}
+                        <KeybindV2 keys={newTabTooltipKeybind(command)} variant="neutral" />
+                      </>
+                    }
+                  >
+                    <IconButtonV2
+                      type="button"
+                      variant="ghost-muted"
+                      size="large"
+                      class="shrink-0"
+                      icon={<IconV2 name="plus" />}
+                      onClick={openNewTab}
+                      aria-label={language.t("command.session.new")}
+                    />
+                  </TooltipV2>
+                </Show>
                 <div class="flex-1" />
                 <TitlebarV2Right state={v2RightState()} />
               </div>

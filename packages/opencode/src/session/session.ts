@@ -90,6 +90,7 @@ export function fromRow(row: SessionRow): Info {
           id: ModelV2.ID.make(row.model.id),
           providerID: ProviderV2.ID.make(row.model.providerID),
           variant: row.model.variant,
+          contextWindow: row.model.contextWindow,
         }
       : undefined,
     version: row.version,
@@ -217,6 +218,7 @@ const Model = Schema.Struct({
   id: ModelV2.ID,
   providerID: ProviderV2.ID,
   variant: optional(Schema.String),
+  contextWindow: optional(Schema.Int.check(Schema.isGreaterThan(0))),
 })
 
 export const Metadata = Schema.Record(Schema.String, Schema.Any)

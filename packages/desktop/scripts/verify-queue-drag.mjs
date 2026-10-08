@@ -46,9 +46,19 @@ const app = await _electron.launch({
 let page
 try {
   page = await app.firstWindow()
+  const suppressNotifications = () => {
+    class QuietNotification extends EventTarget {
+      static permission = "denied"
+      static async requestPermission() { return "denied" }
+      close() {}
+    }
+    Object.defineProperty(window, "Notification", { configurable: true, value: QuietNotification })
+  }
+  await page.addInitScript(suppressNotifications)
+  await page.evaluate(suppressNotifications)
   page.setDefaultTimeout(30000)
   page.on("pageerror", error => report.errors.push(error.message))
-  await page.locator(".bb-nav").waitFor({ timeout: 90000 })
+  await page.locator(".bb-org-utilities, .bb-nav").first().waitFor({ timeout: 90000 })
   await page.locator("[contenteditable=true]").first().waitFor({ timeout: 90000 })
   const call = (method, args = {}) => page.evaluate(({ method, args }) => window.api.bitsbytes.call(method, args), { method, args })
   const server = await page.evaluate(() => window.api.awaitInitialization())

@@ -9,6 +9,8 @@ import { Auth, type AnyRoute } from "@opencode-ai/llm/route"
 import { Context, Effect, Layer, Schema } from "effect"
 import { produce } from "immer"
 import { Catalog } from "../../catalog"
+import { Config } from "../../config"
+import { validContextWindow, CONTEXT_BUFFER } from "../../util/context-window"
 import { Credential } from "../../credential"
 import { Integration } from "../../integration"
 import { ModelV2 } from "../../model"
@@ -64,11 +66,21 @@ export class UnsupportedApiError extends Schema.TaggedErrorClass<UnsupportedApiE
   }
 }
 
+export class ContextWindowUnavailableError extends Schema.TaggedErrorClass<ContextWindowUnavailableError>()(
+  "SessionRunnerModel.ContextWindowUnavailableError",
+  { providerID: ProviderV2.ID, modelID: ModelV2.ID, contextWindow: Schema.Int },
+) {
+  override get message() {
+    return `The saved context window (${this.contextWindow} tokens) is unavailable for ${this.providerID}/${this.modelID}. Choose Recommended or a supported size and resend.`
+  }
+}
+
 export type Error =
   | ModelNotSelectedError
   | ModelUnavailableError
   | VariantUnavailableError
   | UnsupportedApiError
+  | ContextWindowUnavailableError
   | Integration.AuthorizationError
 
 export interface Interface {
@@ -169,8 +181,45 @@ export const fromCatalogModel = (
   )
 }
 
-export const resolve = (session: SessionSchema.Info, model: ModelV2.Info, credential?: Credential.Value) =>
-  withVariant(model, session.model?.variant).pipe(Effect.flatMap((model) => fromCatalogModel(model, credential)))
+export const resolve = (
+  session: SessionSchema.Info,
+  model: ModelV2.Info,
+  credential?: Credential.Value,
+  buffer = CONTEXT_BUFFER,
+): Effect.Effect<Model, UnsupportedApiError | VariantUnavailableError | ContextWindowUnavailableError> => {
+  const contextWindow = session.model?.contextWindow
+  if (!validContextWindow(contextWindow, model.limit, buffer))
+    return Effect.fail(
+      new ContextWindowUnavailableError({
+        providerID: model.providerID,
+        modelID: model.id,
+        contextWindow: contextWindow!,
+      }),
+    )
+  const effective =
+    contextWindow === undefined ? model : { ...model, limit: { ...model.limit, context: contextWindow } }
+  return withVariant(effective, session.model?.variant).pipe(
+    Effect.flatMap((model) => fromCatalogModel(model, credential)),
+  )
+}
+
+/** Shared pre-admission guard; repeats at execution for saved queued requests. */
+export const validateContext = (ref: ModelV2.Ref) =>
+  Effect.gen(function* () {
+    if (ref.contextWindow === undefined) return
+    const catalog = yield* Catalog.Service
+    const config = yield* Config.Service
+    const model = (yield* catalog.model.available()).find(
+      (item) => item.id === ref.id && item.providerID === ref.providerID,
+    )
+    const buffer = contextBuffer(yield* config.entries())
+    if (!validContextWindow(ref.contextWindow, model?.limit, buffer))
+      return yield* new ContextWindowUnavailableError({
+        providerID: ref.providerID,
+        modelID: ref.id,
+        contextWindow: ref.contextWindow,
+      })
+  })
 
 export const supported = (model: ModelV2.Info) =>
   model.api.type === "aisdk" &&
@@ -178,12 +227,19 @@ export const supported = (model: ModelV2.Info) =>
     model.api.package === "@ai-sdk/anthropic" ||
     (model.api.package === "@ai-sdk/openai-compatible" && model.api.url !== undefined))
 
+const contextBuffer = (entries: readonly Config.Entry[]) =>
+  entries.reduce(
+    (value, entry) => (entry.type === "document" ? (entry.info.compaction?.buffer ?? value) : value),
+    CONTEXT_BUFFER,
+  )
+
 /** Resolves models from the catalog belonging to the current Location runtime. */
 export const locationLayer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const catalog = yield* Catalog.Service
     const integrations = yield* Integration.Service
+    const config = yield* Config.Service
     return Service.of({
       resolve: Effect.fn("SessionRunnerModel.resolve")(function* (session) {
         // Location plugins populate and filter the catalog asynchronously during layer startup.
@@ -209,10 +265,15 @@ export const locationLayer = Layer.effect(
           session,
           selected,
           connection ? yield* integrations.connection.resolve(connection) : undefined,
+          contextBuffer(yield* config.entries()),
         )
       }),
     })
   }),
 )
 
-export const node = makeLocationNode({ service: Service, layer: locationLayer, deps: [Catalog.node, Integration.node] })
+export const node = makeLocationNode({
+  service: Service,
+  layer: locationLayer,
+  deps: [Catalog.node, Integration.node, Config.node],
+})

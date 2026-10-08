@@ -46,6 +46,20 @@ test("explicit V2 Resume posts no new prompt, model or user attachment", async (
   expect(seen).toEqual([{ url: "/api/session/ses_saved/resume", body: "" }])
 })
 
+test.each(["v1", "v2"] as const)("%s dispatch preserves the saved context choice independently of effort", async protocol => {
+  const seen: { url?: string; body: Record<string, any> }[] = []
+  const server = await fixture(async (request, response) => {
+    let body = ""; for await (const chunk of request) body += chunk
+    seen.push({ url: request.url, body: JSON.parse(body || "{}") })
+    response.writeHead(204).end()
+  })
+  await dispatchEngine(server, { id: "msg_budget", sessionID: "ses_budget", directory: "D:/QA", text: "Budget", model: { providerID: "qa", modelID: "qa", contextWindow: 64_000 }, variant: "medium", legacyParts: [{ type: "text", text: "Budget" }] }, { protocol, contextRoot: "D:/QA", resolveAttachment: async () => ({ text: "" }) })
+  const model = seen.find(row => row.body.model)?.body.model
+  expect(model).toMatchObject({ providerID: "qa", contextWindow: 64_000 })
+  expect(protocol === "v2" ? model.variant : seen.find(row => row.body.model)?.body.variant).toBe("medium")
+  expect(JSON.stringify(seen)).not.toContain("max_output_tokens")
+})
+
 test("V2 Goal inspection excludes waiting questions and Goal bookkeeping from progress", async () => {
   let question = true, remaining = 100, read = false
   const server = await fixture((request, response) => {

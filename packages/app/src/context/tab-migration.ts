@@ -8,7 +8,14 @@ export function migrateTabs(value: unknown, fallback: ServerConnection.Key): Tab
     if ("server" in tab && typeof tab.server !== "string") return []
     const server = ("server" in tab ? tab.server : fallback) as ServerConnection.Key
     if (tab.type === "session" && typeof tab.sessionId === "string") {
-      return [{ type: tab.type, server, sessionId: tab.sessionId }]
+      return [
+        {
+          type: tab.type,
+          server,
+          sessionId: tab.sessionId,
+          ...(typeof tab.pendingProjectID === "string" ? { pendingProjectID: tab.pendingProjectID } : {}),
+        },
+      ]
     }
     if (
       tab.type === "draft" &&
@@ -16,7 +23,16 @@ export function migrateTabs(value: unknown, fallback: ServerConnection.Key): Tab
       typeof tab.directory === "string" &&
       (tab.worktree === undefined || typeof tab.worktree === "string")
     ) {
-      return [{ type: tab.type, server, draftID: tab.draftID, directory: tab.directory, worktree: tab.worktree }]
+      return [
+        {
+          type: tab.type,
+          server,
+          draftID: tab.draftID,
+          directory: tab.directory,
+          worktree: tab.worktree,
+          ...(typeof tab.projectID === "string" ? { projectID: tab.projectID } : {}),
+        },
+      ]
     }
     return []
   })

@@ -87,6 +87,72 @@ test("queued direct previews contain a startup save failure and remain retryable
 })
 
 const integration = process.env.BB_ARTIFACT_PYTHON ? test : test.skip
+
+test("pending pages return normal preparing state for the pinned revision", async () => {
+  const f = await fixture()
+  f.artifacts.items = [{ id: "doc", sessionID: "chat", path: "source.docx", source: "source.docx", filename: "source.docx", hash: "hash", revision: 1, updated: 1, kind: "document", status: "exporting", pdf: "", error: "", history: [{ revision: 1, hash: "hash", source: "source.docx", pdf: "", updated: 1 }] }]
+  const result = await f.artifacts.pages("doc", 0, { waitMs: 0 })
+  expect(result).toMatchObject({ status: "preparing", id: "doc", revision: 1, retryAfterMs: 1000 })
+  expect(JSON.parse(result.content[0].text!)).toMatchObject({ status: "preparing", revision: 1 })
+  expect(f.artifacts.items[0].status).toBe("exporting")
+})
+
+test("preview wait cancellation leaves the shared job intact and actual failures visible", async () => {
+  const f = await fixture()
+  const item: DocumentArtifact = { id: "doc", sessionID: "chat", path: "source.docx", source: "source.docx", filename: "source.docx", hash: "hash", revision: 1, updated: 1, kind: "document", status: "exporting", pdf: "", error: "", history: [{ revision: 1, hash: "hash", source: "source.docx", pdf: "", updated: 1 }] }
+  f.artifacts.items = [item]
+  const controller = new AbortController()
+  const pending = f.artifacts.pages("doc", 0, { signal: controller.signal, waitMs: 10_000 })
+  controller.abort(new Error("waiter canceled"))
+  await expect(pending).rejects.toThrow("waiter canceled")
+  expect(item.status).toBe("exporting")
+  item.status = "error"; item.error = "actual render diagnostic"
+  await expect(f.artifacts.pages("doc", 0, { waitMs: 0 })).rejects.toThrow("actual render diagnostic")
+  await expect(f.artifacts.pages("missing", 0, { waitMs: 0 })).rejects.toThrow("bb.error.invalidDocument")
+})
+
+test("waiting pages join preparation without switching to a newly published revision", async () => {
+  const f = await fixture()
+  const item: DocumentArtifact = { id: "doc", sessionID: "chat", path: "source.docx", source: "source.docx", filename: "source.docx", hash: "hash-one", revision: 1, updated: 1, kind: "document", status: "exporting", pdf: "", error: "", history: [{ revision: 1, hash: "hash-one", source: "source.docx", pdf: "", updated: 1 }] }
+  f.artifacts.items = [item]
+  const calls: Record<string, unknown>[] = []
+  f.artifacts.runtime.call = async <T>(_action: string, args: Record<string, unknown>) => { calls.push(args); return { pages: 2, images: [], next: 1 } as T }
+  const pending = f.artifacts.pages("doc", 0, { waitMs: 500 })
+  item.history![0].pdf = "immutable-one.pdf"
+  item.history!.push({ revision: 2, hash: "hash-two", source: "source-two.docx", pdf: "new-two.pdf", updated: 2 })
+  item.revision = 2; item.hash = "hash-two"; item.pdf = "new-two.pdf"
+  const result = await pending
+  expect(result).toMatchObject({ status: "ready", revision: 1 })
+  expect(calls).toHaveLength(1)
+  expect(calls[0]).toMatchObject({ path: "immutable-one.pdf", folder: join(f.folder, "previews/pages/hash-one") })
+})
+
+test("historical page readers start and join one immutable revision render", async () => {
+  const f = await fixture(), pdf = join(f.folder, "immutable-old.pdf")
+  await writeFile(pdf, "%PDF-1.4\n")
+  f.artifacts.items = [{ id: "doc", sessionID: "chat", path: "latest.docx", source: "latest.docx", filename: "latest.docx", hash: "latest", revision: 2, updated: 2, kind: "document", status: "ready", pdf: "latest.pdf", error: "", history: [
+    { revision: 1, hash: "old", source: "immutable-old.docx", pdf: "", updated: 1 },
+    { revision: 2, hash: "latest", source: "latest.docx", pdf: "latest.pdf", updated: 2 },
+  ] }]
+  let started!: () => void, finish!: () => void
+  const rendering = new Promise<void>(resolve => { started = resolve })
+  const gate = new Promise<void>(resolve => { finish = resolve })
+  const calls: { action: string; args: Record<string, unknown> }[] = []
+  f.artifacts.runtime.call = async <T>(action: string, args: Record<string, unknown>) => {
+    calls.push({ action, args })
+    if (action === "render") { started(); await gate; return { pdf } as T }
+    return { pages: 1, images: [], next: null } as T
+  }
+  const first = f.artifacts.pages("doc", 0, { revision: 1, waitMs: 1000 })
+  const second = f.artifacts.pages("doc", 0, { revision: 1, waitMs: 1000 })
+  await rendering
+  expect(calls.filter(call => call.action === "render")).toHaveLength(1)
+  expect(calls[0].args.path).toBe("immutable-old.docx")
+  finish()
+  expect(await first).toMatchObject({ status: "ready", revision: 1 })
+  expect(await second).toMatchObject({ status: "ready", revision: 1 })
+  expect(f.artifacts.items[0]).toMatchObject({ revision: 2, pdf: "latest.pdf", status: "ready" })
+})
 integration("publication retries cannot acknowledge a snapshot that is still unsaved", async () => {
   const f = await fixture(), path = join(f.folder, "storage.html"), temporary = join(f.folder, "artifacts.json.tmp")
   const source = "<!doctype html><p>Complete saved source 🌿</p>"

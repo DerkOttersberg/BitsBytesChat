@@ -1,4 +1,5 @@
 import * as i18n from "@solid-primitives/i18n"
+import { bbt } from "../../bitsbytes/copy"
 import {
   DESKTOP_NATIVE_LOCALES,
   detectDesktopNativeLocale,
@@ -186,10 +187,10 @@ const state = {
 
 state.dict = build(state.locale)
 
-const translate = i18n.translator(() => state.dict, i18n.resolveTemplate)
-
 export function t(key: keyof Dictionary, params?: Record<string, string | number>) {
-  return translate(key, params)
+  // Replace only authored source copy, before inserting versions, filenames or
+  // diagnostics supplied by the caller.
+  return i18n.resolveTemplate(state.dict[key].replace(/\bOpenCode(?: Desktop)?\b/g, bbt("brand")), params)
 }
 
 export function initI18n(): Promise<Locale> {

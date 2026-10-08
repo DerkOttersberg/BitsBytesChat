@@ -1,0 +1,25 @@
+[data-component="recorded-image-cards"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0;
+}
+[data-slot="recorded-image-card"] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  width: 320px;
+  padding: 7px 10px 7px 7px;
+  border: 1px solid var(--border-weak-base);
+  border-radius: 10px;
+  background: var(--background-base);
+  img { width: 54px; height: 44px; object-fit: contain; border-radius: 5px; }
+  button { flex-shrink: 0; color: var(--text-base); font-size: 12px; border-radius: 5px; padding: 4px 6px; cursor: pointer; }
+  button:hover { background: var(--surface-base-hover); }
+  button:focus-visible { outline: 2px solid var(--border-interactive-base); outline-offset: 2px; }
+  button:disabled { opacity: .5; cursor: default; }
+}
+[data-slot="recorded-image-description"] { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+[data-slot="recorded-image-description"] > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-slot="recorded-image-dimensions"] { color: var(--text-weak); }

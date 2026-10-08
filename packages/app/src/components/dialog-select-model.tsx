@@ -34,6 +34,43 @@ type ModelItem = ReturnType<ModelState["list"]>[number]
 const modelKey = (model: ModelItem) => `${model.provider.id}:${model.id}`
 const manageKey = "action:manage"
 
+function showContextWindow(model: ModelState, item: ModelItem, dialog: ReturnType<typeof useDialog>) {
+  void dialog.show(() => {
+    const language = useLanguage()
+    const key = { providerID: item.provider.id, modelID: item.id }
+    const choose = (value?: number) => {
+      model.context.set(key, value)
+      dialog.close()
+    }
+    return (
+      <Dialog title={language.t("contextWindow.title")}>
+        <div class="flex flex-col gap-1 px-4 pb-5" data-component="context-window-options">
+          <p class="text-13-regular text-text-weak pb-2">{language.t("contextWindow.hint", { model: item.name })}</p>
+          <Button variant="ghost" class="justify-between" onClick={() => choose()}>
+            {language.t("contextWindow.recommended")}
+            <Show when={model.context.get(key) === undefined}>
+              <Icon name="check" size="small" />
+            </Show>
+          </Button>
+          <For each={model.context.list(key)}>
+            {(value) => (
+              <Button variant="ghost" class="justify-between" onClick={() => choose(value)}>
+                {language.t("contextWindow.tokens", { count: value.toLocaleString(language.locale()) })}
+                <Show when={model.context.get(key) === value}>
+                  <Icon name="check" size="small" />
+                </Show>
+              </Button>
+            )}
+          </For>
+          <Show when={!model.context.list(key).length}>
+            <p class="text-12-regular text-text-weak pt-2">{language.t("contextWindow.unknown")}</p>
+          </Show>
+        </div>
+      </Dialog>
+    )
+  })
+}
+
 const sortModelGroups = (a: { category: string; items: ModelItem[] }, b: { category: string; items: ModelItem[] }) => {
   const aIndex = popularProviders.indexOf(a.category)
   const bIndex = popularProviders.indexOf(b.category)
@@ -54,8 +91,11 @@ const ModelList: Component<{
   model?: ModelState
 }> = (props) => {
   const model = props.model ?? useLocal().model
+  const dialog = useDialog()
   const language = useLanguage()
-  void usePlatform().bitsbytes?.call("models.list", { force: false }).catch(() => undefined)
+  void usePlatform()
+    .bitsbytes?.call("models.list", { force: false })
+    .catch(() => undefined)
 
   const models = createMemo(() =>
     model
@@ -101,7 +141,14 @@ const ModelList: Component<{
       }}
     >
       {(i) => (
-        <div class="w-full flex items-center gap-x-2 text-13-regular">
+        <div
+          class="w-full flex items-center gap-x-2 text-13-regular"
+          onContextMenu={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            showContextWindow(model, i, dialog)
+          }}
+        >
           <span class="truncate">{i.name}</span>
           <Show when={isFree(i.provider.id, i.cost)}>
             <Tag>{language.t("model.tag.free")}</Tag>
@@ -155,7 +202,9 @@ export function ModelSelectorPopover(props: {
     })
   }
   const language = useLanguage()
-  void usePlatform().bitsbytes?.call("models.list", { force: false }).catch(() => undefined)
+  void usePlatform()
+    .bitsbytes?.call("models.list", { force: false })
+    .catch(() => undefined)
 
   return (
     <Kobalte
@@ -245,6 +294,8 @@ export function ModelSelectorPopoverV2(props: {
       models={controller.models}
       groups={controller.groups}
       current={controller.current}
+      currentItem={controller.currentItem}
+      onContext={(item) => showContextWindow(controller.model, item, dialog)}
       select={controller.select}
       onManage={() => {
         void import("./dialog-manage-models").then((module) => {
@@ -270,6 +321,8 @@ function createModelSelectorController(input: {
   )
 
   return {
+    model,
+    currentItem: model.current,
     models: (search: string) => {
       const query = search.trim()
       const filtered = query
@@ -300,12 +353,22 @@ function ModelSelectorPopoverV2View(props: {
   models: (search: string) => ModelItem[]
   groups: (models: ModelItem[]) => { category: string; items: ModelItem[] }[]
   current: () => string | undefined
+  currentItem: () => ModelItem | undefined
+  onContext: (item: ModelItem) => void
   select: (item: ModelItem) => void
   onManage: () => void
   onClose: () => void
 }) {
   const language = useLanguage()
-  const [store, setStore] = createStore({ open: false, search: "", active: "", catalogError: "", catalogLoading: false, missingSol: false, account: false })
+  const [store, setStore] = createStore({
+    open: false,
+    search: "",
+    active: "",
+    catalogError: "",
+    catalogLoading: false,
+    missingSol: false,
+    account: false,
+  })
   let searchRef: HTMLInputElement | undefined
   let contentRef: HTMLDivElement | undefined
   const dismiss = createMenuDismissController(() => contentRef)
@@ -330,9 +393,12 @@ function ModelSelectorPopoverV2View(props: {
       setStore("account", !!state.account)
       if (!state.account) return
       const models = await bridge.call<{ id: string }[]>("models.list", { provider: "chatgpt", force })
-      setStore({ catalogError: "", missingSol: !models.some(model => model.id === "gpt-6.1-sol") })
-    } catch (error) { setStore({ catalogError: String(error), missingSol: false }) }
-    finally { setStore("catalogLoading", false) }
+      setStore({ catalogError: "", missingSol: !models.some((model) => model.id === "gpt-6.1-sol") })
+    } catch (error) {
+      setStore({ catalogError: String(error), missingSol: false })
+    } finally {
+      setStore("catalogLoading", false)
+    }
   }
   const setOpen = (open: boolean) => {
     if (open) {
@@ -353,6 +419,12 @@ function ModelSelectorPopoverV2View(props: {
     dismiss.preventTriggerRestore()
     setOpen(false)
     dismiss.afterClose(() => props.select(item))
+  }
+  const contextModel = (item?: ModelItem) => {
+    if (!item) return
+    dismiss.preventTriggerRestore()
+    setOpen(false)
+    dismiss.afterClose(() => props.onContext(item))
   }
   const manage = () => {
     dismiss.preventTriggerRestore()
@@ -385,14 +457,41 @@ function ModelSelectorPopoverV2View(props: {
     createEventListener(
       document,
       "keydown",
-      (event: KeyboardEvent) => handleDocumentSearchKeydown(searchRef, event, store.search, setSearch),
+      (event: KeyboardEvent) => {
+        if (
+          (event.key === "Enter" || event.key === " ") &&
+          event.target instanceof Element &&
+          event.target.closest('[data-action="model-context-window"]')
+        )
+          return
+        handleDocumentSearchKeydown(searchRef, event, store.search, setSearch)
+      },
       true,
     )
   })
 
+  const contextTrigger: ModelSelectorTrigger = (trigger) => (
+    <span
+      class="contents"
+      onContextMenu={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        contextModel(props.currentItem())
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+          event.preventDefault()
+          contextModel(props.currentItem())
+        }
+      }}
+    >
+      {props.trigger(trigger)}
+    </span>
+  )
+
   return (
     <MenuV2 open={store.open} modal={false} placement="top-start" gutter={6} onOpenChange={setOpen}>
-      <MenuV2.Trigger as={props.trigger} />
+      <MenuV2.Trigger as={contextTrigger} />
       <MenuV2.Portal>
         <MenuV2.Content
           ref={(element: HTMLDivElement) => (contentRef = element)}
@@ -417,6 +516,11 @@ function ModelSelectorPopoverV2View(props: {
                 onKeyDown={(event) => {
                   if (event.key === "Tab") return
                   event.stopPropagation()
+                  if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+                    event.preventDefault()
+                    contextModel(models().find((item) => modelKey(item) === store.active))
+                    return
+                  }
                   if (event.key === "Escape") {
                     event.preventDefault()
                     dismiss.preventTriggerRestore()
@@ -455,9 +559,26 @@ function ModelSelectorPopoverV2View(props: {
             </div>
           </div>
           <div class="h-px bg-v2-border-border-muted" />
-          <Show when={store.catalogError}><p class="px-3 py-2 text-12-regular text-text-weak" title={store.catalogError}>{language.t("bitsbytes.cached")}</p></Show>
-          <Show when={store.missingSol}><p class="px-3 pt-2 text-12-regular text-text-weak">{language.t("bitsbytes.modelUnavailable")}</p></Show>
-          <Show when={store.account}><div class="px-2 py-1"><ButtonV2 variant="ghost-muted" size="normal" disabled={store.catalogLoading} onClick={() => void refreshCatalog(true)}>{language.t(store.catalogLoading ? "bitsbytes.refreshingModels" : "bitsbytes.refreshModels")}</ButtonV2></div></Show>
+          <Show when={store.catalogError}>
+            <p class="px-3 py-2 text-12-regular text-text-weak" title={store.catalogError}>
+              {language.t("bitsbytes.cached")}
+            </p>
+          </Show>
+          <Show when={store.missingSol}>
+            <p class="px-3 pt-2 text-12-regular text-text-weak">{language.t("bitsbytes.modelUnavailable")}</p>
+          </Show>
+          <Show when={store.account}>
+            <div class="px-2 py-1">
+              <ButtonV2
+                variant="ghost-muted"
+                size="normal"
+                disabled={store.catalogLoading}
+                onClick={() => void refreshCatalog(true)}
+              >
+                {language.t(store.catalogLoading ? "bitsbytes.refreshingModels" : "bitsbytes.refreshModels")}
+              </ButtonV2>
+            </div>
+          </Show>
           <ScrollView data-slot="model-selector-scroll" class="max-h-[220px] min-h-0">
             <div class="flex flex-col p-0.5 pt-0">
               <Show
@@ -495,7 +616,12 @@ function ModelSelectorPopoverV2View(props: {
                                 value={modelKey(item)}
                                 data-option-key={modelKey(item)}
                                 data-selected-model={props.current() === modelKey(item) ? true : undefined}
-                                class="scroll-my-6 w-full"
+                                class="scroll-my-6 w-full group"
+                                onContextMenu={(event: MouseEvent) => {
+                                  event.preventDefault()
+                                  event.stopPropagation()
+                                  contextModel(item)
+                                }}
                                 classList={{ "!bg-v2-overlay-simple-overlay-hover": store.active === modelKey(item) }}
                                 onMouseEnter={() => {
                                   setStore("active", modelKey(item))
@@ -510,6 +636,25 @@ function ModelSelectorPopoverV2View(props: {
                                 <Show when={item.latest}>
                                   <TagV2 class="shrink-0">{language.t("model.tag.latest")}</TagV2>
                                 </Show>
+                                <button
+                                  type="button"
+                                  data-action="model-context-window"
+                                  class="ml-auto shrink-0 rounded px-1 text-text-weak opacity-0 group-hover:opacity-100 focus:opacity-100"
+                                  aria-label={language.t("contextWindow.title")}
+                                  title={language.t("contextWindow.title")}
+                                  onPointerDown={(event) => event.stopPropagation()}
+                                  onPointerUp={(event) => event.stopPropagation()}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter" || event.key === " ") event.stopPropagation()
+                                  }}
+                                  onClick={(event) => {
+                                    event.preventDefault()
+                                    event.stopPropagation()
+                                    contextModel(item)
+                                  }}
+                                >
+                                  ⋯
+                                </button>
                               </MenuV2.RadioItem>
                             </TooltipV2>
                           )}
@@ -545,7 +690,9 @@ function ModelSelectorPopoverV2View(props: {
 export const DialogSelectModel: Component<{ provider?: string; model?: ModelState }> = (props) => {
   const dialog = useDialog()
   const language = useLanguage()
-  void usePlatform().bitsbytes?.call("models.list", { force: false }).catch(() => undefined)
+  void usePlatform()
+    .bitsbytes?.call("models.list", { force: false })
+    .catch(() => undefined)
   const local = useLocal()
   const directory = () => decode64(local.slug())
 

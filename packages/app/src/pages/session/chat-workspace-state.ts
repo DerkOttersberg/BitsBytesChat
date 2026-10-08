@@ -1,6 +1,6 @@
 export type PanelTab = {
   id: string
-  kind: "chat" | "browser" | "terminal" | "review" | "file" | "code" | "document" | "source" | "plan" | "goal"
+  kind: "chat" | "browser" | "terminal" | "review" | "file" | "code" | "document" | "source" | "plan" | "goal" | "image"
   title: string
   owner: string
   path?: string
@@ -10,7 +10,18 @@ export type PanelTab = {
   previewRevision?: number
 }
 
-export function readPanelState(storage: Pick<Storage, "getItem" | "setItem">, key: string, maximumWidth: number) {
+export function workspacePanelLayout(workspaceWidth: number, preferredWidth: number) {
+  const available = Math.max(0, workspaceWidth - 16)
+  const maximum = Math.max(0, available - 280 - 8)
+  const overlay = maximum < 340
+  return { width: overlay ? available : Math.min(Math.max(340, preferredWidth), maximum), maximum, overlay }
+}
+
+export function readPanelState(
+  storage: Pick<Storage, "getItem" | "setItem">,
+  key: string,
+  maximumWidth = Number.POSITIVE_INFINITY,
+) {
   const empty = { tabs: [] as PanelTab[], active: "", collapsed: true, width: Math.min(520, maximumWidth) }
   const raw = (() => {
     try {
@@ -53,8 +64,9 @@ export function readPanelState(storage: Pick<Storage, "getItem" | "setItem">, ke
       typeof previous?.active === "string" && tabs.some((tab) => tab.id === previous.active)
         ? previous.active
         : (tabs.at(-1)?.id ?? ""),
-    collapsed:
-      typeof previous?.open === "boolean"
+    collapsed: !tabs.length
+      ? true
+      : typeof previous?.open === "boolean"
         ? !previous.open
         : !tabs.length || (typeof previous?.collapsed === "boolean" ? previous.collapsed : false),
     width:
@@ -93,12 +105,13 @@ function panelTab(value: unknown): value is PanelTab {
     typeof value.owner === "string" &&
     Boolean(value.owner) &&
     typeof value.kind === "string" &&
-    ["chat", "browser", "terminal", "review", "file", "code", "document", "source", "plan", "goal"].includes(
+    ["chat", "browser", "terminal", "review", "file", "code", "document", "source", "plan", "goal", "image"].includes(
       value.kind,
     ) &&
     (value.path === undefined || typeof value.path === "string") &&
     (value.uri === undefined || typeof value.uri === "string") &&
     (value.kind !== "source" || (typeof value.uri === "string" && Boolean(value.uri))) &&
+    (value.kind !== "image" || (typeof value.uri === "string" && /^[a-f0-9]{64}$/.test(value.uri))) &&
     (value.unread === undefined || typeof value.unread === "boolean") &&
     (value.revision === undefined ||
       (typeof value.revision === "number" && Number.isInteger(value.revision) && value.revision >= 0)) &&

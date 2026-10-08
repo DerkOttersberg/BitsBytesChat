@@ -7,6 +7,7 @@ import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { useProviders } from "@/hooks/use-providers"
 import { resolveDefaultModel } from "@/hooks/provider-catalog"
+import { contextWindowOptions } from "@opencode-ai/core/util/context-window"
 
 export function createPromptModelSelection(input: { agent: () => { model?: ModelKey; variant?: string } | undefined }) {
   const sdk = useSDK()
@@ -41,7 +42,17 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
       (item): item is ModelKey => !!item && valid(item),
     )
     if (!key) return
-    return models.find(key)
+    const model = models.find(key)
+    return model
+      ? {
+          ...model,
+          contextWindow:
+            prompt.model.context.get(JSON.stringify([key.providerID, key.modelID])) ??
+            (prompt.model.current()?.providerID === key.providerID && prompt.model.current()?.modelID === key.modelID
+              ? prompt.model.current()?.contextWindow
+              : undefined),
+        }
+      : undefined
   }
   const recentModels = createMemo(() =>
     models.recent
@@ -67,7 +78,15 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
     set(item: ModelKey | undefined, options?: { recent?: boolean }) {
       startTransition(() =>
         batch(() => {
-          prompt.model.set(item ? { ...item, variant: prompt.model.current()?.variant } : undefined)
+          prompt.model.set(
+            item
+              ? {
+                  ...item,
+                  contextWindow: prompt.model.context.get(JSON.stringify([item.providerID, item.modelID])),
+                  variant: prompt.model.current()?.variant,
+                }
+              : undefined,
+          )
           if (!item) return
           models.setVisibility(item, true)
           if (options?.recent) models.recent.push(item)
@@ -76,6 +95,24 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
     },
     visible: models.visible,
     setVisibility: models.setVisibility,
+    context: {
+      get(item: ModelKey) {
+        return (
+          prompt.model.context.get(JSON.stringify([item.providerID, item.modelID])) ??
+          (prompt.model.current()?.providerID === item.providerID && prompt.model.current()?.modelID === item.modelID
+            ? prompt.model.current()?.contextWindow
+            : undefined)
+        )
+      },
+      list(item: ModelKey) {
+        return contextWindowOptions(models.find(item)?.limit, sync().data.config.compaction?.reserved)
+      },
+      set(item: ModelKey, value: number | undefined) {
+        prompt.model.context.set(JSON.stringify([item.providerID, item.modelID]), value)
+        prompt.model.set({ ...item, contextWindow: value, variant: prompt.model.current()?.variant })
+        models.setVisibility(item, true)
+      },
+    },
     variant: {
       configured() {
         const item = input.agent()
@@ -109,7 +146,12 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
           batch(() => {
             const model = current()
             if (!model) return
-            prompt.model.set({ providerID: model.provider.id, modelID: model.id, variant: value ?? null })
+            prompt.model.set({
+              providerID: model.provider.id,
+              modelID: model.id,
+              contextWindow: model.contextWindow,
+              variant: value ?? null,
+            })
             models.variant.set({ providerID: model.provider.id, modelID: model.id }, value)
           }),
         )

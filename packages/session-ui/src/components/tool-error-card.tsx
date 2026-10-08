@@ -6,10 +6,13 @@ import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { useI18n } from "@opencode-ai/ui/context/i18n"
+import { toolPresentationKey } from "./tool-presentation"
+import { ToolDetails } from "./tool-details"
 
 export interface ToolErrorCardProps extends Omit<ComponentProps<typeof Card>, "children" | "variant"> {
   tool: string
   error: string
+  input?: unknown
   title?: string
   defaultOpen?: boolean
   open?: boolean
@@ -30,6 +33,7 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
   const [split, rest] = splitProps(props, [
     "tool",
     "error",
+    "input",
     "title",
     "defaultOpen",
     "open",
@@ -44,6 +48,8 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
   }
   const name = createMemo(() => {
     if (split.title) return split.title
+    const presentation = toolPresentationKey(split.tool)
+    if (presentation) return i18n.t(presentation)
     const map: Record<string, string> = {
       read: "ui.tool.read",
       list: "ui.tool.list",
@@ -154,6 +160,9 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
               </div>
             </Show>
             <Show when={body()}>{(value) => <CardDescription>{value()}</CardDescription>}</Show>
+            <Show when={open()}>
+              <ToolDetails tool={split.tool} input={split.input} error={split.error} />
+            </Show>
           </div>
         </Collapsible.Content>
       </Collapsible>

@@ -9,8 +9,9 @@ type Local = {
 
 type ModelSelection = {
   model: {
-    current(): { id: string; provider: { id: string } } | undefined
-    set(model: { providerID: string; modelID: string }): void
+    current(): { id: string; provider: { id: string }; contextWindow?: number } | undefined
+    set(model: { providerID: string; modelID: string; contextWindow?: number }): void
+    context?: { set(model: { providerID: string; modelID: string }, value?: number): void }
     variant: {
       current(): string | undefined
       set(variant: string | undefined): void
@@ -20,8 +21,8 @@ type ModelSelection = {
 
 type PromptState = {
   model: {
-    current(): { providerID: string; modelID: string; variant?: string | null } | undefined
-    set(model: { providerID: string; modelID: string; variant?: string | null }): void
+    current(): { providerID: string; modelID: string; variant?: string | null; contextWindow?: number } | undefined
+    set(model: { providerID: string; modelID: string; variant?: string | null; contextWindow?: number }): void
   }
 }
 
@@ -40,9 +41,15 @@ export const syncPromptModel = (local: ModelSelection, prompt: PromptState) => {
     providerID: model.provider.id,
     modelID: model.id,
     variant: local.model.variant.current(),
+    contextWindow: model.contextWindow,
   }
   const current = prompt.model.current()
-  if (current?.providerID === next.providerID && current.modelID === next.modelID && current.variant === next.variant)
+  if (
+    current?.providerID === next.providerID &&
+    current.modelID === next.modelID &&
+    current.variant === next.variant &&
+    current.contextWindow === next.contextWindow
+  )
     return
   prompt.model.set(next)
 }
@@ -54,10 +61,12 @@ export const restorePromptModel = (local: ModelSelection, prompt: PromptState) =
   if (
     current?.provider.id === model.providerID &&
     current.id === model.modelID &&
-    local.model.variant.current() === (model.variant ?? undefined)
+    local.model.variant.current() === (model.variant ?? undefined) &&
+    current.contextWindow === model.contextWindow
   )
     return true
   local.model.set({ providerID: model.providerID, modelID: model.modelID })
+  local.model.context?.set(model, model.contextWindow)
   local.model.variant.set(model.variant ?? undefined)
   return true
 }

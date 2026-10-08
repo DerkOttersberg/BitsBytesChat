@@ -122,7 +122,9 @@ export function ChatRuns() {
     for (const context of prompt.context.items()) prompt.context.remove(context.key)
     for (const context of draft.context) prompt.context.add(context)
     local.agent.set(draft.agent)
-    local.model.set({ providerID: draft.model.providerID, modelID: draft.model.modelID })
+    local.model.context.set(draft.model, draft.model.contextWindow)
+    prompt.model.set({ ...draft.model, variant: draft.variant ?? null })
+    prompt.model.context.set(JSON.stringify([draft.model.providerID, draft.model.modelID]), draft.model.contextWindow)
     local.model.variant.set(draft.variant)
   }
   createEffect(() => { if (store.editing && !run.store.value?.queue.some(item => item.id === store.editing && item.editing)) setStore({ editing: "" }) })

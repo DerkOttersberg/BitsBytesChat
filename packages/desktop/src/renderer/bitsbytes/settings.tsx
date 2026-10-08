@@ -4,6 +4,7 @@ import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import type { Settings, State } from "../../bitsbytes/types"
 import { bbt, bbError } from "../../bitsbytes/copy"
 import { McpSettings } from "./mcp-settings"
+import { ImageGenerationSettings } from "./image-settings"
 
 export function BitsBytesSettings(props: { page: "audio" | "tools" | "chatgpt" }) {
   const api = window.api.bitsbytes
@@ -58,6 +59,7 @@ export function BitsBytesSettings(props: { page: "audio" | "tools" | "chatgpt" }
         </Show>
           <Show when={props.page === "tools"}>
             <McpSettings />
+            <ImageGenerationSettings />
             <h3>{bbt("questionTimer")}</h3><p class="bb-subtle">{bbt("questionTimerHint")}</p><label class="bb-check"><input type="checkbox" checked={store.values.questionAutoResolve !== false} onChange={event => setStore("values", "questionAutoResolve", event.currentTarget.checked)} />{bbt("enable")}</label>
             <h3>{bbt("artifactsRuntime")}</h3><p class="bb-subtle">{bbt("artifactsHint")}</p><ButtonV2 disabled={!!store.busy} onClick={() => void run("artifact.setup")}>{bbt("installArtifacts")}</ButtonV2>
           <h3>{bbt("browserControl")}</h3><p class="bb-subtle">{bbt("browserHint")}</p><label class="bb-check"><input type="checkbox" checked={store.values.browserControl} onChange={event => setStore("values", "browserControl", event.currentTarget.checked)} />{bbt("enableBrowser")}</label>

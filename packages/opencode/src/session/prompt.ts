@@ -59,6 +59,7 @@ import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionReminders } from "./reminders"
 import { SessionTools } from "./tools"
 import { LLMEvent } from "@opencode-ai/llm"
+import { applyContextWindow } from "./context-window"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -629,6 +630,7 @@ const layer = Layer.effect(
           providerID: ProviderV2.ID.make(current.model.providerID),
           modelID: ModelV2.ID.make(current.model.id),
           ...(current.model.variant && current.model.variant !== "default" ? { variant: current.model.variant } : {}),
+          contextWindow: current.model.contextWindow,
         }
       }
       const match = yield* sessions
@@ -649,7 +651,12 @@ const layer = Layer.effect(
         throw error
       }
 
-      const model = input.model ?? ag.model ?? (yield* currentModel(input.sessionID))
+      const model: typeof ModelRef.Type = input.model ?? ag.model ?? (yield* currentModel(input.sessionID))
+      if (model.contextWindow !== undefined) {
+        const resolved = yield* provider.getModel(model.providerID, model.modelID).pipe(Effect.orDie)
+        const cfg = yield* config.get()
+        yield* Effect.try({ try: () => applyContextWindow(resolved, model.contextWindow, cfg.compaction?.reserved), catch: error => new InputError({ message: (error as Error).message }) })
+      }
       const same = ag.model && model.providerID === ag.model.providerID && model.modelID === ag.model.modelID
       const full =
         !input.variant && ag.variant && same
@@ -670,6 +677,7 @@ const layer = Layer.effect(
           providerID: model.providerID,
           modelID: model.modelID,
           variant,
+          contextWindow: model.contextWindow,
         },
         system: input.system,
         format: input.format,
@@ -680,7 +688,8 @@ const layer = Layer.effect(
         current.agent !== info.agent ||
         current.model?.providerID !== info.model.providerID ||
         current.model?.id !== info.model.modelID ||
-        (current.model?.variant === "default" ? undefined : current.model?.variant) !== info.model.variant
+        (current.model?.variant === "default" ? undefined : current.model?.variant) !== info.model.variant ||
+        current.model?.contextWindow !== info.model.contextWindow
       ) {
         yield* sessions.setAgentModel({
           sessionID: input.sessionID,
@@ -689,6 +698,7 @@ const layer = Layer.effect(
             id: info.model.modelID,
             providerID: info.model.providerID,
             variant: info.model.variant ?? "default",
+            contextWindow: info.model.contextWindow,
           },
           time: info.time.created,
         })
@@ -1231,7 +1241,8 @@ const layer = Layer.effect(
               history: msgs,
             }).pipe(Effect.ignore, Effect.forkIn(scope))
 
-          const model = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
+          const originalModel = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
+          const model = applyContextWindow(originalModel, lastUser.model.contextWindow, (yield* config.get()).compaction?.reserved)
           const task = tasks.pop()
 
           if (task?.type === "subtask") {
@@ -1283,6 +1294,7 @@ const layer = Layer.effect(
             mode: agent.name,
             agent: agent.name,
             variant: lastUser.model.variant,
+            contextWindow: lastUser.model.contextWindow,
             path: { cwd: ctx.directory, root: ctx.worktree },
             cost: 0,
             tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
@@ -1637,6 +1649,7 @@ const layer = Layer.effect(
 const ModelRef = Schema.Struct({
   providerID: ProviderV2.ID,
   modelID: ModelV2.ID,
+  contextWindow: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
 })
 
 export const PromptInput = Schema.Struct({

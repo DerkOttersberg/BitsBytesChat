@@ -806,7 +806,11 @@ it.live("session.processor effect tests publish retry status updates", () =>
         const off = yield* events.listen((evt) => {
           if (evt.type !== SessionStatus.Event.Status.type) return Effect.void
           const data = evt.data as typeof SessionStatus.Event.Status.data.Type
-          if (data.sessionID === chat.id && data.status.type === "retry") states.push(data.status.attempt)
+          if (data.sessionID === chat.id && data.status.type === "retry") {
+            states.push(data.status.attempt)
+            expect(data.status.owner).toMatchObject({ inputID: parent.id, assistantID: msg.id })
+            expect(data.status.owner?.runEpoch).toBeTruthy()
+          }
           return Effect.void
         })
         const handle = yield* processors.create({
@@ -1068,6 +1072,8 @@ it.live("session.processor effect tests record aborted errors and idle state", (
           .pipe(Effect.forkChild)
 
         yield* llm.wait(1)
+        const running = yield* sts.get(chat.id)
+        expect(running).toMatchObject({ type: "busy", owner: { inputID: parent.id, assistantID: msg.id } })
         yield* Fiber.interrupt(run)
 
         const exit = yield* Fiber.await(run)

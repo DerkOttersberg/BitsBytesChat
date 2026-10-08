@@ -366,11 +366,12 @@ export function Markdown(
     text: string
     cacheKey?: string
     streaming?: boolean
+    imageSource?: (source: string) => string | undefined
     class?: string
     classList?: Record<string, boolean>
   },
 ) {
-  const [local, others] = splitProps(props, ["text", "cacheKey", "streaming", "class", "classList"])
+  const [local, others] = splitProps(props, ["text", "cacheKey", "streaming", "imageSource", "class", "classList"])
   const i18n = useI18n()
   const [root, setRoot] = createSignal<HTMLDivElement>()
   const owner = createUniqueId()
@@ -515,7 +516,7 @@ export function Markdown(
     })
     activeCodeKeys.clear()
     nextCodeKeys.forEach((key) => activeCodeKeys.add(key))
-    content.forEach((block, index) => updateBlock(container, index, block, labels))
+    content.forEach((block, index) => updateBlock(container, index, block, labels, local.imageSource))
     while (container.children.length > content.length) {
       const child = container.lastElementChild
       if (!child) break
@@ -586,14 +587,14 @@ function disposeCode(key: string) {
   disposeStreamingCode(key)
 }
 
-function updateBlock(container: HTMLDivElement, index: number, block: RenderedBlock, labels: CopyLabels) {
+function updateBlock(container: HTMLDivElement, index: number, block: RenderedBlock, labels: CopyLabels, imageSource?: (source: string) => string | undefined) {
   const current = container.children[index]
   if (block.mode === "code") {
     updateCodeBlock(container, current, block, labels)
     return
   }
   if (
-    current instanceof HTMLDivElement &&
+    !imageSource && current instanceof HTMLDivElement &&
     current.dataset.markdownKey === block.key &&
     current.dataset.markdownHash === block.hash
   )
@@ -604,7 +605,22 @@ function updateBlock(container: HTMLDivElement, index: number, block: RenderedBl
   next.dataset.markdownKey = block.key
   next.dataset.markdownHash = block.hash
   next.style.display = "contents"
-  next.innerHTML = block.html
+  if (imageSource) {
+    // Template content is inert: unresolved relative/private image paths never
+    // become browser requests before the saved-resource resolver handles them.
+    const template = document.createElement("template")
+    template.innerHTML = block.html
+    template.content.querySelectorAll("img").forEach(image => {
+      const source = imageSource(image.getAttribute("src") ?? "")
+      image.removeAttribute("srcset")
+      if (source) { image.setAttribute("src", source); return }
+      const fallback = document.createElement("span")
+      fallback.textContent = image.alt
+      fallback.dataset.imageUnavailable = ""
+      image.replaceWith(fallback)
+    })
+    next.append(template.content)
+  } else next.innerHTML = block.html
   decorate(next, labels)
 
   if (!(current instanceof HTMLDivElement)) {

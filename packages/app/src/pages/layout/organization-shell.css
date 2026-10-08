@@ -1,0 +1,366 @@
+.bb-organization-shell {
+  display: flex;
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  color: var(--text-base);
+  background: var(--background-base);
+}
+.bb-org-sidebar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 var(--organization-width);
+  width: var(--organization-width);
+  min-height: 0;
+  background: var(--surface-base);
+  border-right: 1px solid var(--border-weak-base);
+  font-size: 13px;
+  padding: 8px 8px 0;
+}
+:root[data-color-scheme="dark"] .bb-org-sidebar {
+  background: #111111;
+}
+.bb-org-sidebar.collapsed {
+  display: none;
+}
+.bb-org-main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.bb-org-chat-content,
+.bb-org-utility-content {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+.bb-org-utilities {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 18px;
+  flex-shrink: 0;
+  gap: 1px;
+}
+.bb-org-utility {
+  display: flex;
+  align-items: center;
+  text-align: left;
+  gap: 10px;
+  height: 28px;
+  padding: 0 6px;
+  border-radius: 6px;
+}
+.bb-org-utility:hover,
+.bb-org-row:hover,
+.bb-org-utility.active {
+  background: var(--surface-raised-base-hover);
+}
+.bb-org-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.bb-org-heading {
+  font-size: 12px;
+  color: var(--text-weak);
+  padding: 10px 6px 8px;
+}
+.bb-org-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bb-org-heading-actions > span {
+  flex: 1;
+}
+.bb-org-heading-actions button {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+}
+.bb-org-row {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  min-width: 0;
+  border-radius: 6px;
+  gap: 2px;
+}
+.bb-org-row.active {
+  background: var(--surface-raised-base);
+  color: var(--text-strong);
+}
+:root[data-color-scheme="dark"] .bb-org-row.active {
+  background: #303030;
+}
+.bb-org-chat-link,
+.bb-org-project-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  text-align: left;
+  padding: 0 6px;
+}
+.bb-org-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bb-org-status {
+  display: block;
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  margin: 0 5px;
+  border: 1px solid var(--text-weaker);
+  border-radius: 50%;
+}
+.bb-org-more {
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  flex: 0 0 24px;
+  height: 24px;
+  border-radius: 4px;
+}
+.bb-org-row:hover > .bb-org-more,
+.bb-org-row:focus-within > .bb-org-more,
+.bb-org-more[data-expanded],
+.bb-org-project-grid .bb-org-more {
+  opacity: 1;
+}
+.bb-org-children {
+  padding-left: 22px;
+}
+.bb-org-more-rows {
+  display: block;
+  text-align: left;
+  padding: 6px;
+  color: var(--text-weak);
+  font-size: 13px;
+}
+.bb-org-search {
+  width: calc(100% - 12px);
+  margin: 0 6px 8px;
+  border: 1px solid var(--border-weak-base);
+  background: var(--background-base);
+  border-radius: 7px;
+  padding: 6px 8px;
+}
+.bb-org-empty {
+  padding: 8px 6px;
+  color: var(--text-weak);
+  font-size: 12px;
+}
+.bb-org-account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--border-weak-base);
+  margin: 12px -8px 0;
+  padding: 10px 12px;
+  min-height: 48px;
+}
+.bb-org-account > button:first-child {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+.bb-org-account > button > span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bb-org-avatar {
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  background: var(--surface-raised-base);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.bb-org-sidebar button:focus-visible,
+.bb-org-main button:focus-visible,
+.bb-org-main input:focus-visible,
+.bb-org-sidebar input:focus-visible {
+  outline: 1px solid var(--border-focus);
+  outline-offset: -1px;
+}
+.bb-org-page {
+  padding: 28px 32px;
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+}
+.bb-org-page > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.bb-org-page h1 {
+  font-size: 22px;
+  font-weight: 600;
+}
+.bb-org-page > header button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 7px;
+  background: var(--surface-raised-base);
+}
+.bb-org-project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 12px;
+}
+.bb-org-project-grid article {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  border: 1px solid var(--border-weak-base);
+  border-radius: 10px;
+  padding: 12px;
+}
+.bb-org-project-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  flex: 1;
+  text-align: left;
+  min-width: 0;
+}
+.bb-org-project-card span {
+  color: var(--text-weak);
+  font-size: 12px;
+}
+.bb-org-project-card strong {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bb-org-artifact {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px;
+  border-bottom: 1px solid var(--border-weak-base);
+  text-align: left;
+}
+.bb-org-error {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-danger-base);
+  display: flex;
+  gap: 12px;
+}
+.bb-org-error button {
+  text-decoration: underline;
+}
+.bb-org-modal {
+  position: absolute;
+  inset: 0;
+  background: #0005;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.bb-org-modal form {
+  width: min(430px, 100%);
+  padding: 22px;
+  background: var(--background-base);
+  border: 1px solid var(--border-weak-base);
+  border-radius: 12px;
+  box-shadow: 0 12px 60px #0004;
+}
+.bb-org-modal h2 {
+  font-size: 17px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+.bb-org-modal label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 12px 0;
+  font-size: 13px;
+}
+.bb-org-modal input,
+.bb-org-modal select {
+  width: 100%;
+  border: 1px solid var(--border-weak-base);
+  border-radius: 6px;
+  padding: 8px;
+  background: var(--background-base);
+}
+.bb-org-modal p {
+  color: var(--text-weak);
+  font-size: 12px;
+  margin-top: 10px;
+}
+.bb-org-modal button {
+  padding: 6px 9px;
+  border-radius: 6px;
+  background: var(--surface-raised-base);
+}
+.bb-org-dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+.bb-org-backdrop {
+  display: none;
+}
+@media (max-width: 899px) {
+  .bb-org-sidebar {
+    display: none;
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 51;
+    max-width: calc(100% - 32px);
+  }
+  .bb-org-sidebar.drawer {
+    display: flex;
+  }
+  .bb-org-sidebar > [data-component="resize-handle"] {
+    display: none;
+  }
+  .bb-org-backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    background: #0006;
+    z-index: 50;
+  }
+  .bb-org-page {
+    padding: 20px 16px;
+  }
+}

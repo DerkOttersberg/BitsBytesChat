@@ -27,6 +27,7 @@ import {
   Part as MessagePart,
   partDefaultOpen,
   type UserActions,
+  type PartGroup,
 } from "@opencode-ai/session-ui/message-part"
 import { DiffChanges } from "@opencode-ai/ui/diff-changes"
 import { FileIcon } from "@opencode-ai/ui/file-icon"
@@ -1026,6 +1027,14 @@ export function MessageTimeline(props: {
               <MessagePart
                 actions={props.actions}
                 part={part()}
+                recoveredTools={
+                  row().group.type === "part"
+                    ? (row().group as Extract<PartGroup, { type: "part" }>).recovered?.flatMap((ref) => {
+                        const previous = getMsgPart(ref.messageID, ref.partID)
+                        return previous?.type === "tool" ? [previous] : []
+                      })
+                    : undefined
+                }
                 message={message()}
                 showAssistantCopyPartID={assistantCopyPartID(row().userMessageID)}
                 turnDurationMs={turnDurationMs(row().userMessageID)}

@@ -7,6 +7,7 @@ import { useSessionLayout } from "./session-layout"
 import { useDialog } from "@opencode-ai/ui/context"
 import { DialogUsageExceeded } from "@/components/dialog-usage-exceeded"
 import { useI18n } from "@opencode-ai/ui/context"
+import { usePlatform } from "@/context/platform"
 
 const GO_UPSELL_FREE_TIER_LAST_SEEN_AT = "go_upsell_last_seen_at"
 const GO_UPSELL_FREE_TIER_DONT_SHOW = "go_upsell_dont_show"
@@ -34,6 +35,7 @@ function goUpsellKeys(status: SessionStatus) {
 }
 
 export function useUsageExceededDialogs() {
+  const platform = usePlatform()
   const sdk = useSDK()
   const dialog = useDialog()
   const { params } = useSessionLayout()
@@ -52,6 +54,7 @@ export function useUsageExceededDialogs() {
 
   onCleanup(
     sdk().event.on("session.status", (evt) => {
+      if (platform.bitsbytes) return
       if (evt.properties.sessionID !== params.id) return
       if (evt.properties.status.type !== "retry") return
       const { action } = evt.properties.status

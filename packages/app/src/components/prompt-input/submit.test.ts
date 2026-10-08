@@ -60,6 +60,7 @@ const prompt = {
   model: {
     current: () => undefined,
     set: () => undefined,
+    context: { get: () => undefined, set: () => undefined },
   },
   reset: () => undefined,
   set: () => undefined,
@@ -179,6 +180,8 @@ beforeAll(async () => {
   mock.module("@/context/server", () => ({
     useServer: () => ({ key: "server-key" }),
   }))
+  mock.module("@/context/server-sdk", () => ({ useServerSDK: () => () => ({ server: { http: { url: "http://localhost:4096" } } }) }))
+  mock.module("@/utils/organization-api", () => ({ createOrganizationClient: () => ({ chat: async () => undefined }) }))
 
   mock.module("@/context/tabs", () => ({
     useTabs: () => ({

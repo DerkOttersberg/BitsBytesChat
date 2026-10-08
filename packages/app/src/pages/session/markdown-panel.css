@@ -1,0 +1,17 @@
+.bb-markdown-panel { display: flex; flex: 1; flex-direction: column; min-height: 0; width: 100%; height: 100%; }
+.bb-preview-modes { display: flex; align-items: center; gap: 2px; padding: 7px 12px; border-bottom: 1px solid var(--border-weak-base); flex-shrink: 0; }
+.bb-preview-modes button { padding: 4px 10px; border-radius: 6px; font-size: 12px; color: var(--text-weak); cursor: pointer; }
+.bb-preview-modes button[aria-pressed="true"] { color: var(--text-strong); background: var(--surface-raised-base); }
+.bb-preview-modes button:focus-visible { outline: 2px solid var(--border-interactive-base); outline-offset: 1px; }
+.bb-preview-modes button:disabled { opacity: .5; cursor: default; }
+.bb-markdown-limit { padding: 8px 16px; color: var(--text-weak); font-size: 12px; }
+.bb-markdown-preview, .bb-markdown-source { min-height: 0; flex: 1; overflow: auto; }
+.bb-markdown-preview { padding: 22px 26px 42px; }
+.bb-markdown-preview > [data-component="markdown"] { max-width: 76ch; margin: 0 auto; }
+.bb-markdown-preview [data-component="markdown"] { font-size: 14px; line-height: 1.65; }
+.bb-markdown-preview img { max-width: 100%; height: auto; }
+.bb-markdown-preview[hidden], .bb-markdown-source[hidden] { display: none; }
+.bb-recorded-image-panel { width: 100%; height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.bb-recorded-image-meta { padding: 10px 16px; font-size: 12px; color: var(--text-weak); border-bottom: 1px solid var(--border-weak-base); }
+.bb-recorded-image-canvas { flex: 1; min-height: 0; padding: 20px; overflow: auto; display: grid; place-items: center; }
+.bb-recorded-image-canvas img { max-width: 100%; max-height: 100%; object-fit: contain; }

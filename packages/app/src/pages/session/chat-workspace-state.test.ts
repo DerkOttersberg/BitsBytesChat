@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { readPanelState, savePanelState, type PanelTab } from "./chat-workspace-state"
+import { readPanelState, savePanelState, workspacePanelLayout, type PanelTab } from "./chat-workspace-state"
 
 const key = "bitsbytes.panels.v2:workspace:ses_test"
 const tab: PanelTab = {
@@ -12,8 +12,30 @@ const tab: PanelTab = {
   unread: true,
 }
 
+test("panel layout reserves chat space after the sidebar without overwriting the preferred width", () => {
+  const f = fixture(JSON.stringify({ tabs: [tab], open: true, width: 700 }))
+  const preferred = readPanelState(f.storage, key).value.width
+  expect(preferred).toBe(700)
+  expect(workspacePanelLayout(1048, preferred)).toEqual({ width: 700, maximum: 744, overlay: false })
+  expect(workspacePanelLayout(772, preferred)).toEqual({ width: 468, maximum: 468, overlay: false })
+  expect(workspacePanelLayout(1048, preferred).width).toBe(700)
+})
+
+test("narrow workspaces show a contained panel while retaining the preferred split width", () => {
+  expect(workspacePanelLayout(628, 520)).toEqual({ width: 612, maximum: 324, overlay: true })
+  expect(workspacePanelLayout(375, 520)).toEqual({ width: 359, maximum: 71, overlay: true })
+  expect(workspacePanelLayout(644, 520)).toEqual({ width: 340, maximum: 340, overlay: false })
+  expect(workspacePanelLayout(1048, 520).width).toBe(520)
+})
+
 test("saved Goal panels are retired while the Plan tab remains available", () => {
-  const f = fixture(JSON.stringify({ tabs: [tab, { ...tab, id: "goal:ses_test", kind: "goal", title: "Goal" }], active: "goal:ses_test", open: true }))
+  const f = fixture(
+    JSON.stringify({
+      tabs: [tab, { ...tab, id: "goal:ses_test", kind: "goal", title: "Goal" }],
+      active: "goal:ses_test",
+      open: true,
+    }),
+  )
   const result = readPanelState(f.storage, key, 800)
   expect(result.value.tabs).toEqual([tab])
   expect(result.value.active).toBe(tab.id)
@@ -47,6 +69,22 @@ test("missing optional layout uses bounded defaults without a recovery copy", ()
     writable: true,
   })
   expect(f.backups()).toEqual([])
+})
+
+test.each([{ tabs: [] }, { tabs: [{ ...tab, kind: "browser" }] }, { tabs: [{ ...tab, kind: "goal" }] }])(
+  "an empty restored panel collapses despite a saved open flag",
+  ({ tabs }) => {
+    const f = fixture(JSON.stringify({ tabs, active: tab.id, open: true }))
+    expect(readPanelState(f.storage, key, 800).value).toMatchObject({ tabs: [], active: "", collapsed: true })
+  },
+)
+
+test("recorded images restore immutable snapshot IDs only", () => {
+  const image: PanelTab = { ...tab, kind: "image", id: "image", uri: "a".repeat(64) }
+  const f = fixture(
+    JSON.stringify({ tabs: [image, { ...image, id: "unsafe", uri: "file:///private.png" }], open: true }),
+  )
+  expect(readPanelState(f.storage, key, 800).value.tabs).toEqual([image])
 })
 
 test("valid panel state retains active tab, revisions, visibility and width", () => {

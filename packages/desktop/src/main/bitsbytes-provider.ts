@@ -10,8 +10,10 @@ import { bbt } from "../bitsbytes/copy"
 import { planRequest, openrouterRequest } from "./bitsbytes-request"
 import { catalogModels } from "./bitsbytes-models"
 import { readState, stateRecord } from "./bitsbytes-state"
+import type { ImageConfiguration } from "./bitsbytes-images"
 
 type Credentials = {
+  images?: ImageConfiguration
   host: string; client?: string; access?: string; refresh?: string; idToken?: string
   expires?: number; scopes?: string[]; subject?: string; email?: string; verified?: boolean
   openrouter?: string; groq?: string; providers?: Record<string, unknown>; nativeCredentials?: { id: string; integrationID: string; label: string; value: unknown }[]

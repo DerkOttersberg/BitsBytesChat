@@ -3,6 +3,7 @@ import { MessageHandler } from "./handlers/message"
 import { ModelHandler } from "./handlers/model"
 import { ProviderHandler } from "./handlers/provider"
 import { SessionHandler } from "./handlers/session"
+import { ChatProjectHandler } from "./handlers/chat-project"
 import { PermissionHandler } from "./handlers/permission"
 import { FileSystemHandler } from "./handlers/fs"
 import { CommandHandler } from "./handlers/command"
@@ -23,6 +24,7 @@ export const handlers = Layer.mergeAll(
   LocationHandler,
   AgentHandler,
   SessionHandler,
+  ChatProjectHandler,
   MessageHandler,
   ModelHandler,
   ProviderHandler,

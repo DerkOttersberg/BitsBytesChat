@@ -58,6 +58,7 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { Cause, DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema, Stream } from "effect"
 import { asc, eq } from "drizzle-orm"
 import { testEffect } from "./lib/effect"
+import { SessionStatusEvent } from "@opencode-ai/schema/session-status-event"
 
 const requests: LLMRequest[] = []
 let response: LLMEvent[] = []
@@ -3470,6 +3471,47 @@ describe("SessionRunnerLLM", () => {
       expect(yield* session.resume(sessionID).pipe(Effect.catchDefect(Effect.succeed))).toBe(
         "Tool input delta before start: call-1",
       )
+    }),
+  )
+
+  it.effect("publishes exact process-local assistant ownership and retires it on interruption", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const events = yield* EventV2.Service
+      const runner = yield* SessionRunner.Service
+      const statuses: SessionStatusEvent.Info[] = []
+      yield* events.listen((event) =>
+        Effect.sync(() => {
+          if (event.type === SessionStatusEvent.Status.type)
+            statuses.push((event.data as typeof SessionStatusEvent.Status.data.Type).status)
+        }),
+      )
+      const streamed = yield* Deferred.make<void>()
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Own this turn" }), resume: false })
+      responseStream = Stream.concat(
+        Stream.fromIterable([
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.reasoningStart({ id: "owned-reasoning" }),
+          LLMEvent.reasoningDelta({ id: "owned-reasoning", text: "Partial reasoning" }),
+        ]),
+        Stream.fromEffect(Deferred.succeed(streamed, undefined)).pipe(Stream.flatMap(() => Stream.never)),
+      )
+      const run = yield* runner.run({ sessionID, force: true, runEpoch: "test-epoch" }).pipe(Effect.forkChild)
+      yield* Deferred.await(streamed)
+      const context = yield* session.context(sessionID)
+      const user = context.find((message) => message.type === "user")!
+      const assistant = context.find((message) => message.type === "assistant")!
+      expect(statuses.at(-1)).toMatchObject({
+        type: "busy",
+        owner: { runEpoch: "test-epoch", inputID: user.id, assistantID: assistant.id },
+      })
+      yield* Fiber.interrupt(run)
+      expect(statuses.at(-1)).toEqual({ type: "idle" })
+      expect(yield* session.context(sessionID)).toMatchObject([
+        { type: "user" },
+        { type: "assistant", error: { message: "Provider turn interrupted" } },
+      ])
     }),
   )
 })

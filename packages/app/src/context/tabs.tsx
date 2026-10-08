@@ -18,6 +18,7 @@ export type SessionTab = {
   type: "session"
   server: ServerConnection.Key
   sessionId: string
+  pendingProjectID?: string
 }
 
 export type DraftTab = {
@@ -26,6 +27,7 @@ export type DraftTab = {
   server: ServerConnection.Key
   directory: string
   worktree?: string
+  projectID?: string
 }
 
 export type Tab = SessionTab | DraftTab
@@ -232,7 +234,8 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
         // Keep the replacement and navigation atomic so /new-session never renders
         // after its backing draft tab has been removed from the store.
         const active = location.pathname === "/new-session" && location.query.draftId === draftID
-        const next = { type: "session" as const, ...session }
+        const draft = store.find((tab) => tab.type === "draft" && tab.draftID === draftID)
+        const next = { type: "session" as const, ...session, pendingProjectID: draft?.type === "draft" ? draft.projectID : undefined }
         void startTransition(() => {
           setStore(
             produce((tabs) => {
@@ -245,6 +248,11 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
         })
         memory.remove(`draft:${draftID}`)
         removeDraftPersisted(draftID)
+      },
+      projectAssigned(sessionId: string) {
+        setStore((tab) => tab.type === "session" && tab.sessionId === sessionId, produce((tab) => {
+          if (tab.type === "session") delete tab.pendingProjectID
+        }))
       },
       removeTab,
       // User-initiated close: records the tab so it can be reopened.

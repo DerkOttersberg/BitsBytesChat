@@ -20,9 +20,12 @@ import { useComments } from "@/context/comments"
 import { useLanguage } from "@/context/language"
 import { usePrompt } from "@/context/prompt"
 import { useSettings } from "@/context/settings"
+import { useSDK } from "@/context/sdk"
 import { getSessionHandoff } from "@/pages/session/handoff"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionTabs } from "@/pages/session/helpers"
+import { isMarkdownName, MarkdownPreviewSource } from "./markdown-panel"
+import { markdownFileIdentity } from "./markdown-path"
 
 type SessionFileViewProps = {
   tab: string
@@ -229,7 +232,8 @@ function SessionFileViewV1(props: { tab: string }) {
   const language = useLanguage()
   const prompt = usePrompt()
   const fileComponent = useFileComponent()
-  const { sessionKey, tabs, view } = useSessionLayout()
+  const { sessionKey, tabs, view, params } = useSessionLayout()
+  const sdk = useSDK()
   const activeFileTab = createSessionTabs({
     tabs,
     pathFromTab: file.pathFromTab,
@@ -245,6 +249,9 @@ function SessionFileViewV1(props: { tab: string }) {
   }
 
   const path = createMemo(() => file.pathFromTab(props.tab))
+  createEffect(on([path, () => sdk().directory], ([value]) => {
+    if (value) void file.load(value)
+  }))
   const state = createMemo(() => {
     const p = path()
     if (!p) return
@@ -495,7 +502,11 @@ function SessionFileViewV1(props: { tab: string }) {
     <div class="mt-3 relative h-full min-h-0">
       <ScrollView class="h-full" viewportRef={scrollSync.setViewport} onScroll={scrollSync.handleScroll as any}>
         <Switch>
-          <Match when={state()?.loaded}>{renderFile(contents())}</Match>
+          <Match when={state()?.loaded}>
+            <Show when={isMarkdownName(path() ?? "")} fallback={renderFile(contents())}>
+              <MarkdownPreviewSource identity={markdownFileIdentity(sdk().directory, props.tab)} path={path()} directory={sdk().directory} sessionID={params.id} text={contents()} source={() => renderFile(contents())} />
+            </Show>
+          </Match>
           <Match when={state()?.loading}>
             <div class="px-6 py-4 text-text-weak">{language.t("common.loading")}...</div>
           </Match>
@@ -514,7 +525,8 @@ function SessionFileViewV2(props: { tab: string }) {
   const language = useLanguage()
   const prompt = usePrompt()
   const fileComponent = useFileComponent()
-  const { sessionKey, tabs, view } = useSessionLayout()
+  const { sessionKey, tabs, view, params } = useSessionLayout()
+  const sdk = useSDK()
   const activeFileTab = createSessionTabs({
     tabs,
     pathFromTab: file.pathFromTab,
@@ -530,6 +542,9 @@ function SessionFileViewV2(props: { tab: string }) {
   }
 
   const path = createMemo(() => file.pathFromTab(props.tab))
+  createEffect(on([path, () => sdk().directory], ([value]) => {
+    if (value) void file.load(value)
+  }))
   const state = createMemo(() => {
     const p = path()
     if (!p) return
@@ -786,7 +801,11 @@ function SessionFileViewV2(props: { tab: string }) {
     <div class="mt-3 relative h-full min-h-0">
       <ScrollView class="h-full" viewportRef={scrollSync.setViewport} onScroll={scrollSync.handleScroll as any}>
         <Switch>
-          <Match when={state()?.loaded}>{renderFile(contents())}</Match>
+          <Match when={state()?.loaded}>
+            <Show when={isMarkdownName(path() ?? "")} fallback={renderFile(contents())}>
+              <MarkdownPreviewSource identity={markdownFileIdentity(sdk().directory, props.tab)} path={path()} directory={sdk().directory} sessionID={params.id} text={contents()} source={() => renderFile(contents())} />
+            </Show>
+          </Match>
           <Match when={state()?.loading}>
             <div class="px-6 py-4 text-text-weak">{language.t("common.loading")}...</div>
           </Match>

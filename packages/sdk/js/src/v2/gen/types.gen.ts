@@ -53,6 +53,8 @@ export type Event =
   | EventSessionError
   | EventInstallationUpdated
   | EventInstallationUpdateAvailable
+  | EventOrganizationChanged
+  | EventOrganizationChatUpdated
   | EventFileEdited
   | EventReferenceUpdated
   | EventPermissionV2Asked
@@ -200,6 +202,7 @@ export type Session = {
     id: string
     providerID: string
     variant?: string
+    contextWindow?: number
   }
   version: string
   metadata?: {
@@ -264,6 +267,7 @@ export type UserMessage = {
     providerID: string
     modelID: string
     variant?: string
+    contextWindow?: number
   }
   system?: string
   tools?: {
@@ -381,6 +385,7 @@ export type AssistantMessage = {
   }
   structured?: unknown
   variant?: string
+  contextWindow?: number
   finish?: string
 }
 
@@ -698,9 +703,11 @@ export type SessionStatus =
         link?: string
       }
       next: number
+      owner?: SessionExecutionOwner
     }
   | {
       type: "busy"
+      owner?: SessionExecutionOwner
     }
 
 export type QuestionOption = {
@@ -1252,6 +1259,26 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "organization.changed"
+        properties: {
+          timestamp: number
+        }
+      }
+    | {
+        id: string
+        type: "organization.chat.updated"
+        properties: {
+          sessionID: string
+          timestamp: number
+          title?: string
+          projectID?: ChatProjectId
+          pinned?: boolean
+          order?: number
+          archived?: boolean
+        }
+      }
+    | {
+        id: string
         type: "file.edited"
         properties: {
           file: string
@@ -1652,6 +1679,7 @@ export type GlobalEvent = {
     | SyncEventSessionNextRevertStaged
     | SyncEventSessionNextRevertCleared
     | SyncEventSessionNextRevertCommitted
+    | SyncEventOrganizationChatUpdated
 }
 
 /**
@@ -2244,6 +2272,7 @@ export type GlobalSession = {
     id: string
     providerID: string
     variant?: string
+    contextWindow?: number
   }
   version: string
   metadata?: {
@@ -2712,6 +2741,12 @@ export type UnauthorizedError = {
   message: string
 }
 
+export type SessionNotFoundError = {
+  _tag: "SessionNotFoundError"
+  sessionID: string
+  message: string
+}
+
 export type SessionsResponse = {
   data: Array<SessionV2Info>
   cursor: {
@@ -2727,12 +2762,7 @@ export type InvalidCursorError = {
 
 export type SessionActive = {
   type: "running"
-}
-
-export type SessionNotFoundError = {
-  _tag: "SessionNotFoundError"
-  sessionID: string
-  message: string
+  owner?: SessionExecutionOwner
 }
 
 export type PromptInput = {
@@ -2925,6 +2955,8 @@ export type V2Event =
   | SessionError
   | InstallationUpdated
   | InstallationUpdateAvailable
+  | OrganizationChanged
+  | OrganizationChatUpdated
   | FileEdited
   | ReferenceUpdated
   | PermissionV2Asked
@@ -3063,6 +3095,7 @@ export type ModelRef = {
   id: string
   providerID: string
   variant?: string
+  contextWindow?: number
 }
 
 export type LocationRef = {
@@ -3143,6 +3176,8 @@ export type RevertState = {
   files?: Array<FileDiff>
 }
 
+export type ChatProjectId = string
+
 export type PermissionV2Source = {
   type: "tool"
   messageID: string
@@ -3205,6 +3240,12 @@ export type ProjectTime = {
   created: number
   updated: number
   initialized?: number
+}
+
+export type SessionExecutionOwner = {
+  runEpoch: string
+  inputID: string
+  assistantID?: string
 }
 
 export type EventServerInstanceDisposed = {
@@ -3847,6 +3888,26 @@ export type SyncEventSessionNextRevertCommitted = {
   }
 }
 
+export type SyncEventOrganizationChatUpdated = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "organization.chat.updated.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      timestamp: number
+      title?: string
+      projectID?: ChatProjectId
+      pinned?: boolean
+      order?: number
+      archived?: boolean
+    }
+  }
+}
+
 export type ConfigV2ReferenceGit = {
   repository: string
   branch?: string
@@ -3881,6 +3942,73 @@ export type PtyTicketConnectToken = {
 export type WorkspaceEventConnectionStatus = {
   workspaceID: string
   status: "connected" | "connecting" | "disconnected" | "error"
+}
+
+export type ChatProjectInfo = {
+  id: ChatProjectId
+  name: string
+  directory?: string
+  pinned: boolean
+  order: number
+  created: number
+  updated: number
+  count: number
+}
+
+export type ChatProjectCreate = {
+  name: string
+  directory?: string
+}
+
+export type ChatProjectUpdate = {
+  name?: string
+  directory?: string
+  pinned?: boolean
+  order?: number
+}
+
+export type ChatProjectListInput = {
+  limit?: number
+  cursor?: string
+  projectID?: ChatProjectId
+  archived?: boolean
+  pinned?: boolean
+  search?: string
+  sort?: "updated" | "created"
+}
+
+export type ChatProjectChat = {
+  id: string
+  title: string
+  directory: string
+  projectID?: ChatProjectId
+  projectName?: string
+  pinned: boolean
+  order: number
+  created: number
+  updated: number
+  archived?: number
+}
+
+export type ChatProjectPage = {
+  data: Array<ChatProjectChat>
+  next?: string
+}
+
+export type ChatProjectChatUpdate = {
+  title?: string
+  projectID?: ChatProjectId
+  pinned?: boolean
+  order?: number
+  archived?: boolean
+}
+
+export type ChatProjectMigration = {
+  projects: Array<{
+    directory: string
+    name?: string
+  }>
+  defaultDirectory?: string
 }
 
 export type LocationInfo = {
@@ -5423,6 +5551,46 @@ export type InstallationUpdateAvailable = {
   }
 }
 
+export type OrganizationChanged = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "organization.changed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+  }
+}
+
+export type OrganizationChatUpdated = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "organization.chat.updated"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    timestamp: number
+    title?: string
+    projectID?: ChatProjectId
+    pinned?: boolean
+    order?: number
+    archived?: boolean
+  }
+}
+
 export type FileEdited = {
   id: string
   metadata?: {
@@ -6732,6 +6900,28 @@ export type EventInstallationUpdateAvailable = {
   type: "installation.update-available"
   properties: {
     version: string
+  }
+}
+
+export type EventOrganizationChanged = {
+  id: string
+  type: "organization.changed"
+  properties: {
+    timestamp: number
+  }
+}
+
+export type EventOrganizationChatUpdated = {
+  id: string
+  type: "organization.chat.updated"
+  properties: {
+    sessionID: string
+    timestamp: number
+    title?: string
+    projectID?: ChatProjectId
+    pinned?: boolean
+    order?: number
+    archived?: boolean
   }
 }
 
@@ -9577,6 +9767,7 @@ export type SessionCreateData = {
       id: string
       providerID: string
       variant?: string
+      contextWindow?: number
     }
     metadata?: {
       [key: string]: unknown
@@ -9895,6 +10086,7 @@ export type SessionPromptData = {
     model?: {
       providerID: string
       modelID: string
+      contextWindow?: number
     }
     agent?: string
     noReply?: boolean
@@ -10249,6 +10441,7 @@ export type SessionPromptAsyncData = {
     model?: {
       providerID: string
       modelID: string
+      contextWindow?: number
     }
     agent?: string
     noReply?: boolean
@@ -10357,6 +10550,7 @@ export type SessionShellData = {
     model?: {
       providerID: string
       modelID: string
+      contextWindow?: number
     }
     command: string
   }
@@ -11368,6 +11562,233 @@ export type V2HealthGetResponses = {
 }
 
 export type V2HealthGetResponse = V2HealthGetResponses[keyof V2HealthGetResponses]
+
+export type ServerOrganizationOrganizationProjectsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/organization/projects"
+}
+
+export type ServerOrganizationOrganizationProjectsErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type ServerOrganizationOrganizationProjectsError =
+  ServerOrganizationOrganizationProjectsErrors[keyof ServerOrganizationOrganizationProjectsErrors]
+
+export type ServerOrganizationOrganizationProjectsResponses = {
+  /**
+   * Success
+   */
+  200: Array<ChatProjectInfo>
+}
+
+export type ServerOrganizationOrganizationProjectsResponse =
+  ServerOrganizationOrganizationProjectsResponses[keyof ServerOrganizationOrganizationProjectsResponses]
+
+export type ServerOrganizationOrganizationCreateData = {
+  body: ChatProjectCreate
+  path?: never
+  query?: never
+  url: "/api/organization/projects"
+}
+
+export type ServerOrganizationOrganizationCreateErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type ServerOrganizationOrganizationCreateError =
+  ServerOrganizationOrganizationCreateErrors[keyof ServerOrganizationOrganizationCreateErrors]
+
+export type ServerOrganizationOrganizationCreateResponses = {
+  /**
+   * ChatProject.Info
+   */
+  200: ChatProjectInfo
+}
+
+export type ServerOrganizationOrganizationCreateResponse =
+  ServerOrganizationOrganizationCreateResponses[keyof ServerOrganizationOrganizationCreateResponses]
+
+export type ServerOrganizationOrganizationRemoveData = {
+  body?: never
+  path: {
+    id: ChatProjectId
+  }
+  query?: never
+  url: "/api/organization/projects/{id}"
+}
+
+export type ServerOrganizationOrganizationRemoveErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type ServerOrganizationOrganizationRemoveError =
+  ServerOrganizationOrganizationRemoveErrors[keyof ServerOrganizationOrganizationRemoveErrors]
+
+export type ServerOrganizationOrganizationRemoveResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type ServerOrganizationOrganizationRemoveResponse =
+  ServerOrganizationOrganizationRemoveResponses[keyof ServerOrganizationOrganizationRemoveResponses]
+
+export type ServerOrganizationOrganizationUpdateData = {
+  body: ChatProjectUpdate
+  path: {
+    id: ChatProjectId
+  }
+  query?: never
+  url: "/api/organization/projects/{id}"
+}
+
+export type ServerOrganizationOrganizationUpdateErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type ServerOrganizationOrganizationUpdateError =
+  ServerOrganizationOrganizationUpdateErrors[keyof ServerOrganizationOrganizationUpdateErrors]
+
+export type ServerOrganizationOrganizationUpdateResponses = {
+  /**
+   * ChatProject.Info
+   */
+  200: ChatProjectInfo
+}
+
+export type ServerOrganizationOrganizationUpdateResponse =
+  ServerOrganizationOrganizationUpdateResponses[keyof ServerOrganizationOrganizationUpdateResponses]
+
+export type ServerOrganizationOrganizationChatsData = {
+  body: ChatProjectListInput
+  path?: never
+  query?: never
+  url: "/api/organization/chats/query"
+}
+
+export type ServerOrganizationOrganizationChatsErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type ServerOrganizationOrganizationChatsError =
+  ServerOrganizationOrganizationChatsErrors[keyof ServerOrganizationOrganizationChatsErrors]
+
+export type ServerOrganizationOrganizationChatsResponses = {
+  /**
+   * ChatProject.Page
+   */
+  200: ChatProjectPage
+}
+
+export type ServerOrganizationOrganizationChatsResponse =
+  ServerOrganizationOrganizationChatsResponses[keyof ServerOrganizationOrganizationChatsResponses]
+
+export type ServerOrganizationOrganizationChatData = {
+  body: ChatProjectChatUpdate
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/organization/chats/{sessionID}"
+}
+
+export type ServerOrganizationOrganizationChatErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type ServerOrganizationOrganizationChatError =
+  ServerOrganizationOrganizationChatErrors[keyof ServerOrganizationOrganizationChatErrors]
+
+export type ServerOrganizationOrganizationChatResponses = {
+  /**
+   * ChatProject.Chat
+   */
+  200: ChatProjectChat
+}
+
+export type ServerOrganizationOrganizationChatResponse =
+  ServerOrganizationOrganizationChatResponses[keyof ServerOrganizationOrganizationChatResponses]
+
+export type ServerOrganizationOrganizationMigrateData = {
+  body: ChatProjectMigration
+  path?: never
+  query?: never
+  url: "/api/organization/migrate"
+}
+
+export type ServerOrganizationOrganizationMigrateErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type ServerOrganizationOrganizationMigrateError =
+  ServerOrganizationOrganizationMigrateErrors[keyof ServerOrganizationOrganizationMigrateErrors]
+
+export type ServerOrganizationOrganizationMigrateResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type ServerOrganizationOrganizationMigrateResponse =
+  ServerOrganizationOrganizationMigrateResponses[keyof ServerOrganizationOrganizationMigrateResponses]
 
 export type V2LocationGetData = {
   body?: never

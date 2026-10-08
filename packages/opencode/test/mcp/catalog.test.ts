@@ -5,6 +5,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js"
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js"
 import { McpCatalog } from "@/mcp/catalog"
 import { Effect } from "effect"
+import { ToolOperation } from "@opencode-ai/schema/tool-operation"
 
 const options = { toolCallId: "call_mcp", abortSignal: new AbortController().signal } as any
 
@@ -27,6 +28,60 @@ function mcpTool() {
 }
 
 describe("McpCatalog.convertTool", () => {
+  test("MCP calls retain the executing input identity independently of model arguments", async () => {
+    const calls: unknown[] = []
+    const client = {
+      callTool: async (request: unknown) => {
+        calls.push(request)
+        return { content: [] }
+      },
+    } as unknown as Client
+    const converted = McpCatalog.convertTool(mcpTool(), client, undefined, "chat", "originating-input")
+    await converted.execute?.({ inputID: "untrusted-argument" }, options)
+    expect(calls).toEqual([
+      {
+        name: "screenshot",
+        arguments: { inputID: "untrusted-argument" },
+        _meta: { sessionID: "chat", inputID: "originating-input" },
+      },
+    ])
+  })
+  test("typed MCP failures preserve validated retry lineage and exact diagnostics", async () => {
+    const operation = {
+      operationID: "operation",
+      attemptID: "attempt",
+      sessionID: "chat",
+      tool: "create_artifact",
+      outputKey: "output",
+    }
+    const converted = McpCatalog.convertTool(
+      mcpTool(),
+      clientReturning({
+        isError: true,
+        content: [{ type: "text", text: "failed exactly 🌿" }],
+        _meta: { [ToolOperation.key]: operation },
+      }),
+    )
+    const error = await converted.execute?.({}, options).catch((error: unknown) => error)
+    expect(error).toBeInstanceOf(McpCatalog.ToolError)
+    if (!(error instanceof McpCatalog.ToolError)) throw new Error("Expected typed tool error")
+    expect(error.message).toBe("failed exactly 🌿")
+    expect(error.operation).toEqual(operation)
+  })
+  test("malformed MCP operation metadata never acquires retry authority", async () => {
+    const converted = McpCatalog.convertTool(
+      mcpTool(),
+      clientReturning({
+        isError: true,
+        content: [{ type: "text", text: "failed" }],
+        _meta: { [ToolOperation.key]: { operationID: "partial" } },
+      }),
+    )
+    const error = await converted.execute?.({}, options).catch((error: unknown) => error)
+    expect(error).toBeInstanceOf(McpCatalog.ToolError)
+    if (!(error instanceof McpCatalog.ToolError)) throw new Error("Expected typed tool error")
+    expect(error.operation).toBeUndefined()
+  })
   test("preserves content when structuredContent is also present", async () => {
     const content = [{ type: "image" as const, mimeType: "image/png", data: "AAAA" }]
     const structuredContent = { image: { mimeType: "image/png", data: "AAAA" } }

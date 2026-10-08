@@ -25,6 +25,7 @@ import { isRecord } from "@/util/record"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
 import { Usage, type LLMEvent } from "@opencode-ai/llm"
+import { randomUUID } from "node:crypto"
 
 const DOOM_LOOP_THRESHOLD = 3
 export type Result = "compact" | "stop" | "continue"
@@ -657,6 +658,7 @@ const layer = Layer.effect(
       })
 
       const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
+        const owner = { runEpoch: randomUUID(), inputID: ctx.assistantMessage.parentID, assistantID: ctx.assistantMessage.id }
         yield* Effect.logInfo("process", {
           "session.id": input.sessionID,
           messageID: input.assistantMessage.id,
@@ -668,7 +670,7 @@ const layer = Layer.effect(
           yield* Effect.gen(function* () {
             ctx.currentText = undefined
             ctx.reasoningMap = {}
-            yield* status.set(ctx.sessionID, { type: "busy" })
+            yield* status.set(ctx.sessionID, { type: "busy", owner })
             const stream = llm.stream(streamInput)
 
             yield* stream.pipe(
@@ -700,6 +702,7 @@ const layer = Layer.effect(
                     message: info.message,
                     action: info.action,
                     next: info.next,
+                    owner,
                   })
                 },
               }),

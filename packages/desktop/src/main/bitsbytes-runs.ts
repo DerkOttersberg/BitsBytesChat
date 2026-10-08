@@ -8,7 +8,7 @@ import type { SessionV1 } from "@opencode-ai/core/v1/session"
 
 export type RunPrompt = {
   sessionID: string; directory: string; id: string; text: string; agent?: string
-  model?: { providerID: string; modelID: string }; variant?: string
+  model?: { providerID: string; modelID: string; contextWindow?: number }; variant?: string
   legacyParts?: unknown[]; files?: { uri: string; name?: string }[]; agents?: { name: string }[]
   draft?: unknown; protocol?: "v1" | "v2"; mode?: "normal" | "plan"; goal?: boolean; delivery?: "queue" | "steer"; prepared?: boolean; turnID?: string; resume?: boolean; revision?: number; diagnosticPrepared?: boolean
 }
@@ -102,6 +102,7 @@ export class BBRuns {
     if (action === "prepare" || action === "admit") {
       const prompt = structuredClone(args.prompt) as RunPrompt
       if (!prompt?.id || prompt.sessionID !== chat.sessionID || !prompt.directory || typeof prompt.text !== "string") throw new Error("bb.error.invalidRequest")
+      if (prompt.model?.contextWindow !== undefined && (!Number.isSafeInteger(prompt.model.contextWindow) || prompt.model.contextWindow <= 0)) throw new Error("bb.error.invalidRequest")
       prompt.mode ??= chat.mode
       if (prompt.mode === "plan" && !prompt.prepared) {
         prompt.agent = "plan"

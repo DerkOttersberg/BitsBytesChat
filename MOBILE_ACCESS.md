@@ -2,6 +2,8 @@
 
 The phone connects to the **same engine and sessions on your Windows computer**. Messages sent on either device appear in the same conversation. The computer executes AI tools, transcribes uploaded recordings, creates documents and writes to the server share. Provider credentials remain on the computer. Each device keeps its own unsent drafts.
 
+The interface candidate adds desktop project collections, a left conversation sidebar, Markdown Preview/Source, recorded-image panel tabs and context-window controls. The phone retains its compact mobile layout. Image generation runs on the computer and requires its separate verified OpenAI image API connection; ChatGPT-plan sign-in alone does not enable it. Saved generated PNGs use the existing artifact/download system. Physical iPhone microphone/background behavior and Dutch accuracy remain separate deferred checks.
+
 ## First connection
 
 1. Open **Start BitsBytesChat.cmd** or **Start BitsBytes Mobile.cmd**. Both launch the same **0.3.5 candidate** application with mobile access included. If an older desktop/mobile copy is still running, the launcher offers to close it first. Your existing `%LOCALAPPDATA%\BitsBytesChat` data and credentials are retained.

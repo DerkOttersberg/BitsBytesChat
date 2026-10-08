@@ -17,11 +17,16 @@ export type RunError =
   | ToolOutputStore.Error
 
 /** Runs one local continuation from already-recorded Session history. */
+export type OwnershipCallback = (
+  owner: { readonly inputID: string; readonly assistantID?: string } | undefined,
+) => Effect.Effect<void>
 export interface Interface {
   /** Drains eligible durable work. Explicit runs perform one provider attempt even when no work is eligible. */
   readonly run: (input: {
     readonly sessionID: SessionSchema.ID
     readonly force: boolean
+    readonly runEpoch?: string
+    readonly onOwnership?: OwnershipCallback
   }) => Effect.Effect<void, RunError>
 }
 

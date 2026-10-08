@@ -4,10 +4,13 @@ import type { DocumentArtifact, SpreadsheetGrid } from "../../bitsbytes/types"
 import { bbt, bbError } from "../../bitsbytes/copy"
 import { WordPreview } from "./preview"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
+import { Icon } from "@opencode-ai/ui/icon"
+import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
+import { MarkdownPreviewSource, isMarkdownName } from "@opencode-ai/app"
 
 export function DocumentPanel(props: { id: string; revision?: number }) {
   const api = window.api.bitsbytes
-  const [store, setStore] = createStore({ artifact: undefined as DocumentArtifact | undefined, bytes: undefined as Uint8Array | undefined, error: "", text: "", image: "", loading: false, mode: "preview", revision: 0, sheet: "", offset: 0, pages: [] as number[], grid: undefined as SpreadsheetGrid | undefined })
+  const [store, setStore] = createStore({ artifact: undefined as DocumentArtifact | undefined, bytes: undefined as Uint8Array | undefined, error: "", text: "", image: "", loading: false, mode: "preview", revision: 0, resourceRevision: 0, resources: [] as { href: string; id?: string }[], sheet: "", offset: 0, pages: [] as number[], grid: undefined as SpreadsheetGrid | undefined })
   let generation = 0
   let identity = ""
   let disposed = false
@@ -30,8 +33,8 @@ export function DocumentPanel(props: { id: string; revision?: number }) {
         return
       }
       if (artifact.kind === "html" || artifact.kind === "code") {
-        const content = await api.call<{ text: string }>("artifact.content", args)
-        if (token === generation) setStore({ text: content.text, error: "" })
+        const content = await api.call<{ text: string; revision?: number; resources?: { href: string; id?: string }[] }>("artifact.content", args)
+        if (token === generation) setStore({ text: content.text, error: "", resourceRevision: content.revision ?? store.revision, resources: content.resources ?? [] })
         return
       }
       if (artifact.kind === "image") {
@@ -71,7 +74,11 @@ export function DocumentPanel(props: { id: string; revision?: number }) {
     <Show when={store.artifact?.kind === "spreadsheet" && store.grid}>{grid => <div class="bb-sheet-panel"><div class="bb-document-toolbar"><select aria-label={bbt("sheet")} value={grid().sheet} disabled={store.loading} onChange={event => { setStore({ sheet: event.currentTarget.value, offset: 0, pages: [], grid: undefined }); refresh() }}><For each={grid().sheets}>{sheet => <option>{sheet}</option>}</For></select><span>{grid().rows.length ? grid().offset + 1 : 0}–{Math.min(grid().total, grid().offset + grid().rows.length)} / {grid().total}</span><ButtonV2 variant="ghost-muted" size="normal" disabled={store.loading || !grid().offset} onClick={() => { setStore("offset", store.pages.at(-1) ?? Math.max(0, grid().offset - 200)); refresh() }}>{bbt("previousRows")}</ButtonV2><ButtonV2 variant="ghost-muted" size="normal" disabled={store.loading || !grid().rows.length || grid().offset + grid().rows.length >= grid().total} onClick={() => { setStore("offset", grid().offset + grid().rows.length); refresh() }}>{bbt("nextRows")}</ButtonV2></div><div class="bb-sheet-scroll"><table><tbody><For each={grid().rows}>{(row, index) => <tr><th>{grid().offset + index() + 1}</th><For each={row}>{(cell, column) => <td title={grid().formulas?.[index()]?.[column()]}>{cell}</td>}</For></tr>}</For></tbody></table></div></div>}</Show>
     <Show when={(store.grid?.columns ?? 0) > 100}><p class="bb-preview-status">{bbt("sheetColumnLimit")}</p></Show>
     <Show when={store.grid?.shortened}><p class="bb-preview-status">{bbt("sheetCellLimit")}</p></Show>
-    <Show when={store.artifact?.kind === "html" || store.artifact?.kind === "code"}><Show when={store.artifact?.kind === "html" && store.mode === "preview"} fallback={<pre class="bb-artifact-source">{store.text}</pre>}><Show when={store.text} keyed>{text => { const url = URL.createObjectURL(new Blob([isolatedHTML(text)], { type: "text/html" })); onCleanup(() => URL.revokeObjectURL(url)); return <iframe class="bb-html-preview" title={bbt("htmlPreview")} sandbox="allow-scripts" src={url} /> }}</Show></Show></Show>
+    <Show when={store.artifact?.kind === "html" || store.artifact?.kind === "code"}>
+      <Show when={store.artifact?.kind === "code" && isMarkdownName(store.artifact?.filename ?? "")} fallback={<Show when={store.artifact?.kind === "html" && store.mode === "preview"} fallback={<pre class="bb-artifact-source">{store.text}</pre>}><Show when={store.text} keyed>{text => { const url = URL.createObjectURL(new Blob([isolatedHTML(text)], { type: "text/html" })); onCleanup(() => URL.revokeObjectURL(url)); return <iframe class="bb-html-preview" title={bbt("htmlPreview")} sandbox="allow-scripts" src={url} /> }}</Show></Show>}>
+        <MarkdownPreviewSource identity={props.id} text={store.text} path={store.artifact?.path} sessionID={store.artifact?.sessionID} artifactID={props.id} revision={store.resourceRevision} resources={store.resources} source={() => <pre class="bb-artifact-source">{store.text}</pre>} />
+      </Show>
+    </Show>
     <Show when={store.image}><div class="bb-artifact-image"><img src={store.image} alt={store.artifact?.filename ?? ""} /></div></Show>
     <Show when={["document", "presentation", "pdf"].includes(store.artifact?.kind ?? "document")}><Show when={store.bytes} fallback={<div class="bb-preview-status" role="status"><Show when={store.artifact?.status !== "error"}><i class="bb-preview-spinner" aria-hidden="true" /></Show><p>{bbt(store.artifact?.status === "error" ? "previewFailed" : "previewPreparing")}</p></div>}>{bytes => <WordPreview bytes={bytes()} />}</Show></Show>
   </div>
@@ -79,20 +86,20 @@ export function DocumentPanel(props: { id: string; revision?: number }) {
 
 export function BrowserPanel(props: { id: string; active: boolean }) {
   const api = window.api.bitsbytes
-  const [store, setStore] = createStore({ url: "", title: "", loading: false, canBack: false, canForward: false, error: "" })
+  const [store, setStore] = createStore({ url: "", address: "", editing: false, title: "", loading: false, canBack: false, canForward: false, error: "" })
   let host!: HTMLDivElement
   let frame = 0
   let lastBounds = ""
   let generation = 0, disposed = false
   const run = async (action: string, args: Record<string, unknown> = {}) => {
-    try { await api.call("browser." + action, { id: props.id, ...args }); setStore("error", "") }
+    try { await api.call("browser." + action, { id: props.id, ...args }); if (action !== "bounds" && action !== "hide") setStore("error", "") }
     catch (error) { setStore("error", bbError(error)) }
   }
   function bounds() {
     if (!host) return
     const rect = host.getBoundingClientRect()
     const modal = Array.from(document.querySelectorAll('[role="dialog"],[aria-modal="true"],[role="menu"]')).some(element => !!(element as HTMLElement).offsetParent)
-    const args = { bounds: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }, visible: props.active && !modal && rect.width > 0 && rect.height > 0 }
+    const args = { bounds: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, visible: props.active && !modal && rect.width > 0 && rect.height > 0 }
     const key = JSON.stringify(args)
     if (key === lastBounds) return
     lastBounds = key
@@ -100,15 +107,27 @@ export function BrowserPanel(props: { id: string; active: boolean }) {
   }
   const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(bounds) }
   onMount(() => {
-    const unsubscribe = api.subscribe(event => { if (event.type === "browser" && event.id === props.id) { generation++; setStore({ url: event.url, title: event.title, loading: event.loading, canBack: event.canBack, canForward: event.canForward }) } })
+    const unsubscribe = api.subscribe(event => { if (event.type === "browser" && event.id === props.id) { generation++; setStore({ url: event.url, ...(!store.editing ? { address: event.url } : {}), title: event.title, loading: event.loading, canBack: event.canBack, canForward: event.canForward }) } })
     const token = generation
-    void api.call<{ id: string; url: string; title: string; loading: boolean; canBack: boolean; canForward: boolean }[]>("browser.list").then(items => { if (disposed || token !== generation) return; const item = items.find(item => item.id === props.id); if (item) setStore(item) }).catch(error => { if (!disposed && token === generation) setStore("error", bbError(error)) })
+    void api.call<{ id: string; url: string; title: string; loading: boolean; canBack: boolean; canForward: boolean }[]>("browser.list").then(items => { if (disposed || token !== generation) return; const item = items.find(item => item.id === props.id); if (item) setStore({ ...item, address: item.url }) }).catch(error => { if (!disposed && token === generation) setStore("error", bbError(error)) })
     const resize = new ResizeObserver(schedule); resize.observe(host)
-    const observer = new MutationObserver(schedule); observer.observe(document.body, { childList: true, subtree: true })
+    const overlay = '[role="dialog"],[aria-modal="true"],[role="menu"]'
+    const observer = new MutationObserver(records => {
+      if (records.some(record => record.type === "attributes"
+        ? record.target instanceof Element && (record.target.matches(overlay) || ["dialog", "menu", "true"].includes(record.oldValue ?? ""))
+        : [...record.addedNodes, ...record.removedNodes].some(node => node instanceof Element && (node.matches(overlay) || node.querySelector(overlay))))) schedule()
+    }); observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ["role", "aria-modal"] })
     window.addEventListener("resize", schedule)
     onCleanup(() => { disposed = true; generation++; unsubscribe(); resize.disconnect(); observer.disconnect(); cancelAnimationFrame(frame); window.removeEventListener("resize", schedule); void api.call("browser.hide", { id: props.id }).catch(() => undefined) })
     bounds()
   })
   createEffect(() => { props.active; schedule() })
-  return <div class="bb-browser-panel"><form class="bb-browser-toolbar" onSubmit={event => { event.preventDefault(); void run("navigate", { url: store.url }) }}><button type="button" title={bbt("back")} aria-label={bbt("back")} disabled={!store.canBack} onClick={() => void run("back")}>←</button><button type="button" title={bbt("forward")} aria-label={bbt("forward")} disabled={!store.canForward} onClick={() => void run("forward")}>→</button><button type="button" title={bbt(store.loading ? "cancel" : "reload")} aria-label={bbt(store.loading ? "cancel" : "reload")} onClick={() => void run(store.loading ? "stop" : "reload")}>{store.loading ? "×" : "↻"}</button><input aria-label={bbt("address")} value={store.url} onInput={event => { generation++; setStore("url", event.currentTarget.value) }} /><button type="submit" title={bbt("navigate")} aria-label={bbt("navigate")}>↵</button></form><Show when={store.error}><p class="bb-error">{store.error}</p></Show><div ref={host} class="bb-browser-host" /></div>
+  return <div class="bb-browser-panel"><form class="bb-browser-toolbar" onSubmit={event => { event.preventDefault(); setStore("editing", false); void run("navigate", { url: store.address }) }}>
+    <button type="button" title={bbt("back")} aria-label={bbt("back")} disabled={!store.canBack} onClick={() => void run("back")}><Icon name="arrow-left" size="small" /></button>
+    <button type="button" title={bbt("forward")} aria-label={bbt("forward")} disabled={!store.canForward} onClick={() => void run("forward")}><Icon name="arrow-right" size="small" /></button>
+    <button type="button" title={bbt(store.loading ? "cancel" : "reload")} aria-label={bbt(store.loading ? "cancel" : "reload")} onClick={() => void run(store.loading ? "stop" : "reload")}><Icon name={store.loading ? "close-small" : "reset"} size="small" /></button>
+    <input aria-label={bbt("address")} value={store.address} spellcheck={false} onFocus={event => { setStore("editing", true); event.currentTarget.select() }} onBlur={() => setStore("editing", false)} onInput={event => { generation++; setStore("address", event.currentTarget.value) }} onKeyDown={event => { if (event.key === "Escape") { setStore({ address: store.url, editing: false }); event.currentTarget.blur() } }} />
+    <MenuV2 placement="bottom-end" onOpenChange={schedule}><MenuV2.Trigger type="button" aria-label={bbt("organization.browserActions")}><Icon name="dot-grid" size="small" /></MenuV2.Trigger><MenuV2.Portal><MenuV2.Content><MenuV2.Item disabled={!store.url} onSelect={() => void navigator.clipboard.writeText(store.url).catch(error => setStore("error", bbError(error)))}>{bbt("organization.copyURL")}</MenuV2.Item><MenuV2.Item disabled={!store.url} onSelect={() => window.api.openExternal(store.url)}>{bbt("organization.externalBrowser")}</MenuV2.Item></MenuV2.Content></MenuV2.Portal></MenuV2>
+    <Show when={store.loading}><span class="bb-browser-loading" role="progressbar" aria-label={bbt("organization.loadingPage")} /></Show>
+  </form><Show when={store.error}><div class="bb-browser-error" role="alert"><span>{store.error}</span><button onClick={() => void run("navigate", { url: store.address || store.url })}>{bbt("retry")}</button></div></Show><div ref={host} class="bb-browser-host" /></div>
 }

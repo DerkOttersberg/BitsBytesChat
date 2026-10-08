@@ -11,6 +11,7 @@ type Input = {
   readonly agent: string
   readonly model: ModelV2.Ref
   readonly snapshot?: string
+  readonly onAssistantStart?: (assistantID: SessionMessage.ID) => Effect.Effect<void>
 }
 
 const safe = (value: number | undefined) => Math.max(0, Number.isFinite(value) ? (value ?? 0) : 0)
@@ -76,11 +77,14 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
     assistantMessageID = SessionMessage.ID.create()
     assistantActive = true
     yield* events.publish(SessionEvent.Step.Started, {
-      ...input,
+      sessionID: input.sessionID,
+      agent: input.agent,
+      model: input.model,
       assistantMessageID,
       timestamp: yield* timestamp,
       snapshot: input.snapshot,
     })
+    if (input.onAssistantStart) yield* input.onAssistantStart(assistantMessageID)
     return assistantMessageID
   })
   const currentAssistantMessageID = () =>

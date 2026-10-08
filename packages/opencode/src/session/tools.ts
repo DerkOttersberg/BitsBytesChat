@@ -13,7 +13,8 @@ import { Truncate } from "@/tool/truncate"
 import { Plugin } from "@/plugin"
 import type { TaskPromptOps } from "@/tool/task"
 import { type Tool as AITool, tool, jsonSchema, type ToolExecutionOptions, asSchema } from "ai"
-import { Effect } from "effect"
+import { Cause, Effect } from "effect"
+import { ToolOperation } from "@opencode-ai/schema/tool-operation"
 import { MessageV2 } from "./message-v2"
 import { Session } from "./session"
 import { SessionProcessor } from "./processor"
@@ -406,7 +407,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   if (flags.experimentalCodeMode) return tools
 
   for (const [key, entry] of Object.entries(yield* mcp.tools())) {
-    const item = McpCatalog.convertTool(entry.def, entry.client, entry.timeout, input.session.id)
+    const item = McpCatalog.convertTool(entry.def, entry.client, entry.timeout, input.session.id, input.processor.message.parentID, input.agent.name)
     const execute = item.execute
     if (!execute) continue
 
@@ -424,7 +425,12 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
           )
           const result: Awaited<ReturnType<NonNullable<typeof execute>>> = yield* Effect.gen(function* () {
             yield* ctx.ask({ permission: key, metadata: {}, patterns: ["*"], always: ["*"] })
-            return yield* Effect.promise(() => execute(args, opts))
+            return yield* Effect.promise(() => execute(args, opts)).pipe(Effect.catchCause((cause) => Effect.gen(function* () {
+              const error = Cause.squash(cause)
+              if (error instanceof McpCatalog.ToolError && error.operation)
+                yield* ctx.metadata({ metadata: { [ToolOperation.key]: error.operation } })
+              return yield* Effect.failCause(cause)
+            })))
           }).pipe(
             Effect.withSpan("Tool.execute", {
               attributes: {
@@ -482,6 +488,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
           const truncated = yield* truncate.output(textParts.join("\n\n"), {}, input.agent)
           const metadata = {
             ...result.metadata,
+            ...(ToolOperation.metadata(result._meta) ? { [ToolOperation.key]: ToolOperation.metadata(result._meta) } : {}),
             truncated: truncated.truncated,
             ...(truncated.truncated && { outputPath: truncated.outputPath }),
           }

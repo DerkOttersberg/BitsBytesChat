@@ -1,4 +1,5 @@
 export { Agent } from "./agent"
+export { ChatProject } from "./chat-project"
 export { Command } from "./command"
 export { Connection } from "./connection"
 export { Credential } from "./credential"

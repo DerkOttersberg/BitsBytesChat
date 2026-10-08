@@ -28,6 +28,8 @@ import { createPromptSubmissionState } from "./submission-state"
 import { normalizeSessionInfo } from "@/utils/session"
 import { Event } from "@opencode-ai/schema/event"
 import { blobDataUrl } from "@/utils/draft-store"
+import { createOrganizationClient } from "@/utils/organization-api"
+import { useServerSDK } from "@/context/server-sdk"
 
 type PendingPrompt = {
   abort: AbortController
@@ -42,7 +44,7 @@ export type FollowupDraft = {
   prompt: Prompt
   context: (ContextItem & { key: string })[]
   agent: string
-  model: { providerID: string; modelID: string }
+  model: { providerID: string; modelID: string; contextWindow?: number }
   variant?: string
 }
 
@@ -62,6 +64,7 @@ type FollowupSendInput = {
 const draftText = (prompt: Prompt) => prompt.map((part) => ("content" in part ? part.content : "")).join("")
 
 const draftImages = (prompt: Prompt) => prompt.filter((part): part is ImageAttachmentPart => part.type === "image")
+const requestModel = (model: FollowupDraft["model"], variant?: string) => ({ id: model.modelID, providerID: model.providerID, variant, contextWindow: model.contextWindow })
 
 export async function sendFollowupDraft(input: FollowupSendInput) {
   const text = draftText(input.draft.prompt)
@@ -99,11 +102,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
         command: cmd,
         arguments: tail.join(" "),
         agent: input.draft.agent,
-        model: {
-          id: input.draft.model.modelID,
-          providerID: input.draft.model.providerID,
-          variant: input.draft.variant,
-        },
+        model: requestModel(input.draft.model, input.draft.variant),
         files: await Promise.all(
           images.map(async (attachment) => ({
             uri: await blobDataUrl(attachment.blob, attachment.mime),
@@ -269,6 +268,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
   const settings = useSettings()
   const navigate = useNavigate()
   const sdk = useSDK()
+  const serverSDK = useServerSDK()
   const sync = useSync()
   const serverSync = useServerSync()
   const local = useLocal()
@@ -393,6 +393,10 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       })
       return
     }
+    if (currentModel.contextWindow !== undefined && !modelSelection.context.list({ providerID: currentModel.provider.id, modelID: currentModel.id }).includes(currentModel.contextWindow)) {
+      showToast({ title: language.t("contextWindow.title"), description: language.t("contextWindow.invalid") })
+      return
+    }
 
     input.addToHistory(currentPrompt, mode)
     input.resetHistoryNavigation()
@@ -450,7 +454,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       const created = await sdk()
         .api.session.create({
           agent: currentAgent.name,
-          model: { id: currentModel.id, providerID: currentModel.provider.id, variant },
+          model: requestModel({ modelID: currentModel.id, providerID: currentModel.provider.id, contextWindow: currentModel.contextWindow }, variant),
           location: { directory: sessionDirectory },
         })
         .then(normalizeSessionInfo)
@@ -462,6 +466,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           return undefined
         })
       if (created) {
+        const chatProjectID = search.draftId ? tabs.draft(search.draftId).projectID : undefined
         if (platform.bitsbytes) {
           const access = await platform.bitsbytes.call<{ mode: string }>("access.get", { sessionID: accessKey })
             await platform.bitsbytes.call("access.set", { sessionID: created.id, mode: access.mode })
@@ -476,7 +481,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           if (shouldAutoAccept) permissionState.enableAutoAccept(session.id, sessionDirectory)
           local.session.promote(sessionDirectory, session.id, {
             agent: currentAgent.name,
-            model: { providerID: currentModel.provider.id, modelID: currentModel.id },
+            model: { providerID: currentModel.provider.id, modelID: currentModel.id, contextWindow: currentModel.contextWindow },
             variant: variant ?? null,
           })
           layout.handoff.setTabs(base64Encode(sessionDirectory), session.id)
@@ -484,7 +489,14 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           if (draftID) tabs.promoteDraft(draftID, { server: tabs.draft(draftID).server, sessionId: session.id })
           else navigate(`/${base64Encode(sessionDirectory)}/session/${session.id}`)
           submission.retarget(prompt.capture({ dir: base64Encode(sessionDirectory), id: session.id }))
+          submission.target().model.set({ providerID: currentModel.provider.id, modelID: currentModel.id, contextWindow: currentModel.contextWindow, variant: variant ?? null })
+          submission.target().model.context.set(JSON.stringify([currentModel.provider.id, currentModel.id]), currentModel.contextWindow)
         })
+        if (chatProjectID) {
+          await createOrganizationClient(serverSDK().server.http, platform.fetch).chat(created.id, { projectID: chatProjectID })
+            .then(() => tabs.projectAssigned(created.id))
+            .catch(() => showToast({ title: language.t("organization.error.assignment"), description: language.t("organization.assignmentRetry") }))
+        }
       }
     }
     if (!session) {
@@ -498,6 +510,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     const model = {
       modelID: currentModel.id,
       providerID: currentModel.provider.id,
+      contextWindow: currentModel.contextWindow,
     }
     const agent = currentAgent.name
     const draft: FollowupDraft = {
@@ -578,7 +591,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             command: commandName,
             arguments: args.join(" "),
             agent,
-            model: { id: model.modelID, providerID: model.providerID, variant },
+            model: requestModel(model, variant),
             files: await Promise.all(
               images.map(async (attachment) => ({
                 uri: await blobDataUrl(attachment.blob, attachment.mime),

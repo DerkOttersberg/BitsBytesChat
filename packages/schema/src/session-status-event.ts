@@ -6,6 +6,14 @@ import { Event } from "./event"
 import { NonNegativeInt } from "./schema"
 import { SessionID } from "./session-id"
 
+/** Process-local execution evidence; never recovered from transcript state. */
+export interface Owner extends Schema.Schema.Type<typeof Owner> {}
+export const Owner = Schema.Struct({
+  runEpoch: Schema.String,
+  inputID: Schema.String,
+  assistantID: optional(Schema.String),
+}).annotate({ identifier: "Session.Execution.Owner" })
+
 export const Info = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("idle"),
@@ -25,9 +33,11 @@ export const Info = Schema.Union([
       }),
     ),
     next: NonNegativeInt,
+    owner: optional(Owner),
   }),
   Schema.Struct({
     type: Schema.Literal("busy"),
+    owner: optional(Owner),
   }),
 ]).annotate({ identifier: "SessionStatus" })
 export type Info = Schema.Schema.Type<typeof Info>

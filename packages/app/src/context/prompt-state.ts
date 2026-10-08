@@ -49,6 +49,7 @@ export type PromptModel = {
   providerID: string
   modelID: string
   variant?: string | null
+  contextWindow?: number
 }
 
 export type FileContextItem = {
@@ -71,6 +72,7 @@ export type PromptStore = {
   prompt: Prompt
   cursor?: number
   model?: PromptModel
+  contextWindows?: Record<string, number | undefined>
   context: {
     items: (ContextItem & { key: string })[]
   }
@@ -208,6 +210,10 @@ function createPromptStateValue(store: PromptStore, setStore: SetStoreFunction<P
     model: {
       current: () => store.model,
       set: (model: PromptModel | undefined) => setStore("model", model),
+      context: {
+        get: (key: string) => store.contextWindows?.[key],
+        set: (key: string, value: number | undefined) => setStore("contextWindows", { ...store.contextWindows, [key]: value }),
+      },
     },
     context: {
       items: createMemo(() => store.context.items),

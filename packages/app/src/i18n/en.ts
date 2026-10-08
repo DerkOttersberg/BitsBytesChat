@@ -1,6 +1,15 @@
 import { DESKTOP_NATIVE_ENGLISH } from "./desktop-native"
+import { ORGANIZATION_ENGLISH } from "./organization-en"
 
 export const dict = {
+  ...ORGANIZATION_ENGLISH,
+  "bitsbytes.markdown.view": "Document view",
+  "bitsbytes.markdown.preview": "Preview",
+  "bitsbytes.markdown.source": "Source",
+  "bitsbytes.markdown.large": "This document is large. Source view keeps it responsive and shows the complete text.",
+  "bitsbytes.markdown.imagesUnavailable": "Some images are unavailable in this preview. Local images must be inside the document folder.",
+  "bitsbytes.imageRead.unavailable": "This recorded image is unavailable. Open it again from the original tool result.",
+  "bitsbytes.imageRead.dimensions": "{{width}} × {{height}} px · Recorded image",
   "bitsbytes.brand": "Bits & Bytes Chat",
   "error.page.report.project": "to the project",
   "error.chain.mcpConnectionFailed": 'MCP server "{{name}}" failed.',
@@ -1204,4 +1213,10 @@ export const dict = {
   "workspace.reset.archived.one": "1 session will be archived.",
   "workspace.reset.archived.many": "{{count}} sessions will be archived.",
   "workspace.reset.note": "This will reset the workspace to match the default branch.",
+  "contextWindow.title": "Context window",
+  "contextWindow.recommended": "Recommended",
+  "contextWindow.hint": "Choose how much conversation {{model}} retains before compaction. The output allowance stays the same.",
+  "contextWindow.tokens": "{{count}} tokens",
+  "contextWindow.unknown": "This provider has not reported a usable capacity. Recommended uses the provider default.",
+  "contextWindow.invalid": "This context window is no longer supported. Choose Recommended or another available size.",
 }

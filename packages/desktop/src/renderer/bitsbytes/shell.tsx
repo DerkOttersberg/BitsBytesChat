@@ -3,6 +3,7 @@ import type { ParentProps } from "solid-js"
 import type { Job, Settings, Skill, State } from "../../bitsbytes/types"
 import { bbt, bbError } from "../../bitsbytes/copy"
 import { Icon } from "@opencode-ai/ui/icon"
+import { Portal } from "solid-js/web"
 import "./style.css"
 
 const freshSkill = (): Skill => ({ id: "", name: "", instructions: "", defaultPrompt: "", template: "", output: "", enabled: false, revision: 0, versions: [], files: [] })
@@ -12,6 +13,11 @@ export function BitsBytesShell(props: ParentProps<{ audio: { insert: (job: Job) 
   const api = window.api.bitsbytes
   const [state, setState] = createSignal<State>()
   const [tab, setTab] = createSignal<"chats" | "skills" | "recordings" | "settings">("chats")
+  const [utilityHost, setUtilityHost] = createSignal<HTMLElement>()
+  const selectTab = (value: "chats" | "skills" | "recordings" | "settings") => {
+    setTab(value)
+    window.dispatchEvent(new CustomEvent("bitsbytes:utility-state", { detail: { tab: value } }))
+  }
   const [busy, setBusy] = createSignal("")
   const [notice, setNotice] = createSignal("")
   const [error, setError] = createSignal("")
@@ -29,7 +35,7 @@ export function BitsBytesShell(props: ParentProps<{ audio: { insert: (job: Job) 
   }
   function navigate(result: unknown) {
     if (!result || typeof result !== "object" || !("sessionID" in result) || !("directory" in result)) return
-    setTab("chats")
+    selectTab("chats")
     window.dispatchEvent(new CustomEvent("bitsbytes:session", { detail: result }))
   }
   async function run(method: string, args: Record<string, unknown> = {}) {
@@ -48,6 +54,13 @@ export function BitsBytesShell(props: ParentProps<{ audio: { insert: (job: Job) 
     finally { setBusy("") }
   }
   onMount(() => {
+    const findHost = () => { const host = document.getElementById("bitsbytes-utility-content"); if (host) setUtilityHost(host) }
+    findHost()
+    const host = (event: Event) => { const element = (event as CustomEvent).detail; if (element instanceof HTMLElement) setUtilityHost(element) }
+    const select = (event: Event) => { const value = (event as CustomEvent).detail?.tab; if (value === "chats" || value === "skills" || value === "recordings") setTab(value) }
+    window.addEventListener("bitsbytes:utility-host", host)
+    window.addEventListener("bitsbytes:utility-select", select)
+    onCleanup(() => { window.removeEventListener("bitsbytes:utility-host", host); window.removeEventListener("bitsbytes:utility-select", select) })
     void refresh().catch((reason) => setError(bbError(reason)))
     const unsubscribe = api.subscribe((event) => {
       if (event.type === "meter" || event.type === "duration" || event.type === "browser" || event.type === "artifact") return
@@ -59,7 +72,7 @@ export function BitsBytesShell(props: ParentProps<{ audio: { insert: (job: Job) 
       void refresh()
     })
     onCleanup(unsubscribe)
-    const openSettings = () => { setTab("chats"); window.dispatchEvent(new Event("bitsbytes:open-settings")) }
+    const openSettings = () => { selectTab("chats"); window.dispatchEvent(new Event("bitsbytes:open-settings")) }
     window.addEventListener("bitsbytes:settings", openSettings)
     onCleanup(() => window.removeEventListener("bitsbytes:settings", openSettings))
   })
@@ -74,25 +87,22 @@ export function BitsBytesShell(props: ParentProps<{ audio: { insert: (job: Job) 
     if (saved) setEditor({ ...saved })
   }
   function addTranscript(job: Job) {
-    try { props.audio.insert(job); setTab("chats") }
+    try { props.audio.insert(job); selectTab("chats") }
     catch (reason) { setError(bbError(reason)) }
   }
   async function showDocument(job: Job) {
     if (!job.artifact) return
-    setTab("chats")
+    selectTab("chats")
     if (job.sessionID) navigate({ sessionID: job.sessionID, directory: state()!.root + "\\workspace" })
     window.dispatchEvent(new CustomEvent("bitsbytes:open-document", { detail: { path: job.artifact.path, sessionID: job.sessionID } }))
   }
 
   return <div class="bb-shell">
-    <nav class="bb-nav">
-      <For each={["chats", "skills", "recordings", "settings"] as const}>{(item) => <button classList={{ selected: tab() === item, "bb-nav-settings": item === "settings" }} aria-label={bbt(item)} aria-pressed={tab() === item} title={bbt(item)} onClick={() => { if (item === "settings") { setTab("chats"); window.dispatchEvent(new Event("bitsbytes:open-settings")); return } setTab(item) }}><Show when={item === "recordings"} fallback={<Icon name={item === "chats" ? "bubble-5" : item === "skills" ? "brain" : "settings-gear"} />}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M6 11v1a6 6 0 0 0 12 0v-1M12 18v3M9 21h6"/></svg></Show></button>}</For>
-    </nav>
     <main class="bb-main">
       <Show when={busy() || error() || notice()}><div classList={{ "bb-banner": true, "bb-error": Boolean(error()) }} role="status">{error() || notice() || bbt("running")}</div></Show>
       <div class="bb-content">
-        <div class="bb-chat" classList={{ "bb-hidden": tab() !== "chats" }}>{props.children}</div>
-
+        <div class="bb-chat">{props.children}</div>
+        <Show when={utilityHost()}>{host => <Portal mount={host()}>
         <Show when={tab() === "recordings"}>
           <section class="bb-page"><h1>{bbt("recordings")}</h1><p class="bb-subtle">{state()?.settings.engine === "groq" ? bbt("onlineHint") : bbt("localHint")}</p>
             <button disabled={Boolean(busy()) || Boolean(active()) || !state()?.workerReady} onClick={() => void run("audio.import")}>{bbt("importAudio")}</button>
@@ -130,6 +140,7 @@ export function BitsBytesShell(props: ParentProps<{ audio: { insert: (job: Job) 
             <label>{bbt("testInput")}<textarea rows="4" value={testInput()} onInput={(event) => setTestInput(event.currentTarget.value)} /></label><button disabled={Boolean(busy()) || !testInput()} onClick={() => void run("skill.test", { id: editor().id, template: editor().template, instructions: editor().instructions, input: testInput() })}>{bbt("test")}</button><Show when={testOutput()}><pre class="bb-test-result">{testOutput()}</pre></Show>
           </div></section>
         </Show>
+        </Portal>}</Show>
       </div>
     </main>
     <Show when={transcript()}>{(job) => <div class="bb-modal"><div class="bb-modal-card"><header><h2>{job().title}</h2><button onClick={() => setTranscript(undefined)}>×</button></header><pre>{job().transcript || bbt("running")}</pre></div></div>}</Show>

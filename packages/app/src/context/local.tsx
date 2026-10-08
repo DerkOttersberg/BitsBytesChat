@@ -14,13 +14,15 @@ import { useSDK } from "./sdk"
 import { useSync } from "./sync"
 import { useServerSDK } from "./server-sdk"
 import { ScopedKey, type ServerScope } from "@/utils/server-scope"
+import { contextWindowOptions } from "@opencode-ai/core/util/context-window"
 
-export type ModelKey = { providerID: string; modelID: string; variant?: string }
+export type ModelKey = { providerID: string; modelID: string; variant?: string; contextWindow?: number }
 
 type State = {
   agent?: string
   model?: ModelKey
   variant?: string | null
+  contextWindows?: Record<string, number | undefined>
 }
 
 type Saved = {
@@ -205,6 +207,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             agent: item.name,
             model: item.model ?? prev?.model,
             variant: item.variant ?? prev?.variant,
+            contextWindows: prev?.contextWindows,
           } satisfies State
           const session = id()
           if (session) {
@@ -237,7 +240,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         fallback,
       )
       if (!item) return
-      return models.find(item)
+      const value = models.find(item)
+      return value ? { ...value, contextWindow: scope()?.contextWindows?.[JSON.stringify([item.providerID, item.modelID])] ?? (scope()?.model?.providerID === item.providerID && scope()?.model?.modelID === item.modelID ? scope()?.model?.contextWindow : undefined) } : undefined
     }
 
     const configured = () => {
@@ -256,8 +260,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       const model = current()
       return {
         agent: agent.current()?.name,
-        model: model ? { providerID: model.provider.id, modelID: model.id } : undefined,
+        model: model ? { providerID: model.provider.id, modelID: model.id, contextWindow: model.contextWindow } : undefined,
         variant: selected(),
+        contextWindows: scope()?.contextWindows ? { ...scope()!.contextWindows } : undefined,
       } satisfies State
     }
 
@@ -307,7 +312,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
               model: item ?? null,
               variant: selected(),
             })
-            write({ model: item })
+            write({ model: item ? { ...item, contextWindow: scope()?.contextWindows?.[JSON.stringify([item.providerID, item.modelID])] } : undefined })
             if (!item) return
             models.setVisibility(item, true)
             if (!options?.recent) return
@@ -320,6 +325,17 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       },
       setVisibility(item: ModelKey, visible: boolean) {
         models.setVisibility(item, visible)
+      },
+      context: {
+        get(item: ModelKey) {
+          return scope()?.contextWindows?.[JSON.stringify([item.providerID, item.modelID])] ?? (scope()?.model?.providerID === item.providerID && scope()?.model?.modelID === item.modelID ? scope()?.model?.contextWindow : undefined)
+        },
+        list(item: ModelKey) { return contextWindowOptions(models.find(item)?.limit, sync().data.config.compaction?.reserved) },
+        set(item: ModelKey, value: number | undefined) {
+          const contextWindows = { ...scope()?.contextWindows, [JSON.stringify([item.providerID, item.modelID])]: value }
+          write({ model: { ...item, contextWindow: value }, contextWindows })
+          models.setVisibility(item, true)
+        },
       },
       variant: {
         configured,

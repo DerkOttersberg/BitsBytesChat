@@ -7,9 +7,10 @@ test("completed raster reads retain recorded references and exact bytes without 
   const jpeg = { ...image, mime: "image/jpeg", filename: "no-extension", url: "data:image/jpeg;base64,anBlZw==" }
   const state = { status: "completed", attachments: [image, jpeg] }
   const source = JSON.stringify(state)
-  expect(readToolImages(state)).toEqual([image, jpeg])
-  expect(readToolImages(state)[0]).toBe(image)
-  expect(readToolImages(state)[1]).toBe(jpeg)
+  expect(readToolImages(state)).toEqual([
+    { mime: image.mime, filename: image.filename, url: image.url, attachmentIndex: 0 },
+    { mime: jpeg.mime, filename: jpeg.filename, url: jpeg.url, attachmentIndex: 1 },
+  ])
   expect(JSON.stringify(state)).toBe(source)
 })
 
@@ -34,7 +35,9 @@ test("a misleading PNG filename, remote URL or mismatched data MIME cannot produ
     { mime: "image/png", url: null },
     image,
   ]
-  expect(readToolImages({ status: "completed", attachments })).toEqual([image])
+  expect(readToolImages({ status: "completed", attachments })).toEqual([
+    { mime: image.mime, filename: image.filename, url: image.url, attachmentIndex: 10 },
+  ])
 })
 
 test.each([undefined, null, {}, "damaged", 3].map((attachments) => ({ attachments })))(

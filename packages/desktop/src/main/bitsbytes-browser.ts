@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { BrowserWindow, WebContentsView, session } from "electron"
 import type { BBEvent } from "../bitsbytes/types"
+import { browserBounds } from "./bitsbytes-browser-bounds"
 
 type Tab = { id: string; sessionID: string; view: WebContentsView; window: BrowserWindow; closed: () => void }
 export class BBBrowser {
@@ -75,7 +76,7 @@ export class BBBrowser {
     if (action === "bounds") {
       const rect = args.bounds as { x: number; y: number; width: number; height: number }
       if (!rect || ![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)) throw new Error("bb.error.invalidRequest")
-      tab.view.setBounds({ x: Math.max(0, Math.round(rect.x)), y: Math.max(0, Math.round(rect.y)), width: Math.max(0, Math.round(rect.width)), height: Math.max(0, Math.round(rect.height)) })
+      tab.view.setBounds(browserBounds(rect, tab.window.webContents.getZoomFactor()))
       tab.view.setVisible(Boolean(args.visible))
     }
     if (action === "hide") tab.view.setVisible(false)

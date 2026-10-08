@@ -15,6 +15,12 @@ import type {
   AuthRemoveResponses,
   AuthSetErrors,
   AuthSetResponses,
+  ChatProjectChatUpdate,
+  ChatProjectCreate,
+  ChatProjectId,
+  ChatProjectListInput,
+  ChatProjectMigration,
+  ChatProjectUpdate,
   CommandListErrors,
   CommandListResponses,
   Config as Config3,
@@ -179,6 +185,20 @@ import type {
   QuestionReplyErrors,
   QuestionReplyResponses,
   QuestionV2Reply,
+  ServerOrganizationOrganizationChatErrors,
+  ServerOrganizationOrganizationChatResponses,
+  ServerOrganizationOrganizationChatsErrors,
+  ServerOrganizationOrganizationChatsResponses,
+  ServerOrganizationOrganizationCreateErrors,
+  ServerOrganizationOrganizationCreateResponses,
+  ServerOrganizationOrganizationMigrateErrors,
+  ServerOrganizationOrganizationMigrateResponses,
+  ServerOrganizationOrganizationProjectsErrors,
+  ServerOrganizationOrganizationProjectsResponses,
+  ServerOrganizationOrganizationRemoveErrors,
+  ServerOrganizationOrganizationRemoveResponses,
+  ServerOrganizationOrganizationUpdateErrors,
+  ServerOrganizationOrganizationUpdateResponses,
   SessionAbortErrors,
   SessionAbortResponses,
   SessionChildrenErrors,
@@ -3479,6 +3499,7 @@ export class Session2 extends HeyApiClient {
         id: string
         providerID: string
         variant?: string
+        contextWindow?: number
       }
       metadata?: {
         [key: string]: unknown
@@ -3809,6 +3830,7 @@ export class Session2 extends HeyApiClient {
       model?: {
         providerID: string
         modelID: string
+        contextWindow?: number
       }
       agent?: string
       noReply?: boolean
@@ -4168,6 +4190,7 @@ export class Session2 extends HeyApiClient {
       model?: {
         providerID: string
         modelID: string
+        contextWindow?: number
       }
       agent?: string
       noReply?: boolean
@@ -4291,6 +4314,7 @@ export class Session2 extends HeyApiClient {
       model?: {
         providerID: string
         modelID: string
+        contextWindow?: number
       }
       command?: string
     },
@@ -7164,6 +7188,185 @@ export class V2 extends HeyApiClient {
   }
 }
 
+export class Organization extends HeyApiClient {
+  public projects<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<
+      ServerOrganizationOrganizationProjectsResponses,
+      ServerOrganizationOrganizationProjectsErrors,
+      ThrowOnError
+    >({ url: "/api/organization/projects", ...options })
+  }
+
+  public create<ThrowOnError extends boolean = false>(
+    parameters: {
+      chatProjectCreate: ChatProjectCreate
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "chatProjectCreate", map: "body" }] }])
+    return (options?.client ?? this.client).post<
+      ServerOrganizationOrganizationCreateResponses,
+      ServerOrganizationOrganizationCreateErrors,
+      ThrowOnError
+    >({
+      url: "/api/organization/projects",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public remove<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: ChatProjectId
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "id" }] }])
+    return (options?.client ?? this.client).delete<
+      ServerOrganizationOrganizationRemoveResponses,
+      ServerOrganizationOrganizationRemoveErrors,
+      ThrowOnError
+    >({
+      url: "/api/organization/projects/{id}",
+      ...options,
+      ...params,
+    })
+  }
+
+  public update<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: ChatProjectId
+      chatProjectUpdate: ChatProjectUpdate
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { key: "chatProjectUpdate", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<
+      ServerOrganizationOrganizationUpdateResponses,
+      ServerOrganizationOrganizationUpdateErrors,
+      ThrowOnError
+    >({
+      url: "/api/organization/projects/{id}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public chats<ThrowOnError extends boolean = false>(
+    parameters: {
+      chatProjectListInput: ChatProjectListInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "chatProjectListInput", map: "body" }] }])
+    return (options?.client ?? this.client).post<
+      ServerOrganizationOrganizationChatsResponses,
+      ServerOrganizationOrganizationChatsErrors,
+      ThrowOnError
+    >({
+      url: "/api/organization/chats/query",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public chat<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      chatProjectChatUpdate: ChatProjectChatUpdate
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { key: "chatProjectChatUpdate", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<
+      ServerOrganizationOrganizationChatResponses,
+      ServerOrganizationOrganizationChatErrors,
+      ThrowOnError
+    >({
+      url: "/api/organization/chats/{sessionID}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public migrate<ThrowOnError extends boolean = false>(
+    parameters: {
+      chatProjectMigration: ChatProjectMigration
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "chatProjectMigration", map: "body" }] }])
+    return (options?.client ?? this.client).post<
+      ServerOrganizationOrganizationMigrateResponses,
+      ServerOrganizationOrganizationMigrateErrors,
+      ThrowOnError
+    >({
+      url: "/api/organization/migrate",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Organization2 extends HeyApiClient {
+  private _organization?: Organization
+  get organization(): Organization {
+    return (this._organization ??= new Organization({ client: this.client }))
+  }
+}
+
+export class Server extends HeyApiClient {
+  private _organization?: Organization2
+  get organization(): Organization2 {
+    return (this._organization ??= new Organization2({ client: this.client }))
+  }
+}
+
 export class OpencodeClient extends HeyApiClient {
   public static readonly __registry = new HeyApiRegistry<OpencodeClient>()
 
@@ -7305,5 +7508,10 @@ export class OpencodeClient extends HeyApiClient {
   private _v2?: V2
   get v2(): V2 {
     return (this._v2 ??= new V2({ client: this.client }))
+  }
+
+  private _server?: Server
+  get server(): Server {
+    return (this._server ??= new Server({ client: this.client }))
   }
 }
