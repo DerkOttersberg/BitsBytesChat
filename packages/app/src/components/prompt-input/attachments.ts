@@ -9,6 +9,7 @@ import { getCursorPosition } from "./editor-dom"
 import { createBlobReference, type DraftStore } from "@/utils/draft-store"
 import { attachmentMime } from "./files"
 import { normalizePaste, pasteMode } from "./paste"
+import { isQueuedInputDrag } from "@opencode-ai/session-ui/v2/prompt-input/drag-data"
 
 type PromptTarget = Pick<ReturnType<ReturnType<typeof usePrompt>["capture"]>, "current" | "cursor" | "set">
 type AttachmentTarget = { prompt: PromptTarget; cursor: number | undefined }
@@ -164,6 +165,7 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
 
   const handleGlobalDragOver = (event: DragEvent) => {
     if (input.isDialogActive()) return
+    if (isQueuedInputDrag(event)) return
 
     event.preventDefault()
     const hasFiles = event.dataTransfer?.types.includes("Files")
@@ -187,6 +189,7 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
 
     event.preventDefault()
     input.setDraggingType(null)
+    if (isQueuedInputDrag(event)) return
 
     const plainText = event.dataTransfer?.getData("text/plain")
     const filePrefix = "file:"

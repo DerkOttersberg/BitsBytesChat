@@ -6,6 +6,8 @@ The user supplied a 750×156 reference image and a comparison image from this fo
 
 This supersedes the queue appearance described below and the earlier lack of a reference screenshot for this particular state. The supplied images do not show the reference's open menu or editing transitions, so those continue to follow the existing verified interaction contract. Font rasterization can differ between native renderers; measured geometry and colors, rather than whole-image pixel identity, are verified.
 
+The subsequent user feedback restores the six-dot reorder grip on hover, keyboard focus and while dragging, using the existing leading icon slot so the text does not shift. Queue reordering uses a separate native drag type rather than plain text, and both composer implementations exclude it from attachment handling. Drops outside the owning queue cannot insert its ID or reorder messages. Dark mode keeps the reference's `#363636` composer fill across idle, active and queued states; light mode remains unchanged. These mechanics are requested refinements beyond what the original still image can establish.
+
 ## User-directed simplification — 8 October 2026
 
 The follow-up removes the Goal hours form and Goal panel, including restored panel tabs. `/goal` keeps a composer chip and the prompt supplies the objective and constraints. The compact status row keeps Pause/Resume/Clear. Queued editing restores the request in the ordinary composer without an editing banner, Undo or Cancel buttons; Send still replaces the same durable reservation.

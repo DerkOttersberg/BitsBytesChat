@@ -1,6 +1,7 @@
 import { onMount } from "solid-js"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import type { PromptInputV2Attachment, PromptInputV2Prompt } from "./types"
+import { isQueuedInputDrag } from "./drag-data"
 
 const accepted = [
   "image/png",
@@ -179,6 +180,7 @@ export function createPromptInputV2Attachments(
     if (input.isDialogActive()) return
     event.preventDefault()
     input.setDraggingType(null)
+    if (isQueuedInputDrag(event)) return
     const plainText = event.dataTransfer?.getData("text/plain")
     if (plainText?.startsWith("file:")) {
       const path = plainText.slice("file:".length)
@@ -193,6 +195,7 @@ export function createPromptInputV2Attachments(
   onMount(() => {
     makeEventListener(document, "dragover", (event) => {
       if (input.isDialogActive()) return
+      if (isQueuedInputDrag(event)) return
       event.preventDefault()
       if (event.dataTransfer?.types.includes("Files")) input.setDraggingType("image")
       else if (event.dataTransfer?.types.includes("text/plain")) input.setDraggingType("@mention")

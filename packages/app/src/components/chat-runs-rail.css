@@ -45,8 +45,18 @@
   color: var(--text-weak);
   cursor: grab;
 }
-.bb-queue-row:active .bb-queue-icon {
+.bb-queue-row:active .bb-queue-icon,
+.bb-queue-row[data-dragging="true"] .bb-queue-icon {
   cursor: grabbing;
+}
+.bb-queue-grip {
+  display: none;
+}
+.bb-queue-row:is(:hover, :focus-within, [data-dragging="true"]) .bb-queue-symbol {
+  display: none;
+}
+.bb-queue-row:is(:hover, :focus-within, [data-dragging="true"]) .bb-queue-grip {
+  display: block;
 }
 .bb-queue-actions {
   display: flex;
@@ -100,7 +110,7 @@
 :root[data-color-scheme="dark"] :is(.bb-queue-icon, .bb-queue-actions > button) {
   color: #969696;
 }
-:root[data-color-scheme="dark"] .bb-composer-stack:has(.bb-run-queue) :is([data-component="prompt-input-v2"], [data-dock-surface="shell"]) {
+:root[data-color-scheme="dark"] .bb-composer-stack :is([data-component="prompt-input-v2"], [data-dock-surface="shell"]) {
   background: #363636;
   --dock-shell-border-underlay-background: #363636;
 }

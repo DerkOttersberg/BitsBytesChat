@@ -4,6 +4,7 @@ import { useParams, useSearchParams } from "@solidjs/router"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { Icon } from "@opencode-ai/ui/icon"
 import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
+import { isQueuedInputDrag, queuedInputDragType } from "@opencode-ai/session-ui/v2/prompt-input/drag-data"
 import { usePlatform } from "../context/platform"
 import { useLanguage } from "../context/language"
 import { useSDK } from "../context/sdk"
@@ -144,8 +145,37 @@ export function ChatRuns() {
     <Show when={store.confirmGoal}><div class="bb-run-heading"><span>{language.t("bitsbytes.replaceGoal")}</span><ButtonV2 size="normal" variant="ghost-muted" onClick={() => setStore("confirmGoal", false)}>{language.t("bitsbytes.cancel")}</ButtonV2><ButtonV2 size="normal" variant="contrast" onClick={() => { action("goal-draft", { enabled: true, replace: true }); setStore("confirmGoal", false) }}>{language.t("bitsbytes.replace")}</ButtonV2></div></Show>
     <Show when={queued().length}>
       <div class="bb-run-queue" data-component="durable-queue" role="group" aria-label={language.t("bitsbytes.queued", { count: queued().length })}>
-        <div class="bb-queue-list"><For each={queued()}>{(item, index) => <div class="bb-queue-row" draggable={item.status !== "sending"} onDragStart={event => { setStore("dragging", item.id); event.dataTransfer?.setData("text/plain", item.id) }} onDragEnd={() => setStore("dragging", "")} onDragOver={event => { if (store.dragging && store.dragging !== item.id) event.preventDefault() }} onDrop={event => { event.preventDefault(); const ids = reorderQueuedInput(run.store.value?.queue ?? [], store.dragging, item.id); setStore("dragging", ""); if (ids) action("reorder", { ids }) }}>
-          <span class="bb-queue-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4H2.5v8.5H11v-2M6 5.5h5m-2-2 2 2-2 2" /></svg></span>
+        <div class="bb-queue-list"><For each={queued()}>{(item, index) => <div
+          class="bb-queue-row"
+          data-dragging={store.dragging === item.id ? "true" : undefined}
+          draggable={item.status !== "sending"}
+          onDragStart={event => {
+            event.stopPropagation()
+            setStore("dragging", item.id)
+            if (!event.dataTransfer) return
+            event.dataTransfer.setData(queuedInputDragType, item.id)
+            event.dataTransfer.effectAllowed = "move"
+          }}
+          onDragEnd={() => setStore("dragging", "")}
+          onDragOver={event => {
+            if (!store.dragging || !isQueuedInputDrag(event)) return
+            event.preventDefault()
+            event.stopPropagation()
+            if (event.dataTransfer) event.dataTransfer.dropEffect = "move"
+          }}
+          onDrop={event => {
+            if (!store.dragging || !isQueuedInputDrag(event)) return
+            event.preventDefault()
+            event.stopPropagation()
+            const ids = reorderQueuedInput(run.store.value?.queue ?? [], store.dragging, item.id)
+            setStore("dragging", "")
+            if (ids) action("reorder", { ids })
+          }}
+        >
+          <span class="bb-queue-icon" aria-hidden="true">
+            <svg class="bb-queue-symbol" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4H2.5v8.5H11v-2M6 5.5h5m-2-2 2 2-2 2" /></svg>
+            <svg class="bb-queue-grip" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="5.5" cy="4" r="1" /><circle cx="10.5" cy="4" r="1" /><circle cx="5.5" cy="8" r="1" /><circle cx="10.5" cy="8" r="1" /><circle cx="5.5" cy="12" r="1" /><circle cx="10.5" cy="12" r="1" /></svg>
+          </span>
           <span class="bb-queue-text" title={title(item)}>{title(item)}</span>
           <Show when={item.error}><span class="bb-queue-error" title={item.error}>{language.t("bitsbytes.deliveryUncertain")}</span></Show>
           <div class="bb-queue-actions">
