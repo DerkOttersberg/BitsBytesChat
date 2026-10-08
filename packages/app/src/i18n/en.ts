@@ -10,6 +10,8 @@ export const dict = {
   "bitsbytes.removePlan": "Remove Plan mode", "bitsbytes.removeGoal": "Remove Goal", "bitsbytes.openPlan": "Open plan", "bitsbytes.implementPlan": "Implement this plan", "bitsbytes.writingPlan": "Writing plan…",
   "bitsbytes.queued": "Queued · {{count}}", "bitsbytes.resumeQueue": "Resume queue", "bitsbytes.steer": "Steer now", "bitsbytes.queue": "Queue message", "bitsbytes.send": "Send message", "bitsbytes.stop": "Stop", "bitsbytes.retry": "Retry delivery", "bitsbytes.edit": "Edit", "bitsbytes.delete": "Delete", "bitsbytes.cancel": "Cancel", "bitsbytes.replace": "Replace",
   "bitsbytes.queueSteer": "Steer",
+  "bitsbytes.queueInterrupted": "Queue paused because you interrupted",
+  "bitsbytes.queuePaused": "Queue paused",
   "bitsbytes.queueActions": "Queued message actions", "bitsbytes.moveUp": "Move up", "bitsbytes.moveDown": "Move down", "bitsbytes.deliveryUncertain": "Check delivery", "bitsbytes.editingQueued": "Editing queued message; Send saves the change", "bitsbytes.cancelEdit": "Cancel edit",
   "bitsbytes.goalActions": "Goal actions", "bitsbytes.clearGoal": "Clear goal", "bitsbytes.replaceGoal": "Replace the current goal when you send?", "bitsbytes.pause": "Pause", "bitsbytes.resume": "Resume",
   "bitsbytes.goalBudgetReached": "The goal has reached its token budget. Open Goal actions → Edit to increase the budget before resuming.",

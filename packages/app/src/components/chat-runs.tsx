@@ -4,7 +4,6 @@ import { useParams, useSearchParams } from "@solidjs/router"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { Icon } from "@opencode-ai/ui/icon"
 import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
-import { isQueuedInputDrag, queuedInputDragType } from "@opencode-ai/session-ui/v2/prompt-input/drag-data"
 import { usePlatform } from "../context/platform"
 import { useLanguage } from "../context/language"
 import { useSDK } from "../context/sdk"
@@ -15,12 +14,13 @@ import { useLocal } from "../context/local"
 import { draftAccessKey } from "./chat-access"
 import type { FollowupDraft } from "./prompt-input/submit"
 import { readQueuedDraft, restoreQueuedDraft } from "./chat-run-draft"
-import { createQueuedEditGuard, moveQueuedInput, reorderQueuedInput } from "./chat-run-controls"
+import { createQueuedEditGuard, moveQueuedInput } from "./chat-run-controls"
+import { createQueueDrag } from "./chat-queue-drag"
 import "./chat-runs.css"
 import "./chat-runs-rail.css"
 
 export type RunState = {
-  sessionID: string; mode: "normal" | "plan"; goalDraft: boolean; paused: boolean; error: string
+  sessionID: string; mode: "normal" | "plan"; goalDraft: boolean; paused: boolean; pauseReason?: "user-stop" | "recovery" | "storage"; error: string
   goalDraftDurationMs?: number
   queue: { id: string; status: string; sentAt?: number; editing?: boolean; editingSince?: number; presentation?: string; error?: string; prompt: { directory?: string; model?: { providerID: string; modelID: string }; agent?: string; variant?: string; legacyParts?: unknown[]; draft?: FollowupDraft; text: string } }[]
   goal?: { id: string; objective: string; status: string; reason: string; evidence: string; tokens: number; elapsed: number; started: number; budget?: number; summaryDismissed?: boolean; activeSince?: number; minActiveDurationMs?: number }
@@ -92,13 +92,14 @@ export function ModeIcon(props: { kind: "plan" | "goal" | "steer" }) {
 
 export function ChatRuns() {
   const run = useChatRun(), language = useLanguage(), prompt = usePrompt(), local = useLocal(), sdk = useSDK(), platform = usePlatform()
-  const [store, setStore] = createStore({ confirmGoal: false, editing: "", now: Date.now(), tick: performance.now(), dragging: "" })
+  const [store, setStore] = createStore({ confirmGoal: false, editing: "", now: Date.now(), tick: performance.now() })
   const goalClock = createMemo(() => {
     const goal = run.store.value?.goal
     return goal ? { id: goal.id, elapsed: goal.elapsed, running: goal.status === "active" && goal.activeSince !== undefined, tick: performance.now() } : undefined
   })
   const goalElapsed = () => { const anchor = goalClock(); return anchor ? anchor.elapsed + (anchor.running ? Math.max(0, store.tick - anchor.tick) : 0) : 0 }
   const queued = createMemo(() => run.store.value?.queue.filter(item => !item.editing && item.status !== "sending" && item.presentation !== "transcript") ?? [])
+  const drag = createQueueDrag({ queue: () => run.store.value?.queue ?? [], session: run.identity, commit: ids => run.call("reorder", { ids }) })
   const editing = createMemo(() => run.store.value?.queue.find(item => item.editing)?.id ?? "")
   const editGuard = createQueuedEditGuard()
   createEffect(() => { if (editGuard.select(run.identity())) setStore({ editing: "" }) })
@@ -129,7 +130,6 @@ export function ChatRuns() {
   window.addEventListener("bitsbytes:goal-draft", goalRequest)
   onCleanup(() => window.removeEventListener("bitsbytes:goal-draft", goalRequest))
   return <Show when={platform.bitsbytes}><div class="bb-run-controls">
-    <Show when={queued().length && run.store.value?.paused}><div class="bb-run-heading"><ButtonV2 size="normal" variant="ghost-muted" onClick={() => action("resume")}>{language.t("bitsbytes.resumeQueue")}</ButtonV2></div></Show>
     <Show when={run.store.value?.goal && (run.store.value.goal.status !== "complete" || !run.store.value.goal.summaryDismissed) && run.store.value.goal}>{goal => <div class="bb-goal-row" data-status={goal().status}>
       <div class="bb-goal-summary" title={goal().objective}><ModeIcon kind="goal" /><span>{language.t((`bitsbytes.goal.${goal().status}`) as "bitsbytes.goal.active")}</span><span class="bb-goal-objective">{goal().objective}</span></div>
       <span class="bb-goal-stat">{language.t("bitsbytes.goalElapsed", { minutes: Math.floor(goalElapsed() / 60000) })}<Show when={goal().budget}> · {language.t("bitsbytes.goalTokens", { tokens: goal().tokens, budget: goal().budget! })}</Show></span>
@@ -145,50 +145,42 @@ export function ChatRuns() {
     <Show when={store.confirmGoal}><div class="bb-run-heading"><span>{language.t("bitsbytes.replaceGoal")}</span><ButtonV2 size="normal" variant="ghost-muted" onClick={() => setStore("confirmGoal", false)}>{language.t("bitsbytes.cancel")}</ButtonV2><ButtonV2 size="normal" variant="contrast" onClick={() => { action("goal-draft", { enabled: true, replace: true }); setStore("confirmGoal", false) }}>{language.t("bitsbytes.replace")}</ButtonV2></div></Show>
     <Show when={queued().length}>
       <div class="bb-run-queue" data-component="durable-queue" role="group" aria-label={language.t("bitsbytes.queued", { count: queued().length })}>
-        <div class="bb-queue-list"><For each={queued()}>{(item, index) => <div
+        <Show when={run.store.value?.paused}><div class="bb-queue-paused">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M6 5v6M9 5v6" /></svg>
+          <span role="status">{language.t(run.store.value?.pauseReason === "user-stop" ? "bitsbytes.queueInterrupted" : "bitsbytes.queuePaused")}</span>
+          <button aria-label={language.t("bitsbytes.resumeQueue")} onClick={() => action("resume")}><svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="m4 2 6 4-6 4z" /></svg>{language.t("bitsbytes.resume")}</button>
+        </div></Show>
+        <div class="bb-queue-list" data-reordering={drag.state.dragging ? "true" : undefined} data-saving={drag.state.saving ? "true" : undefined}><For each={drag.ids()}>{(id, index) => <Show when={queued().find(row => row.id === id)}>{item => <div
           class="bb-queue-row"
-          data-dragging={store.dragging === item.id ? "true" : undefined}
-          draggable={item.status !== "sending"}
-          onDragStart={event => {
-            event.stopPropagation()
-            setStore("dragging", item.id)
-            if (!event.dataTransfer) return
-            event.dataTransfer.setData(queuedInputDragType, item.id)
-            event.dataTransfer.effectAllowed = "move"
-          }}
-          onDragEnd={() => setStore("dragging", "")}
-          onDragOver={event => {
-            if (!store.dragging || !isQueuedInputDrag(event)) return
-            event.preventDefault()
-            event.stopPropagation()
-            if (event.dataTransfer) event.dataTransfer.dropEffect = "move"
-          }}
-          onDrop={event => {
-            if (!store.dragging || !isQueuedInputDrag(event)) return
-            event.preventDefault()
-            event.stopPropagation()
-            const ids = reorderQueuedInput(run.store.value?.queue ?? [], store.dragging, item.id)
-            setStore("dragging", "")
-            if (ids) action("reorder", { ids })
-          }}
+          data-queue-id={id}
+          data-dragging={drag.state.dragging === id ? "true" : undefined}
+          data-landing={drag.state.landing === id ? "true" : undefined}
+          style={drag.style(id)}
+          draggable={false}
+          onPointerDown={event => drag.start(event, id)}
+          onPointerMove={drag.move}
+          onPointerUp={drag.end}
+          onPointerCancel={drag.cancel}
+          onLostPointerCapture={drag.cancel}
+          onDragStart={event => event.preventDefault()}
         >
           <span class="bb-queue-icon" aria-hidden="true">
             <svg class="bb-queue-symbol" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4H2.5v8.5H11v-2M6 5.5h5m-2-2 2 2-2 2" /></svg>
             <svg class="bb-queue-grip" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="5.5" cy="4" r="1" /><circle cx="10.5" cy="4" r="1" /><circle cx="5.5" cy="8" r="1" /><circle cx="10.5" cy="8" r="1" /><circle cx="5.5" cy="12" r="1" /><circle cx="10.5" cy="12" r="1" /></svg>
           </span>
-          <span class="bb-queue-text" title={title(item)}>{title(item)}</span>
-          <Show when={item.error}><span class="bb-queue-error" title={item.error}>{language.t("bitsbytes.deliveryUncertain")}</span></Show>
+          <span class="bb-queue-text" title={title(item())}>{title(item())}</span>
+          <Show when={item().error}><span class="bb-queue-error" title={item().error}>{language.t("bitsbytes.deliveryUncertain")}</span></Show>
           <div class="bb-queue-actions">
-          <button class="bb-queue-steer" disabled={item.status === "sending"} title={language.t(item.error ? "bitsbytes.retry" : "bitsbytes.queueSteer")} aria-label={language.t(item.error ? "bitsbytes.retry" : "bitsbytes.queueSteer")} onClick={() => action(item.error ? "retry" : "steer", { id: item.id })}><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5V7a3 3 0 0 0 3 3h6m-2.5-2.5L12 10l-2.5 2.5" /></svg><span>{language.t(item.error ? "bitsbytes.retry" : "bitsbytes.queueSteer")}</span></button>
-          <button disabled={item.status === "sending"} title={language.t("bitsbytes.delete")} aria-label={language.t("bitsbytes.delete")} onClick={() => action("delete", { id: item.id })}><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="0.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5.5h9M7.5 5.5v-3h4v3M6 5.5l.5 8h6l.5-8M8.5 8v3.5M10.5 8v3.5" /></svg></button>
-          <MenuV2 placement="top-end"><MenuV2.Trigger as={ButtonV2} size="normal" variant="ghost-muted" aria-label={language.t("bitsbytes.queueActions")} disabled={item.status === "sending"}><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="5.5" cy="8" r="0.75" /><circle cx="9.5" cy="8" r="0.75" /><circle cx="13" cy="8" r="0.75" /></svg></MenuV2.Trigger><MenuV2.Portal><MenuV2.Content>
-            <MenuV2.Item disabled={!readQueuedDraft(item.prompt.draft)} onSelect={() => void edit(item).catch(() => undefined)}>{language.t("bitsbytes.edit")}</MenuV2.Item>
-            <MenuV2.Item disabled={!index()} onSelect={() => move(item.id, -1)}>{language.t("bitsbytes.moveUp")}</MenuV2.Item>
-            <MenuV2.Item disabled={index() === queued().length - 1} onSelect={() => move(item.id, 1)}>{language.t("bitsbytes.moveDown")}</MenuV2.Item>
-            <MenuV2.Item onSelect={() => { const draft = readQueuedDraft(item.prompt.draft); window.dispatchEvent(new CustomEvent("bitsbytes:side-chat", { detail: { source: run.identity(), directory: sdk().directory, draft: draft ? restoreQueuedDraft(draft) : undefined, variant: local.model.variant.current() ?? null } })) }}>{language.t("bitsbytes.sideChat")}</MenuV2.Item>
+          <button class="bb-queue-steer" disabled={item().status === "sending"} title={language.t(item().error ? "bitsbytes.retry" : "bitsbytes.queueSteer")} aria-label={language.t(item().error ? "bitsbytes.retry" : "bitsbytes.queueSteer")} onClick={() => action(item().error ? "retry" : "steer", { id })}><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5V7a3 3 0 0 0 3 3h6m-2.5-2.5L12 10l-2.5 2.5" /></svg><span>{language.t(item().error ? "bitsbytes.retry" : "bitsbytes.queueSteer")}</span></button>
+          <button disabled={item().status === "sending"} title={language.t("bitsbytes.delete")} aria-label={language.t("bitsbytes.delete")} onClick={() => action("delete", { id })}><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="0.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5.5h9M7.5 5.5v-3h4v3M6 5.5l.5 8h6l.5-8M8.5 8v3.5M10.5 8v3.5" /></svg></button>
+          <MenuV2 placement="top-end"><MenuV2.Trigger as={ButtonV2} size="normal" variant="ghost-muted" aria-label={language.t("bitsbytes.queueActions")} disabled={item().status === "sending"}><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="5.5" cy="8" r="0.75" /><circle cx="9.5" cy="8" r="0.75" /><circle cx="13" cy="8" r="0.75" /></svg></MenuV2.Trigger><MenuV2.Portal><MenuV2.Content>
+            <MenuV2.Item disabled={!readQueuedDraft(item().prompt.draft)} onSelect={() => void edit(item()).catch(() => undefined)}>{language.t("bitsbytes.edit")}</MenuV2.Item>
+            <MenuV2.Item disabled={drag.state.saving || !index()} onSelect={() => move(id, -1)}>{language.t("bitsbytes.moveUp")}</MenuV2.Item>
+            <MenuV2.Item disabled={drag.state.saving || index() === queued().length - 1} onSelect={() => move(id, 1)}>{language.t("bitsbytes.moveDown")}</MenuV2.Item>
+            <MenuV2.Item onSelect={() => { const draft = readQueuedDraft(item().prompt.draft); window.dispatchEvent(new CustomEvent("bitsbytes:side-chat", { detail: { source: run.identity(), directory: sdk().directory, draft: draft ? restoreQueuedDraft(draft) : undefined, variant: local.model.variant.current() ?? null } })) }}>{language.t("bitsbytes.sideChat")}</MenuV2.Item>
           </MenuV2.Content></MenuV2.Portal></MenuV2>
           </div>
-        </div>}</For></div>
+        </div>}</Show>}</For></div>
       </div>
     </Show>
   </div></Show>
