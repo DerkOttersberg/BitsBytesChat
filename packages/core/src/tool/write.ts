@@ -78,6 +78,7 @@ const layer = Layer.effectDiscard(
                   })
                 yield* permission.assert({
                   action: "edit",
+                  metadata: { operation: "write", destructive: input.content.length === 0 },
                   resources: [target.resource],
                   save: ["*"],
                   sessionID: context.sessionID,

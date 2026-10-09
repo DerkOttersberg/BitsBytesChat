@@ -203,6 +203,7 @@ export type Session = {
     providerID: string
     variant?: string
     contextWindow?: number
+    recommendedContextWindow?: number
   }
   version: string
   metadata?: {
@@ -268,6 +269,7 @@ export type UserMessage = {
     modelID: string
     variant?: string
     contextWindow?: number
+    recommendedContextWindow?: number
   }
   system?: string
   tools?: {
@@ -1273,6 +1275,7 @@ export type GlobalEvent = {
           title?: string
           projectID?: ChatProjectId
           pinned?: boolean
+          unread?: boolean
           order?: number
           archived?: boolean
         }
@@ -2273,6 +2276,7 @@ export type GlobalSession = {
     providerID: string
     variant?: string
     contextWindow?: number
+    recommendedContextWindow?: number
   }
   version: string
   metadata?: {
@@ -3096,6 +3100,7 @@ export type ModelRef = {
   providerID: string
   variant?: string
   contextWindow?: number
+  recommendedContextWindow?: number
 }
 
 export type LocationRef = {
@@ -3902,6 +3907,7 @@ export type SyncEventOrganizationChatUpdated = {
       title?: string
       projectID?: ChatProjectId
       pinned?: boolean
+      unread?: boolean
       order?: number
       archived?: boolean
     }
@@ -3984,6 +3990,7 @@ export type ChatProjectChat = {
   projectID?: ChatProjectId
   projectName?: string
   pinned: boolean
+  unread?: boolean
   order: number
   created: number
   updated: number
@@ -3999,6 +4006,7 @@ export type ChatProjectChatUpdate = {
   title?: string
   projectID?: ChatProjectId
   pinned?: boolean
+  unread?: boolean
   order?: number
   archived?: boolean
 }
@@ -4054,9 +4062,16 @@ export type AgentV2Info = {
   permissions: PermissionV2Ruleset
 }
 
+export type SessionDiagnostic = {
+  key: string
+  parentID: string
+  ownerID: string
+}
+
 export type SessionV2Info = {
   id: string
   parentID?: string
+  diagnostic?: SessionDiagnostic
   projectID: string
   agent?: string
   model?: ModelRef
@@ -5586,6 +5601,7 @@ export type OrganizationChatUpdated = {
     title?: string
     projectID?: ChatProjectId
     pinned?: boolean
+    unread?: boolean
     order?: number
     archived?: boolean
   }
@@ -6920,6 +6936,7 @@ export type EventOrganizationChatUpdated = {
     title?: string
     projectID?: ChatProjectId
     pinned?: boolean
+    unread?: boolean
     order?: number
     archived?: boolean
   }
@@ -9768,6 +9785,7 @@ export type SessionCreateData = {
       providerID: string
       variant?: string
       contextWindow?: number
+      recommendedContextWindow?: number
     }
     metadata?: {
       [key: string]: unknown
@@ -10087,6 +10105,7 @@ export type SessionPromptData = {
       providerID: string
       modelID: string
       contextWindow?: number
+      recommendedContextWindow?: number
     }
     agent?: string
     noReply?: boolean
@@ -10442,6 +10461,7 @@ export type SessionPromptAsyncData = {
       providerID: string
       modelID: string
       contextWindow?: number
+      recommendedContextWindow?: number
     }
     agent?: string
     noReply?: boolean
@@ -10551,6 +10571,7 @@ export type SessionShellData = {
       providerID: string
       modelID: string
       contextWindow?: number
+      recommendedContextWindow?: number
     }
     command: string
   }
@@ -11861,6 +11882,155 @@ export type V2AgentListResponses = {
 
 export type V2AgentListResponse = V2AgentListResponses[keyof V2AgentListResponses]
 
+export type V2SessionChildrenData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/children"
+}
+
+export type V2SessionChildrenErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionChildrenError = V2SessionChildrenErrors[keyof V2SessionChildrenErrors]
+
+export type V2SessionChildrenResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: Array<SessionV2Info>
+  }
+}
+
+export type V2SessionChildrenResponse = V2SessionChildrenResponses[keyof V2SessionChildrenResponses]
+
+export type V2SessionForkData = {
+  body: {
+    messageID?: string
+    inclusive?: boolean
+  }
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/fork"
+}
+
+export type V2SessionForkErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionForkError = V2SessionForkErrors[keyof V2SessionForkErrors]
+
+export type V2SessionForkResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: SessionV2Info
+  }
+}
+
+export type V2SessionForkResponse = V2SessionForkResponses[keyof V2SessionForkResponses]
+
+export type V2SessionRemoveData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}"
+}
+
+export type V2SessionRemoveErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionRemoveError = V2SessionRemoveErrors[keyof V2SessionRemoveErrors]
+
+export type V2SessionRemoveResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2SessionRemoveResponse = V2SessionRemoveResponses[keyof V2SessionRemoveResponses]
+
+export type V2SessionGetData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}"
+}
+
+export type V2SessionGetErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionGetError = V2SessionGetErrors[keyof V2SessionGetErrors]
+
+export type V2SessionGetResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: SessionV2Info
+  }
+}
+
+export type V2SessionGetResponse = V2SessionGetResponses[keyof V2SessionGetResponses]
+
 export type V2SessionListData = {
   body?: never
   path?: never
@@ -11908,6 +12078,7 @@ export type V2SessionCreateData = {
     agent?: string
     model?: ModelRef
     location?: LocationRef
+    diagnostic?: SessionDiagnostic
   }
   path?: never
   query?: never
@@ -11923,6 +12094,10 @@ export type V2SessionCreateErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
 }
 
 export type V2SessionCreateError = V2SessionCreateErrors[keyof V2SessionCreateErrors]
@@ -11970,43 +12145,6 @@ export type V2SessionActiveResponses = {
 }
 
 export type V2SessionActiveResponse = V2SessionActiveResponses[keyof V2SessionActiveResponses]
-
-export type V2SessionGetData = {
-  body?: never
-  path: {
-    sessionID: string
-  }
-  query?: never
-  url: "/api/session/{sessionID}"
-}
-
-export type V2SessionGetErrors = {
-  /**
-   * InvalidRequestError
-   */
-  400: InvalidRequestError
-  /**
-   * UnauthorizedError
-   */
-  401: UnauthorizedError
-  /**
-   * SessionNotFoundError
-   */
-  404: SessionNotFoundError
-}
-
-export type V2SessionGetError = V2SessionGetErrors[keyof V2SessionGetErrors]
-
-export type V2SessionGetResponses = {
-  /**
-   * Success
-   */
-  200: {
-    data: SessionV2Info
-  }
-}
-
-export type V2SessionGetResponse = V2SessionGetResponses[keyof V2SessionGetResponses]
 
 export type V2SessionSwitchAgentData = {
   body: {

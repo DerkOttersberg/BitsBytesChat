@@ -65,7 +65,7 @@ function fixture(raw: string | null) {
 test("missing optional layout uses bounded defaults without a recovery copy", () => {
   const f = fixture(null)
   expect(readPanelState(f.storage, key, 400)).toEqual({
-    value: { tabs: [], active: "", collapsed: true, width: 400 },
+    value: { tabs: [], active: "", collapsed: true, focused: false, width: 400 },
     writable: true,
   })
   expect(f.backups()).toEqual([])
@@ -90,7 +90,7 @@ test("recorded images restore immutable snapshot IDs only", () => {
 test("valid panel state retains active tab, revisions, visibility and width", () => {
   const f = fixture(JSON.stringify({ tabs: [tab], active: tab.id, open: true, width: 640 }))
   expect(readPanelState(f.storage, key, 800)).toEqual({
-    value: { tabs: [tab], active: tab.id, collapsed: false, width: 640 },
+    value: { tabs: [tab], active: tab.id, collapsed: false, focused: false, width: 640 },
     writable: true,
   })
   expect(f.backups()).toEqual([])
@@ -146,6 +146,7 @@ test("invalid layout field types cannot escape into the renderer", () => {
     tabs: [tab],
     active: tab.id,
     collapsed: false,
+    focused: false,
     width: 520,
   })
   expect(f.backups()).toEqual([raw])
@@ -165,7 +166,7 @@ test("an optional storage read failure leaves a usable default layout", () => {
   const f = fixture(null)
   f.faults.read = true
   expect(readPanelState(f.storage, key, 800)).toEqual({
-    value: { tabs: [], active: "", collapsed: true, width: 520 },
+    value: { tabs: [], active: "", collapsed: true, focused: false, width: 520 },
     writable: false,
   })
   expect(f.values.size).toBe(0)
@@ -198,4 +199,23 @@ test("consecutive damaged states keep separate recovery copies", () => {
   f.values.set(key, "[]")
   readPanelState(f.storage, key, 800)
   expect(f.backups()).toEqual(["{", "[]"])
+})
+
+test("focused panel uses the full contained workspace and restores its preferred split width", () => {
+  const f = fixture(JSON.stringify({ tabs: [tab], active: tab.id, open: true, focused: true, width: 700 }))
+  const state = readPanelState(f.storage, key).value
+  expect(state.focused).toBe(true)
+  expect(state.width).toBe(700)
+  expect(workspacePanelLayout(1048, state.width, state.focused)).toEqual({ width: 1032, maximum: 744, overlay: false })
+  expect(workspacePanelLayout(375, state.width, state.focused)).toEqual({ width: 359, maximum: 71, overlay: false })
+  expect(workspacePanelLayout(1048, state.width, false).width).toBe(700)
+})
+
+test("focus cannot survive an empty panel or invalid optional state", () => {
+  expect(
+    readPanelState(fixture(JSON.stringify({ tabs: [], open: true, focused: true })).storage, key).value,
+  ).toMatchObject({ focused: false, collapsed: true })
+  const f = fixture(JSON.stringify({ tabs: [tab], open: true, focused: "true" }))
+  expect(readPanelState(f.storage, key).value.focused).toBe(false)
+  expect(f.backups()).toHaveLength(1)
 })

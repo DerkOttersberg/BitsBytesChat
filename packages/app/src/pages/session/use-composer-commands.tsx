@@ -9,6 +9,7 @@ import { useParams, useSearchParams } from "@solidjs/router"
 import { draftAccessKey } from "../../components/chat-access"
 import { usePlatform } from "../../context/platform"
 import { useSDK } from "../../context/sdk"
+import { showToast } from "@/utils/toast"
 
 const withCategory = (category: string) => {
   return (option: Omit<CommandOption, "category">): CommandOption => ({
@@ -25,7 +26,9 @@ export const useComposerCommands = (input: { model?: ModelSelection } = {}) => {
   const { sessionKey } = useSessionLayout()
   const sessionOwnership = createSessionOwnership(sessionKey)
   const model = input.model ?? local.model
-  const platform = usePlatform(), params = useParams(), sdk = useSDK()
+  const platform = usePlatform(),
+    params = useParams(),
+    sdk = useSDK()
   const [search] = useSearchParams<{ draftId?: string }>()
   const identity = () => params.id ?? draftAccessKey(sdk().scope, sdk().directory, search.draftId)
   const modelCommand = withCategory(language.t("command.category.model"))
@@ -54,27 +57,59 @@ export const useComposerCommands = (input: { model?: ModelSelection } = {}) => {
   }
 
   command.register("composer", () => [
-    ...(platform.bitsbytes ? [{
-      id: "bitsbytes.plan", title: language.t("bitsbytes.plan"), description: language.t("bitsbytes.planDescription"), slash: "plan",
-      onSelect: () => { void platform.bitsbytes!.call("runs.mode", { sessionID: identity(), mode: "plan" }); local.agent.set("plan") },
-    }, {
-      id: "bitsbytes.goal", title: language.t("bitsbytes.goal"), description: language.t("bitsbytes.goalDescription"), slash: "goal",
-      onSelect: () => window.dispatchEvent(new CustomEvent("bitsbytes:goal-draft", { detail: { sessionID: identity() } })),
-    }, {
-      id: "bitsbytes.side",
-      title: language.t("bitsbytes.sideChat"),
-      description: language.t("bitsbytes.sideChat.description"),
-      slash: "side",
-      disabled: !params.id,
-      onSelect: () => {
-        const current = model.current()
-        window.dispatchEvent(new CustomEvent("bitsbytes:side-chat", { detail: {
-          source: params.id, directory: sdk().directory,
-          model: current ? { providerID: current.provider.id, modelID: current.id } : undefined,
-          agent: local.agent.current()?.name, variant: model.variant.current() ?? null,
-        } }))
-      },
-    }] : []),
+    ...(platform.bitsbytes
+      ? [
+          {
+            id: "bitsbytes.plan",
+            title: language.t("bitsbytes.plan"),
+            description: language.t("bitsbytes.planDescription"),
+            slash: "plan",
+            onSelect: () => {
+              void platform
+                .bitsbytes!.call("runs.mode", { sessionID: identity(), mode: "plan" })
+                .then(() => local.agent.set("plan"))
+                .catch((error) =>
+                  showToast({
+                    variant: "error",
+                    title: language.t("common.requestFailed"),
+                    description: String(error),
+                  }),
+                )
+            },
+          },
+          {
+            id: "bitsbytes.goal",
+            title: language.t("bitsbytes.goal"),
+            description: language.t("bitsbytes.goalDescription"),
+            slash: "goal",
+            onSelect: () =>
+              window.dispatchEvent(new CustomEvent("bitsbytes:goal-draft", { detail: { sessionID: identity() } })),
+          },
+          {
+            id: "bitsbytes.side",
+            title: language.t("bitsbytes.sideChat"),
+            description: language.t("bitsbytes.sideChat.description"),
+            slash: "side",
+            disabled: !params.id,
+            onSelect: () => {
+              const current = model.current()
+              window.dispatchEvent(
+                new CustomEvent("bitsbytes:side-chat", {
+                  detail: {
+                    source: params.id,
+                    directory: sdk().directory,
+                    model: current
+                      ? { providerID: current.provider.id, modelID: current.id, contextWindow: current.contextWindow }
+                      : undefined,
+                    agent: local.agent.current()?.name,
+                    variant: model.variant.current() ?? null,
+                  },
+                }),
+              )
+            },
+          },
+        ]
+      : []),
     modelCommand({
       id: "model.choose",
       title: language.t("command.model.choose"),

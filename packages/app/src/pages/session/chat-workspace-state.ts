@@ -10,11 +10,11 @@ export type PanelTab = {
   previewRevision?: number
 }
 
-export function workspacePanelLayout(workspaceWidth: number, preferredWidth: number) {
+export function workspacePanelLayout(workspaceWidth: number, preferredWidth: number, focused = false) {
   const available = Math.max(0, workspaceWidth - 16)
   const maximum = Math.max(0, available - 280 - 8)
-  const overlay = maximum < 340
-  return { width: overlay ? available : Math.min(Math.max(340, preferredWidth), maximum), maximum, overlay }
+  const overlay = !focused && maximum < 340
+  return { width: focused || overlay ? available : Math.min(Math.max(340, preferredWidth), maximum), maximum, overlay }
 }
 
 export function readPanelState(
@@ -22,7 +22,13 @@ export function readPanelState(
   key: string,
   maximumWidth = Number.POSITIVE_INFINITY,
 ) {
-  const empty = { tabs: [] as PanelTab[], active: "", collapsed: true, width: Math.min(520, maximumWidth) }
+  const empty = {
+    tabs: [] as PanelTab[],
+    active: "",
+    collapsed: true,
+    focused: false,
+    width: Math.min(520, maximumWidth),
+  }
   const raw = (() => {
     try {
       return storage.getItem(key)
@@ -56,6 +62,7 @@ export function readPanelState(
     (previous.active !== undefined && typeof previous.active !== "string") ||
     (previous.open !== undefined && typeof previous.open !== "boolean") ||
     (previous.collapsed !== undefined && typeof previous.collapsed !== "boolean") ||
+    (previous.focused !== undefined && typeof previous.focused !== "boolean") ||
     (previous.width !== undefined &&
       (typeof previous.width !== "number" || !Number.isFinite(previous.width) || previous.width <= 0))
   const value = {
@@ -69,6 +76,7 @@ export function readPanelState(
       : typeof previous?.open === "boolean"
         ? !previous.open
         : !tabs.length || (typeof previous?.collapsed === "boolean" ? previous.collapsed : false),
+    focused: Boolean(tabs.length && previous?.focused === true),
     width:
       typeof previous?.width === "number" && Number.isFinite(previous.width) && previous.width > 0
         ? Math.min(maximumWidth, Math.max(340, previous.width))

@@ -130,10 +130,19 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                 agent: ctx.payload.agent,
                 model: ctx.payload.model,
                 location: ctx.payload.location ?? { directory: AbsolutePath.make(process.cwd()) },
+                diagnostic: ctx.payload.diagnostic,
               })
               .pipe(
                 Effect.catchTag("SessionRunnerModel.ContextWindowUnavailableError", (error) =>
                   Effect.fail(new InvalidRequestError({ message: error.message })),
+                ),
+                Effect.catchTag("Session.NotFoundError", (error) =>
+                  Effect.fail(
+                    new SessionNotFoundError({
+                      sessionID: error.sessionID,
+                      message: `Session not found: ${error.sessionID}`,
+                    }),
+                  ),
                 ),
               ),
           }

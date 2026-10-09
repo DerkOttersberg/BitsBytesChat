@@ -10,7 +10,7 @@ import { Context, Effect, Layer, Schema } from "effect"
 import { produce } from "immer"
 import { Catalog } from "../../catalog"
 import { Config } from "../../config"
-import { validContextWindow, CONTEXT_BUFFER } from "../../util/context-window"
+import { validContextWindow, validRecommendedContextWindow, recommendedContextWindow, CONTEXT_BUFFER } from "../../util/context-window"
 import { Credential } from "../../credential"
 import { Integration } from "../../integration"
 import { ModelV2 } from "../../model"
@@ -188,16 +188,16 @@ export const resolve = (
   buffer = CONTEXT_BUFFER,
 ): Effect.Effect<Model, UnsupportedApiError | VariantUnavailableError | ContextWindowUnavailableError> => {
   const contextWindow = session.model?.contextWindow
-  if (!validContextWindow(contextWindow, model.limit, buffer))
+  if (!validContextWindow(contextWindow, model.limit, buffer) || !validRecommendedContextWindow(session.model?.recommendedContextWindow, model.limit, buffer))
     return Effect.fail(
       new ContextWindowUnavailableError({
         providerID: model.providerID,
         modelID: model.id,
-        contextWindow: contextWindow!,
+        contextWindow: (contextWindow ?? session.model?.recommendedContextWindow)!,
       }),
     )
-  const effective =
-    contextWindow === undefined ? model : { ...model, limit: { ...model.limit, context: contextWindow } }
+  const selected = contextWindow ?? session.model?.recommendedContextWindow ?? recommendedContextWindow(model, buffer)
+  const effective = selected === undefined ? model : { ...model, limit: { ...model.limit, context: selected, input: model.limit.input ? Math.min(model.limit.input, selected) : undefined } }
   return withVariant(effective, session.model?.variant).pipe(
     Effect.flatMap((model) => fromCatalogModel(model, credential)),
   )
@@ -206,18 +206,18 @@ export const resolve = (
 /** Shared pre-admission guard; repeats at execution for saved queued requests. */
 export const validateContext = (ref: ModelV2.Ref) =>
   Effect.gen(function* () {
-    if (ref.contextWindow === undefined) return
+    if (ref.contextWindow === undefined && ref.recommendedContextWindow === undefined) return
     const catalog = yield* Catalog.Service
     const config = yield* Config.Service
     const model = (yield* catalog.model.available()).find(
       (item) => item.id === ref.id && item.providerID === ref.providerID,
     )
     const buffer = contextBuffer(yield* config.entries())
-    if (!validContextWindow(ref.contextWindow, model?.limit, buffer))
+    if (!validContextWindow(ref.contextWindow, model?.limit, buffer) || !validRecommendedContextWindow(ref.recommendedContextWindow, model?.limit, buffer))
       return yield* new ContextWindowUnavailableError({
         providerID: ref.providerID,
         modelID: ref.id,
-        contextWindow: ref.contextWindow,
+        contextWindow: (ref.contextWindow ?? ref.recommendedContextWindow)!,
       })
   })
 

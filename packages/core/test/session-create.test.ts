@@ -50,6 +50,46 @@ const location = Location.Ref.make({ directory: AbsolutePath.make(directory.path
 const id = SessionV2.ID.create()
 
 describe("SessionV2.create", () => {
+  it.effect("creates a read-only diagnostic child with immutable recoverable ownership", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      const parent = yield* session.create({ location })
+      const diagnostic = { key: "a".repeat(32), parentID: parent.id, ownerID: parent.id }
+      const child = yield* session.create({ location, diagnostic })
+      expect(child.parentID).toBe(parent.id)
+      expect(child.diagnostic).toEqual(diagnostic)
+      expect((yield* session.children(parent.id)).map((row) => row.id)).toEqual([child.id])
+      const { db } = yield* Database.Service
+      const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, child.id)).get().pipe(Effect.orDie)
+      expect(row?.metadata).toEqual({ bitsbytesDiagnostic: diagnostic })
+      expect(row?.permission?.map((rule) => [rule.permission, rule.action])).toEqual([
+        ["*", "deny"],
+        ["read", "allow"],
+        ["glob", "allow"],
+        ["grep", "allow"],
+        ["parent_progress", "allow"],
+      ])
+      expect(
+        yield* session.create({ id: child.id, location, diagnostic: { ...diagnostic, key: "b".repeat(32) } }),
+      ).toEqual(child)
+    }),
+  )
+
+  it.effect("rejects diagnostic creation when its parent or owner does not exist", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      const parent = yield* session.create({ location })
+      for (const diagnostic of [
+        { key: "a".repeat(32), parentID: SessionV2.ID.make("ses_missing_parent"), ownerID: parent.id },
+        { key: "a".repeat(32), parentID: parent.id, ownerID: SessionV2.ID.make("ses_missing_owner") },
+      ]) {
+        const error = yield* session.create({ location, diagnostic }).pipe(Effect.flip)
+        expect(error._tag).toBe("Session.NotFoundError")
+      }
+      expect(yield* session.list()).toHaveLength(1)
+    }),
+  )
+
   it.effect("creates a fresh projected session when the ID is omitted", () =>
     Effect.gen(function* () {
       const session = yield* SessionV2.Service

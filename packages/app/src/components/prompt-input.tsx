@@ -1,6 +1,8 @@
 import { useFilteredList } from "@opencode-ai/ui/hooks"
 import { useSpring } from "@opencode-ai/ui/motion-spring"
-import { ChatRuns } from "./chat-runs"
+import { ChatRuns, ChatModeChips } from "./chat-runs"
+import { ChatAccess } from "./chat-access"
+import { composerCommand, removeComposerCommand } from "@opencode-ai/core/util/composer-command"
 import {
   createEffect,
   on,
@@ -743,8 +745,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       return
     }
 
-    clearEditor()
-    prompt.set([...DEFAULT_PROMPT, ...images], 0)
+    const before = prompt.current()
+    const text = before.map((part) => ("content" in part ? part.content : "")).join("")
+    const token = composerCommand(text, prompt.cursor())
+    if (token) {
+      const next = removeComposerCommand(before, token)
+      prompt.set(next.prompt, next.cursor)
+      renderEditor(next.prompt.filter((part) => part.type !== "image"))
+      setCursorPosition(editorRef, next.cursor)
+    }
     command.trigger(cmd.id, "slash")
   }
 
@@ -1000,13 +1009,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
     if (!shellMode) {
       const atMatch = rawText.substring(0, cursorPosition).match(/@(\S*)$/)
-      const slashMatch = rawText.match(/^\/(\S*)$/)
+      const slashMatch = composerCommand(rawText, cursorPosition)
 
       if (atMatch) {
         atOnInput(atMatch[1])
         setStore({ popover: "at", slashMenu: false, slashMenuQuery: "" })
       } else if (slashMatch) {
-        slashOnInput(slashMatch[1])
+        slashOnInput(slashMatch.query)
         setStore({ popover: "slash", slashMenu: false, slashMenuQuery: "" })
       } else {
         closePopover()
@@ -1232,6 +1241,24 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     })
 
   const handleKeyDown = (event: KeyboardEvent) => {
+    if (event.key === " " && store.popover === "slash" && !isImeComposing(event)) {
+      const token = composerCommand(
+        prompt
+          .current()
+          .map((part) => ("content" in part ? part.content : ""))
+          .join(""),
+        prompt.cursor(),
+      )
+      const item =
+        token && ["plan", "goal"].includes(token.query)
+          ? slashFlat().find((item) => item.id === `bitsbytes.${token.query}`)
+          : undefined
+      if (item) {
+        event.preventDefault()
+        handleSlashSelect(item)
+        return
+      }
+    }
     if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "u") {
       event.preventDefault()
       if (store.mode !== "normal") return
@@ -1465,7 +1492,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       <DockShellForm
         data-dock-border-underlay="legacy"
         onSubmit={(event) => {
-          if (platform.recordingActive?.(prompt.capture())) { event.preventDefault(); return }
+          if (platform.recordingActive?.(prompt.capture())) {
+            event.preventDefault()
+            return
+          }
           return handleSubmit(event)
         }}
         classList={{
@@ -1581,15 +1611,18 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             />
 
             <div class="flex items-center gap-1 pointer-events-auto">
-              {platform.composerAudio?.({ identity: () => prompt.capture(), capture: () => {
-                setStore("mode", "normal")
-                const target = prompt.capture()
-                const append = captureTranscriptDraft(target, id => language.t("prompt.recording.source", { id }))
-                return value => {
-                  append(value)
-                  if (target === prompt.capture()) requestAnimationFrame(() => editorRef.focus())
-                }
-              } })}
+              {platform.composerAudio?.({
+                identity: () => prompt.capture(),
+                capture: () => {
+                  setStore("mode", "normal")
+                  const target = prompt.capture()
+                  const append = captureTranscriptDraft(target, (id) => language.t("prompt.recording.source", { id }))
+                  return (value) => {
+                    append(value)
+                    if (target === prompt.capture()) requestAnimationFrame(() => editorRef.focus())
+                  }
+                },
+              })}
               <Tooltip placement="top" inactive={!working() && blank()} value={tip()}>
                 <IconButton
                   data-action="prompt-submit"
@@ -1608,7 +1641,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           <div class="pointer-events-none absolute bottom-2 left-2">
             <div
               aria-hidden={store.mode !== "normal"}
-              class="pointer-events-auto"
+              class="pointer-events-auto flex items-center gap-1"
               style={{
                 "pointer-events": buttonsSpring() > 0.5 ? "auto" : "none",
               }}
@@ -1632,6 +1665,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   <Icon name="plus" class="size-4.5" />
                 </Button>
               </TooltipKeybind>
+              <Show when={platform.bitsbytes}>
+                <ChatAccess />
+                <ChatModeChips />
+              </Show>
             </div>
           </div>
         </div>

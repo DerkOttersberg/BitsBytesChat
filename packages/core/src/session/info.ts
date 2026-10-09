@@ -1,4 +1,5 @@
-import { DateTime } from "effect"
+import { DateTime, Option, Schema } from "effect"
+import { Session } from "@opencode-ai/schema/session"
 import { AgentV2 } from "../agent"
 import { Location } from "../location"
 import { ModelV2 } from "../model"
@@ -17,6 +18,9 @@ export function fromRow(row: typeof SessionTable.$inferSelect): SessionSchema.In
     projectID: ProjectV2.ID.make(row.project_id),
     title: row.title,
     parentID: row.parent_id ? SessionSchema.ID.make(row.parent_id) : undefined,
+    diagnostic: Option.getOrUndefined(
+      Schema.decodeUnknownOption(Session.Diagnostic)(row.metadata?.bitsbytesDiagnostic),
+    ),
     agent: row.agent ? AgentV2.ID.make(row.agent) : undefined,
     model: row.model
       ? {
@@ -24,6 +28,7 @@ export function fromRow(row: typeof SessionTable.$inferSelect): SessionSchema.In
           providerID: ProviderV2.ID.make(row.model.providerID),
           variant: ModelV2.VariantID.make(row.model.variant ?? "default"),
           contextWindow: row.model.contextWindow,
+          recommendedContextWindow: row.model.recommendedContextWindow,
         }
       : undefined,
     cost: row.cost,

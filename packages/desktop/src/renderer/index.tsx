@@ -37,6 +37,7 @@ import "./styles.css"
 import { Splash } from "@opencode-ai/ui/logo"
 import { useTheme } from "@opencode-ai/ui/theme/context"
 import { BitsBytesSettings } from "./bitsbytes/settings"
+import { nativeSettingsSearchEntries } from "./bitsbytes/settings-search"
 import { bbt } from "../bitsbytes/copy"
 import { BitsBytesShell } from "./bitsbytes/shell"
 import { createComposerAudio } from "./bitsbytes/composer-audio"
@@ -363,6 +364,7 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
     { id: "mobile", title: mobileCopy.title, component: MobileSettings },
   ]
   platform.providerSettings = () => <BitsBytesSettings page="chatgpt" />
+  platform.settingsSearchEntries = nativeSettingsSearchEntries
   const loadLocale = async () => {
     const current = await platform.storage?.("opencode.global.dat").getItem("language")
     const legacy = current ? undefined : await platform.storage?.().getItem("language.v1")

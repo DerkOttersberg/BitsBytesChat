@@ -165,13 +165,9 @@ export function createPromptInputV2Controller(input: {
     const result = transitionPromptInputV2(state, event, draft.state)
     const action = event.type === "popover.select" ? input.onSuggestionSelect?.(event.item) : undefined
     if (event.type === "popover.select") {
-      if (!action || state.popover.type !== "command-menu") result.commands.forEach(execute)
-      if (action && event.item.kind === "command" && state.popover.type !== "command-menu") {
-        draft.setPrompt(
-          draft.state.prompt.filter((part): part is PromptInputV2Attachment => part.type === "image"),
-          0,
-        )
-      }
+      // Built-in actions own removal of their typed token. Flattening/clearing
+      // the draft here loses prose, mentions and attachments around it.
+      if (!action) result.commands.forEach(execute)
     }
     setState(reconcile(result.state))
     if (event.type !== "popover.select") result.commands.forEach(execute)

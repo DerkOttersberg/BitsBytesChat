@@ -61,7 +61,7 @@ export function McpSettings() {
   }
   onMount(() => void refresh().catch((error) => setStore("error", bbError(error))))
   return (
-    <section class="bb-mcp-settings">
+    <section class="bb-mcp-settings" data-setting-key="tools-mcp">
       <h3>{bbt("mcpTitle")}</h3>
       <p class="bb-subtle">{bbt("mcpHint")}</p>
       <Show when={store.error}>

@@ -36,7 +36,7 @@ export type State = {
   modelsUpdated: number; modelError: string; settings: Settings; jobs: Job[]; skills: Skill[]; models: Model[]; root: string
   workerReady: boolean; workerError?: string; account: string; planVerified: boolean; openrouterSet: boolean; groqSet: boolean
 }
-export type BBEvent = { type: "run"; sessionID: string } | { type: "access"; sessionID: string; mode: "ask" | "full" } | { type: "artifact"; artifact: DocumentArtifact; published?: boolean } | { type: "browser"; id: string; sessionID: string; url: string; title: string; loading: boolean; canBack: boolean; canForward: boolean; closed?: boolean } | { type: "refresh" } | { type: "job"; job: Job } | { type: "meter"; level: number } | { type: "duration"; id: string; duration: number } | { type: "notice"; message: string }
+export type BBEvent = { type: "run"; sessionID: string } | { type: "access"; sessionID: string; mode: "ask" | "auto" | "full" } | { type: "artifact"; artifact: DocumentArtifact; published?: boolean } | { type: "browser"; id: string; sessionID: string; url: string; title: string; loading: boolean; canBack: boolean; canForward: boolean; closed?: boolean } | { type: "refresh" } | { type: "job"; job: Job } | { type: "meter"; level: number } | { type: "duration"; id: string; duration: number } | { type: "notice"; message: string }
 export type BBAPI = {
   call: <T = unknown>(method: string, args?: Record<string, unknown>) => Promise<T>
   subscribe: (listener: (event: BBEvent) => void) => () => void

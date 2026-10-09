@@ -60,6 +60,18 @@ test.each(["v1", "v2"] as const)("%s dispatch preserves the saved context choice
   expect(JSON.stringify(seen)).not.toContain("max_output_tokens")
 })
 
+test.each(["v1", "v2"] as const)("%s dispatch carries frozen Recommended while keeping the manual choice absent", async protocol => {
+  const seen: { model?: { contextWindow?: number; recommendedContextWindow?: number } }[] = []
+  const server = await fixture(async (request, response) => {
+    let body = ""; for await (const chunk of request) body += chunk
+    seen.push(JSON.parse(body || "{}")); response.writeHead(204).end()
+  })
+  await dispatchEngine(server, { id: "msg_economy", sessionID: "ses_economy", directory: "D:/owned-qa", text: "Budget", model: { providerID: "qa", modelID: "qa" }, recommendedContextWindow: 200_000, variant: "medium" }, { protocol, contextRoot: "D:/owned-qa", resolveAttachment: async () => ({ text: "" }) })
+  expect(seen.find(row => row.model)?.model).toMatchObject({ recommendedContextWindow: 200_000 })
+  expect(seen.find(row => row.model)?.model?.contextWindow).toBeUndefined()
+  expect(JSON.stringify(seen)).not.toContain("max_output_tokens")
+})
+
 test("V2 Goal inspection excludes waiting questions and Goal bookkeeping from progress", async () => {
   let question = true, remaining = 100, read = false
   const server = await fixture((request, response) => {

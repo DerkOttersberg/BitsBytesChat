@@ -27,7 +27,7 @@ import { conversationProtocol, removeOwnedConversation } from "./bitsbytes-conve
 import { readState, stateRecord } from "./bitsbytes-state"
 import { bbt } from "../bitsbytes/copy"
 import type { ServerReadyData } from "../preload/types"
-import { validContextWindow, type ContextCapacity } from "@opencode-ai/core/util/context-window"
+import { freezeRecommendedContext, readPromptContext, validatePromptContext } from "./bitsbytes-context"
 
 export const DEFAULTS: Settings = { shareRoot: "\\\\10.10.1.3\\AdminShare", intakeFolder: "documenten beheer administratief\\2. Intakegesprekken",
   templateName: "Intakegesprek blanco.docx", engine: "parakeet", acceleration: "auto", provider: "chatgpt", model: "", browserControl: true, computerControl: false, microphone: null }
@@ -91,7 +91,7 @@ export class BitsBytes {
   private transcriptSources: Record<string, Record<string, number>> = {}
   private configuration = Promise.resolve()
   private customMcp?: BBMcpSettings
-  private accessModes: Record<string, "ask" | "full"> = {}
+  private accessModes: Record<string, "ask" | "auto" | "full"> = {}
   private selection?: { providerID: string; modelID: string }
   private stateSaving = Promise.resolve()
   private preferenceSaving: Promise<unknown> = Promise.resolve()
@@ -131,7 +131,7 @@ export class BitsBytes {
       })
     }
     this.accessModes = await readState(this.root, "access-modes.json", {}, value => stateRecord(value)
-      && Object.values(value).every(mode => mode === "ask" || mode === "full"))
+      && Object.values(value).every(mode => mode === "ask" || mode === "auto" || mode === "full"))
     this.transcriptSources = await readState(this.root, "transcript-bindings.json", {}, value => stateRecord(value)
       && Object.values(value).every(row => stateRecord(row) && Object.values(row).every(revision => Number.isInteger(revision) && Number(revision) > 0)))
     this.selection = await readState(this.root, "model-selection.json", undefined as typeof this.selection, value => value === null
@@ -501,23 +501,34 @@ export class BitsBytes {
     return dispatchEngine(await this.engine(), prompt, { protocol: this.protocols.get(prompt.sessionID), contextRoot: join(this.root, "run-context"), resolveAttachment: uri => this.resolveAttachment(uri, prompt.sessionID), signal })
   }
   private async validateRunContext(prompt?: RunPrompt) {
-    if (prompt?.model?.contextWindow === undefined) return
-    const [providers, config] = await Promise.all([
-      this.engineFetch<{ all: { id: string; models: Record<string, { limit: ContextCapacity }> }[] }>("/provider", {}, prompt.directory),
-      this.engineFetch<{ compaction?: { reserved?: number } }>("/config", {}, prompt.directory),
-    ])
-    const model = providers.all.find(item => item.id === prompt.model?.providerID)?.models[prompt.model.modelID]
-    if (!validContextWindow(prompt.model.contextWindow, model?.limit, config.compaction?.reserved)) throw new Error("bb.error.contextWindowInvalid")
+    if (!prompt || prompt.model?.contextWindow === undefined && prompt.recommendedContextWindow === undefined) return
+    const context = await readPromptContext(await this.engine(), prompt, this.protocols.get(prompt.sessionID))
+    validatePromptContext(prompt, context.model, context.buffer)
   }
   private async runCall(action: string, args: Record<string, unknown>) {
     const sessionID = String(args.sessionID ?? (args.prompt as RunPrompt | undefined)?.sessionID ?? "")
     const diagnostic = await this.side.relation(sessionID)
     if (diagnostic && ["goal-draft", "goal-progress", "goal-resume", "implement", "mode", "inherit"].includes(action)) throw new Error("bb.error.sideReadOnly")
-    if (args.prompt) args = { ...args, prompt: await this.side.prepare(args.prompt as RunPrompt) }
+    if (args.prompt) {
+      const prompt = args.prompt as RunPrompt, chat = this.runs.chats[prompt.sessionID]
+      const queued = chat?.queue.find(item => item.id === prompt.id)
+      const snapshot = queued?.editing ? undefined : queued?.prompt ?? (chat?.last?.id === prompt.id ? chat.last : undefined)
+      args = { ...args, prompt: await this.side.prepare(prompt, snapshot) }
+    }
     if (["prepare", "admit"].includes(action)) {
-      await this.validateRunContext(args.prompt as RunPrompt | undefined)
+      const prompt = args.prompt as RunPrompt | undefined
+      if (prompt) {
+        const chat = this.runs.chats[prompt.sessionID]
+        const queued = chat?.queue.find(item => item.id === prompt.id)
+        const snapshot = queued?.editing ? undefined : queued?.prompt ?? (chat?.last?.id === prompt.id ? chat.last : undefined)
+        const context = await readPromptContext(await this.engine(), prompt, this.protocols.get(prompt.sessionID))
+        const frozen = freezeRecommendedContext(prompt, context.model, context.buffer, snapshot)
+        validatePromptContext(frozen, context.model, context.buffer)
+        args = { ...args, prompt: frozen }
+      }
     }
     if (action === "permission") {
+      if (diagnostic) return { plan: true, diagnostic: true }
       const id = String(args.sessionID), chat = this.runs.chats[id]
       if (chat) return { plan: (chat.awaiting ? chat.last?.mode : chat.mode) === "plan" }
       const parent = await this.engineFetch<{ parentID?: string }>("/session/" + encodeURIComponent(id)).catch(() => undefined)
@@ -584,7 +595,14 @@ export class BitsBytes {
       this.emit({ type: "refresh" })
       return ids
     }
-    if (method === "side.open") { await this.recoverSides(); return this.side.open(String(args.parentID), String(args.ownerID), String(args.directory), bbt("sideChat")) }
+    if (method === "side.open") {
+      await this.recoverSides()
+      const parentID = String(args.parentID), directory = String(args.directory)
+      const protocol = args.protocol === "v1" || args.protocol === "v2" ? args.protocol : this.protocols.get(parentID) ?? await conversationProtocol(await this.engine(), directory)
+      const child = await this.side.open(parentID, String(args.ownerID), directory, bbt("sideChat"), protocol)
+      this.protocols.set(child.id, protocol)
+      return child
+    }
     if (method === "side.progress") return this.side.progress(String(args.sessionID))
     if (method === "side.close") return this.side.close(String(args.sessionID), String(args.ownerID))
     if (method === "question.activity") return this.engineFetch(`/question/${encodeURIComponent(String(args.requestID))}/activity`, { method: "POST", body: JSON.stringify({ sessionID: args.sessionID, kind: args.kind }) }, String(args.directory ?? join(this.root, "workspace")))
@@ -912,7 +930,7 @@ export class BitsBytes {
     const id = String(args.sessionID ?? "")
     if (!id || id.length > 512) throw new Error("bb.error.invalidRequest")
     if (name === "access.set") {
-      if (args.mode !== "ask" && args.mode !== "full") throw new Error("bb.error.invalidRequest")
+      if (args.mode !== "ask" && args.mode !== "auto" && args.mode !== "full") throw new Error("bb.error.invalidRequest")
       this.accessModes[id] = args.mode
       await this.persistState("access-modes.json", () => this.accessModes)
       this.emit({ type: "access", sessionID: id, mode: args.mode })

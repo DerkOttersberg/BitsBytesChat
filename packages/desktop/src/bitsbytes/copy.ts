@@ -11,6 +11,7 @@ export const copy = {
   "bb.error.imageSnapshot.invalid": "This recorded image cannot be previewed.",
   "bb.error.imageSnapshot.unavailable": "This recorded image is unavailable in this chat.",
   sideChat: "Side chat",
+  autoApprove: "Approve for me",
   "bb.error.sideStorage": "The diagnostic side chat journal needs recovery. Its saved source has been kept.", "bb.error.sideClosed": "This temporary side chat is closed. Open a new side chat from its parent.", "bb.error.sideReadOnly": "Diagnostic side chats can inspect progress and files. Continue work in the parent chat.", "bb.error.sideOwnership": "This side chat does not belong to this panel.",
   questionTimer: "Optional question timer", questionTimerHint: "Optional questions can expire with empty answers. Foreground inactivity waits one minute, then counts down 90 seconds; background questions wait 90 seconds. Interacting with a question keeps it open. Required questions and approvals always wait.",
   minActiveDuration: "Minimum active work (hours)", activeWork: "Active work: {{minutes}} minutes", savedGoal: "Saved {{time}}", goalMinimumRemaining: "Minimum active work remaining: {{minutes}} minutes",

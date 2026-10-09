@@ -1,5 +1,6 @@
 import { ChatAccess } from "./chat-access"
-import { ChatRuns, ModeIcon, useChatRun } from "./chat-runs"
+import { ChatRuns, ChatModeChips, ModeIcon, useChatRun } from "./chat-runs"
+import { composerCommand, removeComposerCommand } from "@opencode-ai/core/util/composer-command"
 import { useSettings } from "../context/settings"
 import { ImagePreview } from "@opencode-ai/ui/image-preview"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
@@ -41,10 +42,12 @@ export type PromptInputV2ComposerProps = {
   class?: string
   controller: PromptInputV2ComposerController
   borderUnderlay?: boolean
+  changes?: { files: number; additions: number; deletions: number; onOpen: () => void }
 }
 
 export type PromptInputV2ControllerProps = Omit<PromptInputProps, "class" | "submission">
 export type PromptInputV2ComposerController = PromptInputV2Interaction & {
+  readonly run: ReturnType<typeof useChatRun>
   readonly model: PromptInputProps["controls"]["model"]
   captureTranscript: () => ReturnType<typeof captureTranscriptDraft>
   recordingIdentity: () => unknown
@@ -58,24 +61,93 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
   const platform = usePlatform()
   const settings = useSettings()
   const working = () => props.controller.view.submit.working?.() ?? false
-  const sendLabel = () => language.t(working() ? settings.general.followup() === "queue" ? "bitsbytes.queue" : "bitsbytes.steer" : "bitsbytes.send")
+  const sendLabel = () =>
+    language.t(
+      working() ? (settings.general.followup() === "queue" ? "bitsbytes.queue" : "bitsbytes.steer") : "bitsbytes.send",
+    )
 
   return (
     <div class="bb-composer-stack flex flex-col gap-3">
-      <ChatRuns />
+      <Show when={props.changes?.files}>
+        <button
+          class="bb-composer-changes"
+          type="button"
+          data-component="composer-changes"
+          aria-label={language.t("composerRefinements.review", {
+            additions: props.changes!.additions,
+            deletions: props.changes!.deletions,
+          })}
+          onClick={() => props.changes?.onOpen()}
+        >
+          <span>{language.plural("composerRefinements.changes", props.changes!.files)}</span>
+          <span class="bb-lines-added">+{props.changes!.additions}</span>
+          <span class="bb-lines-removed">−{props.changes!.deletions}</span>
+        </button>
+      </Show>
+      <ChatRuns run={props.controller.run} />
       <PromptInputV2
         controller={props.controller}
         borderUnderlay={props.borderUnderlay}
         class={props.class}
         variantControlVisible={!props.controller.model.loading}
-        submitControl={platform.bitsbytes && <div class="bb-send-controls">
-          <Show when={working()}><button type="button" class="bb-send-alt" title={language.t(settings.general.followup() === "queue" ? "bitsbytes.steer" : "bitsbytes.queue")} aria-label={language.t(settings.general.followup() === "queue" ? "bitsbytes.steer" : "bitsbytes.queue")} disabled={!props.controller.canSubmit()} onClick={() => props.controller.submitDelivery(settings.general.followup() === "queue" ? "steer" : "queue")}><ModeIcon kind="steer" /></button><button type="button" class="bb-send-stop" title={language.t("bitsbytes.stop")} aria-label={language.t("bitsbytes.stop")} onClick={() => props.controller.stop()}><span /></button></Show>
-          <Show when={!working() || props.controller.canSubmit()}><button type="button" class="bb-send-primary" data-action="prompt-submit" title={sendLabel()} aria-label={sendLabel()} disabled={!props.controller.canSubmit()} onClick={() => props.controller.submitDelivery(settings.general.followup())}><Icon name="arrow-up" /></button></Show>
-        </div>}
+        submitControl={
+          platform.bitsbytes && (
+            <div class="bb-send-controls">
+              <Show when={working()}>
+                <Show when={props.controller.canSubmit()}>
+                  <button
+                    type="button"
+                    class="bb-send-alt"
+                    title={language.t(settings.general.followup() === "queue" ? "bitsbytes.steer" : "bitsbytes.queue")}
+                    aria-label={language.t(
+                      settings.general.followup() === "queue" ? "bitsbytes.steer" : "bitsbytes.queue",
+                    )}
+                    onClick={() =>
+                      props.controller.submitDelivery(settings.general.followup() === "queue" ? "steer" : "queue")
+                    }
+                  >
+                    <ModeIcon kind="steer" />
+                  </button>
+                </Show>
+                <button
+                  type="button"
+                  class="bb-send-stop"
+                  data-secondary={props.controller.canSubmit()}
+                  title={language.t("bitsbytes.stop")}
+                  aria-label={language.t("bitsbytes.stop")}
+                  onClick={() => props.controller.stop()}
+                >
+                  <span />
+                </button>
+              </Show>
+              <Show when={!working() || props.controller.canSubmit()}>
+                <button
+                  type="button"
+                  class="bb-send-primary"
+                  data-action="prompt-submit"
+                  title={sendLabel()}
+                  aria-label={sendLabel()}
+                  disabled={!props.controller.canSubmit()}
+                  onClick={() => props.controller.submitDelivery(settings.general.followup())}
+                >
+                  <Icon name="arrow-up" />
+                </button>
+              </Show>
+            </div>
+          )
+        }
         attachKeybind={command.keybindParts("file.attach")}
         attachShortcut={command.keybind("file.attach")}
-        accessControl={<ChatAccess />}
-        audioControl={platform.composerAudio?.({ capture: props.controller.captureTranscript, identity: props.controller.recordingIdentity })}
+        accessControl={
+          <>
+            <ChatAccess />
+            <ChatModeChips run={props.controller.run} />
+          </>
+        }
+        audioControl={platform.composerAudio?.({
+          capture: props.controller.captureTranscript,
+          identity: props.controller.recordingIdentity,
+        })}
         modelControl={
           <div class="flex min-w-0 flex-wrap items-center gap-1">
             <PromptInputV2ModelControl
@@ -109,7 +181,8 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
   const permission = usePermission()
   const language = useLanguage()
   const platform = usePlatform()
-  const settings = useSettings(), run = useChatRun()
+  const settings = useSettings(),
+    run = useChatRun()
   const delivery = { value: undefined as "queue" | "steer" | undefined }
   const prompt = props.state ?? usePrompt()
   let editor: HTMLDivElement | undefined
@@ -319,7 +392,7 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
       trigger: item.name,
       title: item.name,
       description: item.description,
-      type: "source" in item && item.source === "skill" ? "skill" as const : "custom" as const,
+      type: "source" in item && item.source === "skill" ? ("skill" as const) : ("custom" as const),
     })),
     ...command.options
       .filter((item) => !item.disabled && !item.id.startsWith("suggested.") && item.slash)
@@ -375,7 +448,9 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
     openContext(key) {
       const item = controller.contextItem(key)
       if (item?.attachment) {
-        window.dispatchEvent(new CustomEvent("bitsbytes:attachment", { detail: { sessionID: props.controls.session.id, ...item } }))
+        window.dispatchEvent(
+          new CustomEvent("bitsbytes:attachment", { detail: { sessionID: props.controls.session.id, ...item } }),
+        )
         return
       }
       if (item) openComment(item, props, sync, layout, files, comments)
@@ -390,14 +465,41 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
       if (!selected || selected.type === "custom") return
       if (selected.type === "skill" && platform.bitsbytes) {
         const target = prompt.capture()
-        const before = target.current().map(part => ({ ...part }))
+        const before = target.current().map((part) => ({ ...part }))
         return () => {
-          const preserved = before.map(part => part.type === "text" ? { ...part, content: part.content.replace(/^\/\S*\s*/, "") } : part)
+          const preserved = before.map((part) =>
+            part.type === "text" ? { ...part, content: part.content.replace(/^\/\S*\s*/, "") } : part,
+          )
           target.set(preserved)
-          void platform.bitsbytes!.call<{ id: string; name: string; revision: number; path: string }>("skill.reference", { name: selected.trigger }).then(skill => target.context.add({ type: "file", path: skill.path, comment: skill.name, attachment: { kind: "skill", id: skill.id, name: skill.name, revision: skill.revision } })).catch(error => showToast({ variant: "error", title: language.t("common.requestFailed"), description: String(error) }))
+          void platform
+            .bitsbytes!.call<{ id: string; name: string; revision: number; path: string }>("skill.reference", {
+              name: selected.trigger,
+            })
+            .then((skill) =>
+              target.context.add({
+                type: "file",
+                path: skill.path,
+                comment: skill.name,
+                attachment: { kind: "skill", id: skill.id, name: skill.name, revision: skill.revision },
+              }),
+            )
+            .catch((error) =>
+              showToast({ variant: "error", title: language.t("common.requestFailed"), description: String(error) }),
+            )
         }
       }
-      return () => command.trigger(selected.id, "slash")
+      const target = prompt.capture()
+      const before = target.current().map((part) => ({ ...part }))
+      const text = before.map((part) => ("content" in part ? part.content : "")).join("")
+      const token =
+        controller.state.popover.type === "command-menu" ? undefined : composerCommand(text, target.cursor())
+      return () => {
+        if (token) {
+          const next = removeComposerCommand(before, token)
+          target.set(next.prompt, next.cursor)
+        }
+        command.trigger(selected.id, "slash")
+      }
     },
     attachments: {
       picker: platform.openAttachmentPickerDialog,
@@ -420,8 +522,19 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
       store: platform.draftStore?.putBlob,
     },
     view: {
-      placeholder: () => run.store.value?.mode === "plan" ? language.t("bitsbytes.planPlaceholder") : run.store.value?.goalDraft ? language.t("bitsbytes.goalPlaceholder") : designPlaceholder(),
-      onKeyDown: event => { if (event.key === "Enter" && event.ctrlKey && !event.shiftKey && !event.isComposing) { event.preventDefault(); delivery.value = settings.general.followup() === "queue" ? "steer" : "queue"; controller.submit() } },
+      placeholder: () =>
+        run.store.value?.mode === "plan"
+          ? language.t("bitsbytes.planPlaceholder")
+          : run.store.value?.goalDraft
+            ? language.t("bitsbytes.goalPlaceholder")
+            : designPlaceholder(),
+      onKeyDown: (event) => {
+        if (event.key === "Enter" && event.ctrlKey && !event.shiftKey && !event.isComposing) {
+          event.preventDefault()
+          delivery.value = settings.general.followup() === "queue" ? "steer" : "queue"
+          controller.submit()
+        }
+      },
       get agent() {
         return props.controls.agents.visible && props.controls.agents.options.length > 0
           ? {
@@ -441,23 +554,36 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
       submit: {
         stopping,
         working,
-          onSubmit: () => { const selected = delivery.value ?? settings.general.followup(); delivery.value = undefined; if (!platform.recordingActive?.(prompt.capture())) void submission.handleSubmit(new CustomEvent("submit", { detail: { delivery: selected } })) },
+        onSubmit: () => {
+          const selected = delivery.value ?? settings.general.followup()
+          delivery.value = undefined
+          if (!platform.recordingActive?.(prompt.capture()))
+            void submission.handleSubmit(new CustomEvent("submit", { detail: { delivery: selected } }))
+        },
         onStop: () => void submission.abort(),
       },
     },
   })
   Object.defineProperty(controller, "model", { get: () => props.controls.model })
-  Object.defineProperty(controller, "submitDelivery", { value: (value: "queue" | "steer") => { delivery.value = value; controller.submit() } })
+  Object.defineProperty(controller, "run", { value: run })
+  Object.defineProperty(controller, "submitDelivery", {
+    value: (value: "queue" | "steer") => {
+      delivery.value = value
+      controller.submit()
+    },
+  })
   Object.defineProperty(controller, "recordingIdentity", { value: () => prompt.capture() })
-  Object.defineProperty(controller, "captureTranscript", { value: () => {
-    controller.dispatch({ type: "mode.normal" })
-    const target = prompt.capture()
-    const append = captureTranscriptDraft(target, id => language.t("prompt.recording.source", { id }))
-    return (value: Parameters<typeof append>[0]) => {
-      append(value)
-      if (target === prompt.capture()) controller.restoreFocus()
-    }
-  } })
+  Object.defineProperty(controller, "captureTranscript", {
+    value: () => {
+      controller.dispatch({ type: "mode.normal" })
+      const target = prompt.capture()
+      const append = captureTranscriptDraft(target, (id) => language.t("prompt.recording.source", { id }))
+      return (value: Parameters<typeof append>[0]) => {
+        append(value)
+        if (target === prompt.capture()) controller.restoreFocus()
+      }
+    },
+  })
 
   command.register("prompt-input", () => [
     {

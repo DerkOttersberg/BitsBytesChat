@@ -1,5 +1,15 @@
 # Interface research and implementation
 
+## Composer and panel refinements — 9 October 2026
+
+A passive native screenshot of the running Codex window captured its changed-files pill above the composer: rounded, centered, with a filename count followed by green additions and red deletions. The retained [reference crop](docs/screenshots/035-workflow-codex-changed-lines-reference.png) contains only that control. No reference chat was driven, activated or sent a message. Bits & Bytes uses the same compact arrangement and opens its existing per-turn review when clicked. This establishes the reference for that control, rather than full-product visual parity.
+
+The latest requested panel layout supersedes the earlier leftmost add-tab arrangement: plus follows the final tab, close buttons sit beside titles, and Focus panel toggles the panel into the main content area while preserving the mounted chat and preferred split width. Proposed plans retain a short excerpt; full content opens in the panel. Settings search indexes translated categories, setting titles and descriptions, and reveals the selected control. Ordinary Recents excludes project members; inclusive search and archive views remain available.
+
+Maximum context capacity is distinct from the recommended execution budget. The conservative paid/subscription recommendation is 250,000 total tokens, reduced for a reported lower premium tier and checked against output/compaction reserves. The [official GPT-6 Astra model documentation](https://developers.openai.com/api/docs/models/gpt-6-astra) describes a premium tier beyond 272,000 input tokens, so the app does not treat every advertised million-token capacity as its default. Known local/free models retain their maximum, and larger windows remain a manual choice. No authenticated account model availability was inferred from these public specifications.
+
+The third access mode uses conservative local file-edit review. It differs from Codex's separate [automatic approval reviewer](https://learn.chatgpt.com/docs/sandboxing/auto-review): this implementation performs no billed reviewer-model request and falls back to the user's approval for commands, protected paths, links, destructive or unknown actions. Plan and diagnostic side chats remain read-only in every access mode.
+
 ## Interface and reliability patch — 8 October 2026
 
 The supplied sidebar screenshot is the direct visual reference for this patch: a 332px left column, compact utility rows above the history, expandable pinned projects, 28px chat rows, truncated titles, trailing hover/focus menus and fixed footer controls. The implementation allows 260–420px resizing and a drawer on narrow windows. Horizontal conversation tabs and the duplicate utility rail are retired; document and browser tabs stay in the right panel. This is a comparison against the supplied image, not a claim of complete parity with every current Codex screen.

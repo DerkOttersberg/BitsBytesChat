@@ -156,7 +156,7 @@ const layer = Layer.effect(
     const evaluateInput = EffectRuntime.fnUntraced(function* (input: AssertInput) {
       const rules = yield* configured(input.sessionID, input.agent)
       if (denied(input, rules)) return { effect: "deny" as const, rules }
-      const desktop = yield* EffectRuntime.promise(() => DesktopBridge.permission(input.sessionID, input.action))
+      const desktop = yield* EffectRuntime.promise(() => DesktopBridge.permission(input.sessionID, input.action, { directory: location.directory, resources: input.resources, metadata: input.metadata }))
       if (desktop) return { effect: desktop, rules }
       const all = [...rules, ...(yield* savedRules())]
       const effects = input.resources.map((resource) => evaluate(input.action, resource, all).effect)

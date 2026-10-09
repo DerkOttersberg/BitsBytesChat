@@ -15,10 +15,18 @@ export type ID = SessionID
 
 export const Event = SessionEvent
 
+export interface Diagnostic extends Schema.Schema.Type<typeof Diagnostic> {}
+export const Diagnostic = Schema.Struct({
+  key: Schema.String.check(Schema.isPattern(/^[a-f0-9]{32}$/)),
+  parentID: ID,
+  ownerID: ID,
+}).annotate({ identifier: "Session.Diagnostic" })
+
 export interface Info extends Schema.Schema.Type<typeof Info> {}
 export const Info = Schema.Struct({
   id: ID,
   parentID: ID.pipe(optional),
+  diagnostic: Diagnostic.pipe(optional),
   projectID: Project.ID,
   agent: Agent.ID.pipe(optional),
   model: Model.Ref.pipe(optional),

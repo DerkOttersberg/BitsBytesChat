@@ -1,5 +1,6 @@
 import { Show, type Component, type JSX } from "solid-js"
 import { useLanguage } from "@/context/language"
+import { recommendedContextWindow, type ContextModel } from "@opencode-ai/core/util/context-window"
 
 type InputKey = "text" | "image" | "audio" | "video" | "pdf"
 type InputMap = Record<InputKey, boolean>
@@ -8,6 +9,7 @@ type ModelInfo = {
   id: string
   name: string
   provider: {
+    id?: string
     name: string
   }
   capabilities?: {
@@ -20,7 +22,10 @@ type ModelInfo = {
   reasoning?: boolean
   limit: {
     context: number
+    output?: number
   }
+  cost?: ContextModel["cost"]
+  contextWindow?: number
 }
 
 function ModelTooltipRow(props: { name: JSX.Element; value: JSX.Element }) {
@@ -92,17 +97,20 @@ export const ModelTooltip: Component<{ model: ModelInfo; latest?: boolean; free?
   }
   const context = () => language.t("model.tooltip.context", { limit: props.model.limit.context.toLocaleString() })
   const contextLimit = () => props.model.limit.context.toLocaleString(language.intl())
+  const recommended = () => recommendedContextWindow(props.model)
+  const effective = () => props.model.contextWindow ?? recommended()
 
   if (props.v2) {
     return (
-      <div class="flex w-[180px] flex-col gap-2">
+      <div class="flex w-[220px] flex-col gap-2">
         <ModelTooltipRow name={language.t("model.tooltip.model")} value={name()} />
         <ModelTooltipRow name={language.t("model.tooltip.provider")} value={props.model.provider.name} />
         <Show when={inputs()}>
           {(value) => <ModelTooltipRow name={language.t("model.tooltip.inputs")} value={value()} />}
         </Show>
         <ModelTooltipRow name={language.t("model.tooltip.reasoning")} value={reasoning()} />
-        <ModelTooltipRow name={language.t("model.tooltip.context.label")} value={contextLimit()} />
+        <Show when={effective()}>{value => <ModelTooltipRow name={language.t(props.model.contextWindow === undefined ? "contextWindow.default" : "contextWindow.selected")} value={value().toLocaleString(language.intl())} />}</Show>
+        <ModelTooltipRow name={language.t("contextWindow.maximum")} value={contextLimit()} />
       </div>
     )
   }
@@ -119,6 +127,7 @@ export const ModelTooltip: Component<{ model: ModelInfo; latest?: boolean; free?
       </Show>
       <div class="text-12-regular text-text-invert-base">{reasoning()}</div>
       <div class="text-12-regular text-text-invert-base">{context()}</div>
+      <Show when={effective()}>{value => <div class="text-12-regular text-text-invert-base">{language.t("contextWindow.recommendedValue", { count: value().toLocaleString(language.intl()) })}</div>}</Show>
     </div>
   )
 }

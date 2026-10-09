@@ -40,7 +40,7 @@ import "./chat-workspace.css"
 type SideChatSource = {
   source: string
   directory: string
-  model?: { providerID: string; modelID: string }
+  model?: { providerID: string; modelID: string; contextWindow?: number }
   agent?: string
   variant: string | null
   draft?: FollowupDraft
@@ -62,13 +62,15 @@ export function ChatWorkspace(props: {
     tabs: [] as PanelTab[],
     active: "",
     collapsed: true,
+    focused: false,
     menu: false,
     width: 520,
     busy: false,
   })
   let workspace!: HTMLDivElement
   const [workspaceWidth, setWorkspaceWidth] = createSignal(0)
-  const panelLayout = createMemo(() => workspacePanelLayout(workspaceWidth(), store.width))
+  const panelFocused = () => store.focused && !store.collapsed
+  const panelLayout = createMemo(() => workspacePanelLayout(workspaceWidth(), store.width, panelFocused()))
   onMount(() => {
     const update = () => setWorkspaceWidth(workspace.getBoundingClientRect().width)
     const observer = new ResizeObserver(update)
@@ -139,7 +141,7 @@ export function ChatWorkspace(props: {
     setStore({
       tabs,
       active: store.active === id ? (tabs[Math.min(index, tabs.length - 1)]?.id ?? "") : store.active,
-      ...(!tabs.length ? { active: "", collapsed: true, menu: false } : {}),
+      ...(!tabs.length ? { active: "", collapsed: true, focused: false, menu: false } : {}),
     })
   }
   let savedKey = ""
@@ -162,6 +164,7 @@ export function ChatWorkspace(props: {
         ...stored.value,
         tabs,
         collapsed: !tabs.length || stored.value.collapsed,
+        focused: Boolean(tabs.length && stored.value.focused),
         active: tabs.some((tab) => tab.id === stored.value.active) ? stored.value.active : (tabs.at(-1)?.id ?? ""),
         menu: false,
         busy: false,
@@ -175,6 +178,7 @@ export function ChatWorkspace(props: {
       collapsed: store.collapsed,
       open: !store.collapsed,
       width: store.width,
+      focused: store.focused,
     }
     if (savedKey && savedWritable) savePanelState(localStorage, savedKey, value)
   })
@@ -406,6 +410,11 @@ export function ChatWorkspace(props: {
     }
     window.addEventListener("bitsbytes:side-chat", sideChat)
     onCleanup(() => window.removeEventListener("bitsbytes:side-chat", sideChat))
+    const review = (event: Event) => {
+      if ((event as CustomEvent<{ sessionID: string }>).detail?.sessionID === owner()) void open("review")
+    }
+    window.addEventListener("bitsbytes:review", review)
+    onCleanup(() => window.removeEventListener("bitsbytes:review", review))
     onCleanup(() => {
       unsubscribe()
       window.removeEventListener("bitsbytes:attachment", attachment)
@@ -508,7 +517,9 @@ export function ChatWorkspace(props: {
       const directory = sdk().directory
       const current = local.model.current()
       const selection = inherited ?? {
-        model: current ? { providerID: current.provider.id, modelID: current.id } : undefined,
+        model: current
+          ? { providerID: current.provider.id, modelID: current.id, contextWindow: current.contextWindow }
+          : undefined,
         agent: local.agent.current()?.name,
         variant: local.model.variant.current() ?? null,
       }
@@ -516,6 +527,7 @@ export function ChatWorkspace(props: {
         parentID: source,
         ownerID: workspaceOwner,
         directory,
+        protocol: await sdk().protocol,
       })
       if (token !== generation) {
         await platform.bitsbytes!.call("side.close", { sessionID: fork.id, ownerID: workspaceOwner })
@@ -627,12 +639,12 @@ export function ChatWorkspace(props: {
     </div>
   )
   return (
-    <div class="bb-workspace" ref={workspace}>
+    <div class="bb-workspace" classList={{ "bb-workspace-focused": panelFocused() }} ref={workspace}>
       <div
         class="bb-workspace-chat"
         data-bb-chat={owner()}
-        inert={panelLayout().overlay && !store.collapsed}
-        aria-hidden={panelLayout().overlay && !store.collapsed ? true : undefined}
+        inert={panelFocused() || (panelLayout().overlay && !store.collapsed)}
+        aria-hidden={panelFocused() || (panelLayout().overlay && !store.collapsed) ? true : undefined}
       >
         {props.chat(
           <Show when={store.collapsed}>
@@ -647,7 +659,7 @@ export function ChatWorkspace(props: {
           classList={{ "bb-workspace-panel-overlay": panelLayout().overlay }}
           style={{ width: `${panelLayout().width}px`, display: store.collapsed ? "none" : "flex" }}
         >
-          <Show when={!panelLayout().overlay}>
+          <Show when={!panelLayout().overlay && !panelFocused()}>
             <ResizeHandle
               direction="horizontal"
               edge="start"
@@ -658,7 +670,6 @@ export function ChatWorkspace(props: {
             />
           </Show>
           <div class="bb-panel-header">
-            <div class="bb-panel-add">{panelMenu()}</div>
             <div class="bb-panel-tabs" role="tablist">
               <For each={store.tabs}>
                 {(tab) => (
@@ -689,6 +700,20 @@ export function ChatWorkspace(props: {
                 )}
               </For>
             </div>
+            <div class="bb-panel-add">{panelMenu()}</div>
+            <div class="bb-panel-focus">
+              <IconButtonV2
+                type="button"
+                variant="ghost-muted"
+                size="large"
+                icon={<Icon name={store.focused ? "collapse" : "expand"} />}
+                state={store.focused ? "pressed" : undefined}
+                aria-label={language.t(store.focused ? "panelRefinements.restore" : "panelRefinements.focus")}
+                title={language.t(store.focused ? "panelRefinements.restore" : "panelRefinements.focus")}
+                aria-pressed={store.focused}
+                onClick={() => setStore({ focused: !store.focused, menu: false })}
+              />
+            </div>
             <span class="bb-panel-divider" aria-hidden="true" />
             <div class="bb-panel-collapse">{panelToggle()}</div>
           </div>
@@ -698,7 +723,20 @@ export function ChatWorkspace(props: {
               {(tab) => (
                 <div class="bb-panel-content" style={{ display: tab.id === store.active ? "flex" : "none" }}>
                   <Switch>
-                    <Match when={tab.kind === "chat"}>{props.sideChat(tab.id)}</Match>
+                    <Match when={tab.kind === "chat"}>
+                      <div
+                        class="bb-side-parent-context"
+                        role="note"
+                        title={language.t("panelRefinements.parentContextDescription")}
+                      >
+                        <Icon name="bubble-5" size="small" />
+                        <div>
+                          <span>{language.t("panelRefinements.parentContext")}</span>
+                          <p>{language.t("panelRefinements.parentContextDescription")}</p>
+                        </div>
+                      </div>
+                      {props.sideChat(tab.id)}
+                    </Match>
                     <Match when={tab.kind === "terminal"}>
                       <TerminalPanelV2 />
                     </Match>

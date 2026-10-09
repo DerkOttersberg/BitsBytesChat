@@ -46,8 +46,9 @@ function showContextWindow(model: ModelState, item: ModelItem, dialog: ReturnTyp
       <Dialog title={language.t("contextWindow.title")}>
         <div class="flex flex-col gap-1 px-4 pb-5" data-component="context-window-options">
           <p class="text-13-regular text-text-weak pb-2">{language.t("contextWindow.hint", { model: item.name })}</p>
+          <p class="text-12-regular text-text-weak pb-2">{language.t("contextWindow.economyHint")}</p>
           <Button variant="ghost" class="justify-between" onClick={() => choose()}>
-            {language.t("contextWindow.recommended")}
+            {model.context.recommended(key) ? language.t("contextWindow.recommendedValue", { count: model.context.recommended(key)!.toLocaleString(language.locale()) }) : language.t("contextWindow.recommended")}
             <Show when={model.context.get(key) === undefined}>
               <Icon name="check" size="small" />
             </Show>
@@ -62,6 +63,9 @@ function showContextWindow(model: ModelState, item: ModelItem, dialog: ReturnTyp
               </Button>
             )}
           </For>
+          <Show when={(model.context.recommended(key) ?? item.limit.context) < item.limit.context}>
+            <p class="text-12-regular text-text-weak pt-2">{language.t("contextWindow.expandedHint")}</p>
+          </Show>
           <Show when={!model.context.list(key).length}>
             <p class="text-12-regular text-text-weak pt-2">{language.t("contextWindow.unknown")}</p>
           </Show>

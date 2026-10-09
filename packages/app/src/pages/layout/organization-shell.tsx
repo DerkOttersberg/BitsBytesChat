@@ -159,16 +159,19 @@ export function OrganizationShell(props: ParentProps) {
     Object.values(state.children)
       .flatMap((page) => page.data)
       .find((chat) => chat.id === id)
-  const patchCachedChat = (id: string, change?: Partial<ChatProject.Chat>) => {
-    const previous = cachedChat(id)
+  const recentEligible = (chat: ChatProject.Chat) =>
+    Boolean(chat.archived) === state.archived && (!!state.search || state.archived || (!chat.projectID && !chat.pinned))
+  const patchCachedChat = (id: string, change?: Partial<ChatProject.Chat>, original?: ChatProject.Chat) => {
+    const previous = cachedChat(id) ?? original
     const changedSearchTitle =
       state.search && previous && change?.title !== undefined && previous.title !== change.title
     const next = change && previous ? { ...previous, ...change } : undefined
     setState(
       "chats",
       reconcile(
-        state.chats.flatMap((chat) =>
-          chat.id !== id ? [chat] : next && Boolean(next.archived) === state.archived ? [next] : [],
+        [...state.chats.filter((chat) => chat.id !== id), ...(next && recentEligible(next) ? [next] : [])].sort(
+          (a, b) =>
+            (state.sort === "created" ? b.created - a.created : b.updated - a.updated) || b.id.localeCompare(a.id),
         ),
         { key: "id" },
       ),
@@ -287,6 +290,7 @@ export function OrganizationShell(props: ParentProps) {
         api.chats({
           search: state.search,
           archived: state.archived,
+          ...(!state.search && !state.archived ? { projectID: null, pinned: false } : {}),
           sort: state.sort,
           cursor: more ? state.next : undefined,
         }),
@@ -313,7 +317,11 @@ export function OrganizationShell(props: ParentProps) {
           if (chat.projectID && !projectIDs.has(chat.projectID))
             patchCachedChat(chat.id, { projectID: undefined, projectName: undefined })
       }
-      const retained = mergePage(page, { data: state.chats, next: state.next || undefined }, more)
+      const retained = mergePage(
+        page,
+        { data: state.chats.filter(recentEligible), next: state.next || undefined },
+        more,
+      )
       setState("chats", reconcile([...retained.data], { key: "id" }))
       setState({
         next: retained.next ?? "",
@@ -624,7 +632,7 @@ export function OrganizationShell(props: ParentProps) {
       (a, b) => Number(b.pinned) - Number(a.pinned) || a.order - b.order || a.created - b.created,
     ),
   )
-  const visibleRecents = createMemo(() => state.chats.filter((chat) => state.search || state.archived || !chat.pinned))
+  const visibleRecents = createMemo(() => state.chats.filter(recentEligible))
   const conversationActions = async () => {
     const conn = currentServer()!,
       owner = context()!,
@@ -691,21 +699,12 @@ export function OrganizationShell(props: ParentProps) {
     if (!api) return
     pending.add(key)
     const original = { ...chat }
-    const oldProject = chat.projectID
     const next = {
       ...chat,
       projectID: projectID ? (projectID as ChatProject.ID) : undefined,
       projectName: state.projects.find((project) => project.id === projectID)?.name,
     }
-    setState("chats", (row) => row.id === chat.id, next)
-    setState("pinned", (row) => row.id === chat.id, next)
-    if (oldProject && state.children[oldProject])
-      setState("children", oldProject, {
-        ...state.children[oldProject],
-        data: state.children[oldProject].data.filter((row) => row.id !== chat.id),
-      })
-    if (projectID && state.children[projectID] && !state.children[projectID].data.some((row) => row.id === chat.id))
-      setState("children", projectID, { ...state.children[projectID], data: [next, ...state.children[projectID].data] })
+    patchCachedChat(chat.id, next, original)
     let failure: unknown
     try {
       await saveChat(chat.id, { projectID: projectID ? (projectID as ChatProject.ID) : null })
@@ -713,7 +712,11 @@ export function OrganizationShell(props: ParentProps) {
     } catch (error) {
       failure = error
       if (token === generation)
-        patchCachedChat(chat.id, { ...original, projectID: original.projectID, projectName: original.projectName })
+        patchCachedChat(
+          chat.id,
+          { ...original, projectID: original.projectID, projectName: original.projectName },
+          original,
+        )
     } finally {
       pending.delete(key)
       if (token === generation) await refresh()

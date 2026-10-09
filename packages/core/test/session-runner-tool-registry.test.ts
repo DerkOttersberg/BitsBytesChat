@@ -59,6 +59,38 @@ const make = (permission?: string) => {
 }
 
 describe("ToolRegistry", () => {
+  it.effect("keeps per-materialization tools isolated across simultaneous side chats", () =>
+    Effect.gen(function* () {
+      const service = yield* ToolRegistry.Service
+      yield* service.register({ echo: make() })
+      const scoped = (text: string) =>
+        Tool.make({
+          description: "Captured side context",
+          input: Schema.Struct({ text: Schema.String }),
+          output: Schema.String,
+          execute: (_, context) => Effect.succeed(text + ":" + context.sessionID),
+        })
+      const first = yield* service.materialize([], { echo: scoped("first") })
+      const second = yield* service.materialize([], { echo: scoped("second") })
+      const results = yield* Effect.all([first.settle(call("echo")), second.settle(call("echo"))], {
+        concurrency: "unbounded",
+      })
+      expect(results.map((value) => value.result)).toEqual([
+        { type: "text", value: "first:ses_registry" },
+        { type: "text", value: "second:ses_registry" },
+      ])
+      expect((yield* (yield* service.materialize()).settle(call("echo"))).result).toEqual({
+        type: "text",
+        value: "echo",
+      })
+      const denied = yield* service.materialize([{ action: "*", resource: "*", effect: "deny" }], {
+        echo: scoped("denied"),
+      })
+      expect(denied.definitions).toEqual([])
+      expect((yield* denied.settle(call("echo"))).result.type).toBe("error")
+    }),
+  )
+
   it.effect("filters disabled tools with edit aliases and ordered wildcard precedence", () =>
     Effect.gen(function* () {
       const service = yield* ToolRegistry.Service

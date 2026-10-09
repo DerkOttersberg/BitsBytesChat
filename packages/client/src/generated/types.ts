@@ -366,6 +366,7 @@ export type AgentsListOutput = {
       readonly providerID: string
       readonly variant?: string
       readonly contextWindow?: number
+      readonly recommendedContextWindow?: number
     }
     readonly request: {
       readonly headers: { readonly [x: string]: string }
@@ -391,6 +392,7 @@ export type SessionsChildrenOutput = {
   readonly data: ReadonlyArray<{
     readonly id: string
     readonly parentID?: string
+    readonly diagnostic?: { readonly key: string; readonly parentID: string; readonly ownerID: string }
     readonly projectID: string
     readonly agent?: string
     readonly model?: {
@@ -398,6 +400,7 @@ export type SessionsChildrenOutput = {
       readonly providerID: string
       readonly variant?: string
       readonly contextWindow?: number
+      readonly recommendedContextWindow?: number
     }
     readonly cost: number
     readonly tokens: {
@@ -436,6 +439,7 @@ export type SessionsForkOutput = {
   readonly data: {
     readonly id: string
     readonly parentID?: string
+    readonly diagnostic?: { readonly key: string; readonly parentID: string; readonly ownerID: string }
     readonly projectID: string
     readonly agent?: string
     readonly model?: {
@@ -443,6 +447,7 @@ export type SessionsForkOutput = {
       readonly providerID: string
       readonly variant?: string
       readonly contextWindow?: number
+      readonly recommendedContextWindow?: number
     }
     readonly cost: number
     readonly tokens: {
@@ -562,6 +567,7 @@ export type SessionsListOutput = {
   readonly data: ReadonlyArray<{
     readonly id: string
     readonly parentID?: string
+    readonly diagnostic?: { readonly key: string; readonly parentID: string; readonly ownerID: string }
     readonly projectID: string
     readonly agent?: string
     readonly model?: {
@@ -569,6 +575,7 @@ export type SessionsListOutput = {
       readonly providerID: string
       readonly variant?: string
       readonly contextWindow?: number
+      readonly recommendedContextWindow?: number
     }
     readonly cost: number
     readonly tokens: {
@@ -607,8 +614,10 @@ export type SessionsCreateInput = {
       readonly providerID: string
       readonly variant?: string
       readonly contextWindow?: number
+      readonly recommendedContextWindow?: number
     } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly diagnostic?: { readonly key: string; readonly parentID: string; readonly ownerID: string }
   }["id"]
   readonly agent?: {
     readonly id?: string | null
@@ -618,8 +627,10 @@ export type SessionsCreateInput = {
       readonly providerID: string
       readonly variant?: string
       readonly contextWindow?: number
+      readonly recommendedContextWindow?: number
     } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly diagnostic?: { readonly key: string; readonly parentID: string; readonly ownerID: string }
   }["agent"]
   readonly model?: {
     readonly id?: string | null
@@ -629,8 +640,10 @@ export type SessionsCreateInput = {
       readonly providerID: string
       readonly variant?: string
       readonly contextWindow?: number
+      readonly recommendedContextWindow?: number
     } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly diagnostic?: { readonly key: string; readonly parentID: string; readonly ownerID: string }
   }["model"]
   readonly location?: {
     readonly id?: string | null
@@ -640,15 +653,31 @@ export type SessionsCreateInput = {
       readonly providerID: string
       readonly variant?: string
       readonly contextWindow?: number
+      readonly recommendedContextWindow?: number
     } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly diagnostic?: { readonly key: string; readonly parentID: string; readonly ownerID: string }
   }["location"]
+  readonly diagnostic?: {
+    readonly id?: string | null
+    readonly agent?: string | null
+    readonly model?: {
+      readonly id: string
+      readonly providerID: string
+      readonly variant?: string
+      readonly contextWindow?: number
+      readonly recommendedContextWindow?: number
+    } | null
+    readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly diagnostic?: { readonly key: string; readonly parentID: string; readonly ownerID: string }
+  }["diagnostic"]
 }
 
 export type SessionsCreateOutput = {
   readonly data: {
     readonly id: string
     readonly parentID?: string
+    readonly diagnostic?: { readonly key: string; readonly parentID: string; readonly ownerID: string }
     readonly projectID: string
     readonly agent?: string
     readonly model?: {
@@ -656,6 +685,7 @@ export type SessionsCreateOutput = {
       readonly providerID: string
       readonly variant?: string
       readonly contextWindow?: number
+      readonly recommendedContextWindow?: number
     }
     readonly cost: number
     readonly tokens: {
@@ -699,6 +729,7 @@ export type SessionsGetOutput = {
   readonly data: {
     readonly id: string
     readonly parentID?: string
+    readonly diagnostic?: { readonly key: string; readonly parentID: string; readonly ownerID: string }
     readonly projectID: string
     readonly agent?: string
     readonly model?: {
@@ -706,6 +737,7 @@ export type SessionsGetOutput = {
       readonly providerID: string
       readonly variant?: string
       readonly contextWindow?: number
+      readonly recommendedContextWindow?: number
     }
     readonly cost: number
     readonly tokens: {
@@ -749,6 +781,7 @@ export type SessionsSwitchModelInput = {
       readonly providerID: string
       readonly variant?: string
       readonly contextWindow?: number
+      readonly recommendedContextWindow?: number
     }
   }["model"]
 }
@@ -919,6 +952,7 @@ export type SessionsContextOutput = {
           readonly providerID: string
           readonly variant?: string
           readonly contextWindow?: number
+          readonly recommendedContextWindow?: number
         }
       }
     | {
@@ -974,6 +1008,7 @@ export type SessionsContextOutput = {
           readonly providerID: string
           readonly variant?: string
           readonly contextWindow?: number
+          readonly recommendedContextWindow?: number
         }
         readonly content: ReadonlyArray<
           | { readonly type: "text"; readonly id: string; readonly text: string }
@@ -1100,6 +1135,7 @@ export type SessionsHistoryOutput = {
             readonly providerID: string
             readonly variant?: string
             readonly contextWindow?: number
+            readonly recommendedContextWindow?: number
           }
         }
       }
@@ -1239,6 +1275,7 @@ export type SessionsHistoryOutput = {
             readonly providerID: string
             readonly variant?: string
             readonly contextWindow?: number
+            readonly recommendedContextWindow?: number
           }
           readonly snapshot?: string
         }
@@ -1568,6 +1605,7 @@ export type SessionsEventsOutput =
           readonly providerID: string
           readonly variant?: string
           readonly contextWindow?: number
+          readonly recommendedContextWindow?: number
         }
       }
     }
@@ -1707,6 +1745,7 @@ export type SessionsEventsOutput =
           readonly providerID: string
           readonly variant?: string
           readonly contextWindow?: number
+          readonly recommendedContextWindow?: number
         }
         readonly snapshot?: string
       }
@@ -2027,6 +2066,7 @@ export type SessionsMessageOutput = {
           readonly providerID: string
           readonly variant?: string
           readonly contextWindow?: number
+          readonly recommendedContextWindow?: number
         }
       }
     | {
@@ -2082,6 +2122,7 @@ export type SessionsMessageOutput = {
           readonly providerID: string
           readonly variant?: string
           readonly contextWindow?: number
+          readonly recommendedContextWindow?: number
         }
         readonly content: ReadonlyArray<
           | { readonly type: "text"; readonly id: string; readonly text: string }
@@ -2209,6 +2250,7 @@ export type MessagesListOutput = {
           readonly providerID: string
           readonly variant?: string
           readonly contextWindow?: number
+          readonly recommendedContextWindow?: number
         }
       }
     | {
@@ -2264,6 +2306,7 @@ export type MessagesListOutput = {
           readonly providerID: string
           readonly variant?: string
           readonly contextWindow?: number
+          readonly recommendedContextWindow?: number
         }
         readonly content: ReadonlyArray<
           | { readonly type: "text"; readonly id: string; readonly text: string }
@@ -2945,6 +2988,7 @@ export type CommandsListOutput = {
       readonly providerID: string
       readonly variant?: string
       readonly contextWindow?: number
+      readonly recommendedContextWindow?: number
     }
     readonly subtask?: boolean
   }>

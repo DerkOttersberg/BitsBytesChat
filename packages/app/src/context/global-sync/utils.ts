@@ -126,6 +126,7 @@ export function normalizeProviderList(
           read: cost?.cache.read ?? 0,
           write: cost?.cache.write ?? 0,
         },
+        tiers: model.cost.filter(item => item.tier).map(item => ({ ...item, tier: item.tier! })),
       },
       limit: model.limit,
       status: model.status,

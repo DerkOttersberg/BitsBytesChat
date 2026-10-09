@@ -151,6 +151,7 @@ const layer = Layer.effectDiscard(
                 yield* unableToEdit(
                   permission.assert({
                     action: "edit",
+                    metadata: { operation: "edit", destructive: false },
                     resources: [target.resource],
                     save: ["*"],
                     sessionID: context.sessionID,

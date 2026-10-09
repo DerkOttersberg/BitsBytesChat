@@ -360,6 +360,7 @@ export const User = Schema.Struct({
     modelID: Model.ID,
     variant: Schema.optional(Schema.String),
     contextWindow: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
+    recommendedContextWindow: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
   }),
   system: Schema.optional(Schema.String),
   tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
@@ -553,6 +554,7 @@ const SessionModel = Schema.Struct({
   providerID: Provider.ID,
   variant: optional(Schema.String),
   contextWindow: optional(Schema.Int.check(Schema.isGreaterThan(0))),
+  recommendedContextWindow: optional(Schema.Int.check(Schema.isGreaterThan(0))),
 })
 
 export const SessionInfo = Schema.Struct({

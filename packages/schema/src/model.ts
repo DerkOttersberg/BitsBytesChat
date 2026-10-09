@@ -16,6 +16,8 @@ export const Ref = Schema.Struct({
   providerID: Provider.ID,
   variant: VariantID.pipe(optional),
   contextWindow: Schema.Int.check(Schema.isGreaterThan(0)).pipe(optional),
+  /** Frozen effective budget when the user selected Recommended. */
+  recommendedContextWindow: Schema.Int.check(Schema.isGreaterThan(0)).pipe(optional),
 }).annotate({ identifier: "Model.Ref" })
 export interface Ref extends Schema.Schema.Type<typeof Ref> {}
 

@@ -58,6 +58,7 @@ export const SessionTable = sqliteTable(
       providerID: string
       variant?: string
       contextWindow?: number
+      recommendedContextWindow?: number
     }>(),
     ...Timestamps,
     time_compacting: integer(),

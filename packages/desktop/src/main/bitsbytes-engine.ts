@@ -267,7 +267,7 @@ export async function dispatchEngine(
           body: JSON.stringify({
             messageID: prompt.id,
             agent: prompt.agent,
-            model: prompt.model,
+            model: prompt.model ? { ...prompt.model, recommendedContextWindow: prompt.recommendedContextWindow } : undefined,
             variant: prompt.variant,
             revision: prompt.revision,
             resume: prompt.resume,
@@ -300,6 +300,7 @@ export async function dispatchEngine(
               providerID: prompt.model.providerID,
               variant: prompt.variant,
               contextWindow: prompt.model.contextWindow,
+              recommendedContextWindow: prompt.recommendedContextWindow,
             },
           }),
         },

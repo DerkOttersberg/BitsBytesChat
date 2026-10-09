@@ -1,4 +1,5 @@
 import type { AssistantMessage, Message } from "@opencode-ai/sdk/v2/client"
+import { recommendedContextWindow, type ContextModel } from "@opencode-ai/core/util/context-window"
 
 type Provider = {
   id: string
@@ -10,7 +11,9 @@ type Model = {
   name?: string
   limit: {
     context: number
+    output?: number
   }
+  cost?: ContextModel["cost"]
 }
 
 type Context = {
@@ -44,7 +47,7 @@ const build = (messages: Message[] = [], providers: Provider[] = []): Context | 
 
   const provider = providers.find((item) => item.id === message.providerID)
   const model = provider?.models[message.modelID]
-  const limit = (message as AssistantMessage & { contextWindow?: number }).contextWindow ?? model?.limit.context
+  const limit = (message as AssistantMessage & { contextWindow?: number }).contextWindow ?? (model ? recommendedContextWindow({ ...model, id: message.modelID, providerID: message.providerID }) : undefined)
   const total = tokenTotal(message)
 
   return {

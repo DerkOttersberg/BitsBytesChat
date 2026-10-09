@@ -14,7 +14,7 @@ import { useSDK } from "./sdk"
 import { useSync } from "./sync"
 import { useServerSDK } from "./server-sdk"
 import { ScopedKey, type ServerScope } from "@/utils/server-scope"
-import { contextWindowOptions } from "@opencode-ai/core/util/context-window"
+import { contextWindowOptions, recommendedContextWindow } from "@opencode-ai/core/util/context-window"
 
 export type ModelKey = { providerID: string; modelID: string; variant?: string; contextWindow?: number }
 
@@ -331,6 +331,10 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           return scope()?.contextWindows?.[JSON.stringify([item.providerID, item.modelID])] ?? (scope()?.model?.providerID === item.providerID && scope()?.model?.modelID === item.modelID ? scope()?.model?.contextWindow : undefined)
         },
         list(item: ModelKey) { return contextWindowOptions(models.find(item)?.limit, sync().data.config.compaction?.reserved) },
+        recommended(item: ModelKey) {
+          const value = models.find(item)
+          return value ? recommendedContextWindow(value, sync().data.config.compaction?.reserved) : undefined
+        },
         set(item: ModelKey, value: number | undefined) {
           const contextWindows = { ...scope()?.contextWindows, [JSON.stringify([item.providerID, item.modelID])]: value }
           write({ model: { ...item, contextWindow: value }, contextWindows })

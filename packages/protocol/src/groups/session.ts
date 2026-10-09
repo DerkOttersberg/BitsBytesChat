@@ -182,9 +182,10 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
           agent: Agent.ID.pipe(Schema.optional),
           model: Model.Ref.pipe(Schema.optional),
           location: Location.Ref.pipe(Schema.optional),
+          diagnostic: Session.Diagnostic.pipe(optional),
         }),
         success: Schema.Struct({ data: Session.Info }),
-        error: InvalidRequestError,
+        error: [InvalidRequestError, SessionNotFoundError],
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "v2.session.create",

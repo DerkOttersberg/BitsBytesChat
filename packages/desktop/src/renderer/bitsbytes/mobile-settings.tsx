@@ -92,6 +92,7 @@ export function MobileSettings() {
         </Show>
         <div class="bb-actions">
           <ButtonV2
+            data-setting-key="mobile-enable"
             disabled={store.busy}
             onClick={() => void action(store.state?.enabled ? "disable" : "enable", { port: store.port })}
           >
@@ -100,7 +101,7 @@ export function MobileSettings() {
           <span class="bb-subtle">{store.state?.enabled ? copy.enabled : copy.disabled}</span>
         </div>
         <Show when={!store.state?.enabled}>
-          <label>
+          <label data-setting-key="mobile-port">
             {copy.port}
             <input
               type="number"
@@ -119,7 +120,7 @@ export function MobileSettings() {
             <code style={{ "overflow-wrap": "anywhere", "font-size": "12px" }}>{store.state?.fingerprint}</code>
           </label>
           <Show when={store.state?.urls.length} fallback={<p>{copy.noAddresses}</p>}>
-            <ButtonV2 disabled={store.busy} onClick={() => void action("pair")}>
+            <ButtonV2 data-setting-key="mobile-pair" disabled={store.busy} onClick={() => void action("pair")}>
               {copy.pair}
             </ButtonV2>
           </Show>
@@ -180,7 +181,7 @@ export function MobileSettings() {
               )}
             </For>
           </Show>
-          <h3>{copy.devices}</h3>
+          <h3 data-setting-key="mobile-devices">{copy.devices}</h3>
           <Show when={store.state?.devices.length} fallback={<p class="bb-subtle">{copy.noDevices}</p>}>
             <For each={store.state?.devices}>
               {(device) => (

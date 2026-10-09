@@ -104,6 +104,7 @@ export const EditTool = Tool.define(
                   patterns: [path.relative(instance.worktree, filePath)],
                   always: ["*"],
                   metadata: {
+                    operation: "edit", destructive: false,
                     filepath: filePath,
                     diff,
                   },
@@ -147,6 +148,7 @@ export const EditTool = Tool.define(
                 patterns: [path.relative(instance.worktree, filePath)],
                 always: ["*"],
                 metadata: {
+                  operation: "edit", destructive: false,
                   filepath: filePath,
                   diff,
                 },

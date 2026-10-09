@@ -1,5 +1,4 @@
 import { createMemo, Show } from "solid-js"
-import { createStore } from "solid-js/store"
 import { useI18n } from "@opencode-ai/ui/context/i18n"
 import { Markdown } from "./markdown"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
@@ -11,7 +10,7 @@ export { proposedPlan } from "@opencode-ai/core/util/proposed-plan"
 export function ProposedPlan(props: { text: string; sessionID: string; streaming: boolean }) {
   const i18n = useI18n(),
     value = createMemo(() => proposedPlan(props.text))
-  const [store, setStore] = createStore({ expanded: false })
+  const excerpt = createMemo(() => value()?.plan.slice(0, 1000).split("\n").slice(0, 10).join("\n") ?? "")
   const publish = (implement = false) =>
     window.dispatchEvent(
       new CustomEvent("bitsbytes:plan-proposal", {
@@ -32,46 +31,31 @@ export function ProposedPlan(props: { text: string; sessionID: string; streaming
           <Show when={plan().before.trim()}>
             <Markdown text={plan().before} />
           </Show>
-          <details
-            class="bb-proposed-plan"
-            open={props.streaming}
-            data-component="proposed-plan"
-            onToggle={(event) => {
-              if (!event.currentTarget.open) setStore("expanded", false)
-            }}
-          >
-            <summary>
-              {i18n.t(props.streaming ? "ui.plan.writing" : "ui.plan.title")}
-              <Icon name="chevron-down" class="bb-plan-chevron" />
-            </summary>
-            <div class="bb-proposed-plan-body" data-expanded={store.expanded}>
-              <Markdown text={plan().plan} />
+          <section class="bb-proposed-plan" data-component="proposed-plan">
+            <div class="bb-proposed-plan-heading">{i18n.t(props.streaming ? "ui.plan.writing" : "ui.plan.title")}</div>
+            <div class="bb-proposed-plan-body" data-truncated={excerpt().length < plan().plan.length}>
+              <Markdown text={excerpt()} />
             </div>
             <div class="bb-proposed-plan-actions">
-              <ButtonV2
-                size="normal"
-                variant="ghost-muted"
-                aria-expanded={store.expanded}
-                onClick={() => setStore("expanded", (value) => !value)}
-              >
-                {i18n.t(store.expanded ? "ui.plan.collapse" : "ui.plan.expand")}
-              </ButtonV2>
               <ButtonV2 size="normal" variant="ghost-muted" onClick={download}>
                 {i18n.t("ui.plan.export")}
               </ButtonV2>
               <ButtonV2 size="normal" variant="ghost-muted" disabled={!plan().complete} onClick={() => publish()}>
+                <Icon name="expand" />
                 {i18n.t("ui.plan.open")}
               </ButtonV2>
               <ButtonV2
                 size="normal"
-                variant="contrast"
+                variant="ghost"
+                class="bb-plan-implement"
                 disabled={props.streaming || !plan().complete}
                 onClick={() => publish(true)}
               >
+                <Icon name="arrow-right" />
                 {i18n.t("ui.plan.implement")}
               </ButtonV2>
             </div>
-          </details>
+          </section>
           <Show when={plan().after.trim()}>
             <Markdown text={plan().after} />
           </Show>

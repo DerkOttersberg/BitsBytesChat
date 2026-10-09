@@ -24,7 +24,7 @@ export function ChatAccess() {
     void platform.bitsbytes?.call<{ mode: string }>("access.get", { sessionID: id }).then(value => { if (active) setStore("mode", value.mode) })
     onCleanup(() => { active = false })
   })
-  const unsubscribe = platform.bitsbytes?.subscribe(event => { if (event.type === "access" && event.sessionID === identity() && (event.mode === "ask" || event.mode === "full")) setStore("mode", event.mode) })
+  const unsubscribe = platform.bitsbytes?.subscribe(event => { if (event.type === "access" && event.sessionID === identity() && (event.mode === "ask" || event.mode === "auto" || event.mode === "full")) setStore("mode", event.mode) })
   onCleanup(() => unsubscribe?.())
   createEffect(() => {
     const model = local.model.current()
@@ -41,13 +41,14 @@ export function ChatAccess() {
       <MenuV2.Trigger as={ButtonV2} variant="ghost-muted" size="normal" class="bb-chat-access"
         data-mode={store.mode} aria-label={language.t("bitsbytes.access")} disabled={store.busy}>
         <Show when={store.mode === "full"}><span class="bb-access-warning" aria-hidden="true">!</span></Show>
-        <span>{language.t(store.mode === "full" ? "bitsbytes.full" : "bitsbytes.ask")}</span>
+        <span>{language.t(store.mode === "full" ? "bitsbytes.full" : store.mode === "auto" ? "approval.auto" : "bitsbytes.ask")}</span>
         <Icon name="chevron-down" />
       </MenuV2.Trigger>
       <MenuV2.Portal><MenuV2.Content aria-label={language.t("bitsbytes.access")}>
         <MenuV2.RadioGroup value={store.mode} onChange={mode => void change(mode)}>
-          <MenuV2.RadioItem value="ask" closeOnSelect>{language.t("bitsbytes.ask")}</MenuV2.RadioItem>
-          <MenuV2.RadioItem value="full" closeOnSelect><span class="bb-access-warning" aria-hidden="true">!</span>{language.t("bitsbytes.full")}</MenuV2.RadioItem>
+          <MenuV2.RadioItem value="ask" closeOnSelect><span class="bb-access-option"><span>{language.t("bitsbytes.ask")}</span><small>{language.t("approval.askHint")}</small></span></MenuV2.RadioItem>
+          <MenuV2.RadioItem value="auto" closeOnSelect><span class="bb-access-option"><span>{language.t("approval.auto")}</span><small>{language.t("approval.autoHint")}</small></span></MenuV2.RadioItem>
+          <MenuV2.RadioItem value="full" closeOnSelect><span class="bb-access-warning" aria-hidden="true">!</span><span class="bb-access-option"><span>{language.t("bitsbytes.full")}</span><small>{language.t("approval.fullHint")}</small></span></MenuV2.RadioItem>
         </MenuV2.RadioGroup>
       </MenuV2.Content></MenuV2.Portal>
     </MenuV2>

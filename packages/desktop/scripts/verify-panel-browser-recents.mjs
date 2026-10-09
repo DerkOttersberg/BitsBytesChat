@@ -17,6 +17,7 @@ const directory = join(data, "workspace")
 const output = join(root, ".tools/qa/results")
 const basename = process.env.BB_QA_REPORT || "panel-browser-recents"
 const capture = process.env.BB_QA_CAPTURE === "1"
+const captureFocus = process.env.BB_QA_CAPTURE_FOCUS === "1"
 const report = { checks: [], errors: [], geometry: [], screenshots: [] }
 const fixture = createServer((req, response) => {
   response.writeHead(200, { "content-type": "text/html" })
@@ -64,7 +65,7 @@ try {
       ...process.env,
       BB_QA_ISOLATED: "1",
       BB_QA_HIDDEN: "1",
-      BB_QA_CAPTURE: capture ? "1" : "0",
+      BB_QA_CAPTURE: capture || captureFocus ? "1" : "0",
       LOCALAPPDATA: profile,
     },
     timeout: 90000,
@@ -185,7 +186,7 @@ try {
   const recents = page.locator(".bb-org-recents")
   const group = page.locator(`section[data-project-id="${project.id}"]`)
   const begin = async () => {
-    const link = recents.locator(`.bb-org-row[data-session-id="${chat.id}"] .bb-org-chat-link`)
+    const link = page.locator(`.bb-org-sidebar .bb-org-row[data-session-id="${chat.id}"] .bb-org-chat-link`).first()
     await link.scrollIntoViewIfNeeded()
     const rect = await link.boundingBox()
     await page.mouse.move(rect.x + rect.width * 0.65, rect.y + rect.height / 2)
@@ -260,8 +261,9 @@ try {
         const add = header.querySelector(".bb-panel-add")
         const tabs = header.querySelector(".bb-panel-tabs")
         return {
-          addFirst: header.firstElementChild === add,
-          addBeforeTabs: add.getBoundingClientRect().right <= tabs.getBoundingClientRect().left,
+          tabsFirst: header.firstElementChild === tabs,
+          addAfterTabs: add.previousElementSibling === tabs,
+          addGap: add.getBoundingClientRect().left - tabs.getBoundingClientRect().right,
           closeCenters: [...tabs.querySelectorAll(".bb-panel-tab-close")].map((button) => {
             const box = button.getBoundingClientRect()
             const icon = button.querySelector("svg").getBoundingClientRect()
@@ -270,15 +272,18 @@ try {
               y: (icon.top + icon.bottom - box.top - box.bottom) / 2,
               width: box.width,
               height: box.height,
+              titleGap: box.left - button.previousElementSibling.getBoundingClientRect().right,
             }
           }),
         }
       })
-    assert.ok(geometry.addFirst && geometry.addBeforeTabs)
+    assert.ok(geometry.tabsFirst && geometry.addAfterTabs)
+    assert.ok(geometry.addGap >= 0 && geometry.addGap <= 3)
     assert.ok(geometry.closeCenters.length)
     for (const close of geometry.closeCenters) {
       assert.ok(Math.abs(close.x) <= 0.5 && Math.abs(close.y) <= 0.5)
       assert.equal(close.width, close.height)
+      assert.ok(Math.abs(close.titleGap) <= 0.5)
     }
     report.geometry.push({ tabControls: geometry })
   }
@@ -415,6 +420,40 @@ try {
       sameToggle(before, await collapse().boundingBox())
       await tabControls()
       await noMenu()
+      const toggleBeforeFocus = await collapse().boundingBox()
+      await panel().getByRole("button", { name: "Focus panel", exact: true }).click()
+      await page.locator(".bb-workspace-focused").waitFor()
+      assert.equal(await main.count(), 1)
+      assert.equal(await main.locator("[contenteditable=true]").first().textContent(), "An unsent fictional follow-up")
+      await poll(
+        async () => {
+          const layout = await page.locator(".bb-browser-host").evaluate((host) => {
+            const main = document.querySelector(".bb-workspace-chat")
+            const rect = host.getBoundingClientRect()
+            const panel = host.closest(".bb-workspace-panel").getBoundingClientRect()
+            const workspace = host.closest(".bb-workspace").getBoundingClientRect()
+            return {
+              host: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+              full: Math.abs(panel.width - workspace.width + 16) <= 1,
+              mainHidden:
+                getComputedStyle(main).display === "none" && main.inert && main.getAttribute("aria-hidden") === "true",
+            }
+          })
+          return { ...layout, native: (await native())[0] }
+        },
+        (frame) =>
+          frame.full &&
+          frame.mainHidden &&
+          frame.native?.visible &&
+          Object.entries(frame.host).every(
+            ([key, value]) => Math.abs(Math.round(value * zoom) - frame.native.bounds[key]) <= 1,
+          ),
+        `focused browser bounds ${zoom}/${width}`,
+      )
+      sameToggle(toggleBeforeFocus, await collapse().boundingBox())
+      await panel().getByRole("button", { name: "Restore split view", exact: true }).click()
+      await page.locator(".bb-workspace-focused").waitFor({ state: "hidden" })
+      sameToggle(toggleBeforeFocus, await collapse().boundingBox())
       assert.equal(
         await panel()
           .locator(".bb-panel-collapse")
@@ -424,7 +463,7 @@ try {
       )
     }
   check(
-    "Toolbar/tabs/toggle and native bounds fit at 100%/125% in normal and narrow panels; collapse/reopen keeps menus closed",
+    "Toolbar/tabs/toggle and native bounds fit at 100%/125% in normal and narrow panels; full view preserves mounted main drafts, exact toggle position and browser bounds",
   )
   await app.evaluate(({ BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows()[0]
@@ -471,6 +510,13 @@ try {
   const sideID = () => panel().locator(".bb-panel-content:visible [data-bb-chat]").first().getAttribute("data-bb-chat")
   await sideEditor().waitFor()
   const firstSide = await sideID()
+  await panel()
+    .locator(".bb-panel-content:visible .bb-side-parent-context")
+    .getByText("Context from main chat", { exact: true })
+    .waitFor()
+  const inherited = await call("side.progress", { sessionID: firstSide })
+  assert.equal(inherited.parentID, chat.id)
+  assert.ok(inherited.recentMessages.some((row) => row.role === "user" && row.text.includes("Durable fictional input")))
   await sideEditor().fill("Independent first side-chat draft")
   await panel().locator(".bb-panel-add button").click()
   await page.getByRole("menuitem", { name: "Side chat", exact: true }).click()
@@ -491,6 +537,14 @@ try {
   await tabs().nth(1).getByRole("tab").click()
   assert.equal(await sideID(), secondSide)
   assert.equal(await sideEditor().textContent(), "Independent second side-chat draft")
+  await panel().getByRole("button", { name: "Focus panel", exact: true }).click()
+  await page.locator(".bb-workspace-focused").waitFor()
+  assert.equal(await sideEditor().textContent(), "Independent second side-chat draft")
+  if (captureFocus) {
+    const path = join(output, basename + "-focused-side-chats.png")
+    report.screenshots.push({ path, ...(await captureHidden(app, page, path)) })
+  }
+  await panel().getByRole("button", { name: "Restore split view", exact: true }).click()
   await tabs().nth(0).getByRole("button", { name: "Close tab", exact: true }).click()
   await poll(
     () => api("/session/" + firstSide),
@@ -502,6 +556,7 @@ try {
   assert.equal(await sideEditor().textContent(), "Independent second side-chat draft")
   await tabs().getByRole("button", { name: "Close tab", exact: true }).click()
   await panel().waitFor({ state: "hidden" })
+  assert.equal(await page.locator(".bb-workspace-focused").count(), 0)
   await poll(
     () => api("/session/" + secondSide),
     (child) => !!child.time?.archived,
@@ -509,7 +564,7 @@ try {
   )
   assert.equal(await main.locator("[contenteditable=true]").first().textContent(), "An unsent fictional follow-up")
   check(
-    "The add button stays left; close icons center in both axes; two side chats retain independent drafts, switching and owned closure",
+    "Add stays adjacent after compact tabs; close icons stay centered beside titles; two side chats receive actual main context and retain independent drafts through focus, switching and owned closure",
   )
   assert.deepEqual(report.errors, [])
   assert.ok(

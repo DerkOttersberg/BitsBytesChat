@@ -65,6 +65,7 @@ import { useTabs } from "@/context/tabs"
 import { TerminalProvider, useTerminal } from "@/context/terminal"
 import { PromptInput } from "@/components/prompt-input"
 import { PromptInputV2Composer, usePromptInputV2Controller } from "@/components/prompt-input-v2"
+import { composerChanges } from "@/components/composer-changes"
 import { useSettingsCommand } from "@/components/settings-dialog"
 import { setCursorPosition } from "@/components/prompt-input/editor-dom"
 import { promptLength } from "@/components/prompt-input/history"
@@ -550,8 +551,13 @@ export default function Page(props: { embedded?: boolean } = {}) {
   const activeTab = tabState.activeTab
   const activeFileTab = tabState.activeFileTab
   const revertMessageID = createMemo(() => info()?.revert?.messageID)
-  const timeline = createTimelineModel({ sessionID: () => params.id, revertMessageID,
-    hideBefore: createMemo(() => platform.bitsbytes ? sideChatContextBoundary(sdk().directory, params.id) : undefined) })
+  const timeline = createTimelineModel({
+    sessionID: () => params.id,
+    revertMessageID,
+    hideBefore: createMemo(() =>
+      platform.bitsbytes ? sideChatContextBoundary(sdk().directory, params.id) : undefined,
+    ),
+  })
   const historyLoading = timeline.history.loading
   const historyMore = timeline.history.more
   const lastUserMessage = timeline.lastUserMessage
@@ -1935,13 +1941,20 @@ export default function Page(props: { embedded?: boolean } = {}) {
     const key = input.sessionID + ":" + input.messageID
     if (branching.has(key)) return
     branching.add(key)
-    const directory = sdk().directory, selected = local.session.selection()
+    const directory = sdk().directory,
+      selected = local.session.selection()
     try {
-      const child = platform.bitsbytes ? await platform.bitsbytes.call<{ id: string }>("branch.open", { ...input, directory }) : await sdk().api.session.fork(input)
+      const child = platform.bitsbytes
+        ? await platform.bitsbytes.call<{ id: string }>("branch.open", { ...input, directory })
+        : await sdk().api.session.fork(input)
       if (selected) local.session.promote(directory, child.id, selected)
-      if (params.id === input.sessionID && sdk().directory === directory) navigate(`/${base64Encode(directory)}/session/${child.id}`)
-    } catch (error) { showToast({ variant: "error", title: language.t("common.requestFailed"), description: String(error) }) }
-    finally { branching.delete(key) }
+      if (params.id === input.sessionID && sdk().directory === directory)
+        navigate(`/${base64Encode(directory)}/session/${child.id}`)
+    } catch (error) {
+      showToast({ variant: "error", title: language.t("common.requestFailed"), description: String(error) })
+    } finally {
+      branching.delete(key)
+    }
   }
   const actions = { revert, openAttachment, fork }
 
@@ -2082,7 +2095,15 @@ export default function Page(props: { embedded?: boolean } = {}) {
   const sessionPanelContent = (headerActions?: JSX.Element) => (
     <>
       {sessionSync() ?? ""}
-      <Show when={!platform.bitsbytes && !isDesktop() && !!params.id && settings.general.newLayoutDesigns() && !mobileTabsBottom()}>
+      <Show
+        when={
+          !platform.bitsbytes &&
+          !isDesktop() &&
+          !!params.id &&
+          settings.general.newLayoutDesigns() &&
+          !mobileTabsBottom()
+        }
+      >
         {mobileTabs(true)}
       </Show>
       <Show when={headerActions && (!params.id || !messagesReady())}>
@@ -2261,7 +2282,31 @@ export default function Page(props: { embedded?: boolean } = {}) {
                         setFollowup("paused", id, true)
                       },
                     })
-                    return <PromptInputV2Composer controller={controller} borderUnderlay />
+                    return (
+                      <PromptInputV2Composer
+                        controller={controller}
+                        borderUnderlay
+                        changes={
+                          platform.bitsbytes
+                            ? {
+                                ...composerChanges(
+                                  turnDiffs().flatMap((row) =>
+                                    !row.file || row.additions === undefined || row.deletions === undefined
+                                      ? []
+                                      : [{ file: row.file, additions: row.additions, deletions: row.deletions }],
+                                  ),
+                                ),
+                                onOpen: () => {
+                                  view().review.setMode("turn")
+                                  window.dispatchEvent(
+                                    new CustomEvent("bitsbytes:review", { detail: { sessionID: params.id } }),
+                                  )
+                                },
+                              }
+                            : undefined
+                        }
+                      />
+                    )
                   }}
                 </Show>
               }
@@ -2273,8 +2318,30 @@ export default function Page(props: { embedded?: boolean } = {}) {
     </>
   )
 
-  if (props.embedded) return <div class="size-full min-h-0 flex flex-col" data-bb-chat={params.id}><SessionPanelFrame newLayout raised><ErrorBoundary fallback={sessionErrorFallback}>{sessionPanelContent()}</ErrorBoundary></SessionPanelFrame></div>
-  if (platform.bitsbytes) return <SessionRouteFrame><SessionHeader /><ChatWorkspace sessionID={params.id} review={newSessionDesign() ? reviewPanelV2 : reviewPanel} sideChat={id => <EmbeddedSession sessionID={id} directory={sdk().directory} />} chat={headerActions => <SessionPanelFrame newLayout raised={!!params.id}><ErrorBoundary fallback={sessionErrorFallback}>{sessionPanelContent(headerActions)}</ErrorBoundary></SessionPanelFrame>} /></SessionRouteFrame>
+  if (props.embedded)
+    return (
+      <div class="size-full min-h-0 flex flex-col" data-bb-chat={params.id}>
+        <SessionPanelFrame newLayout raised>
+          <ErrorBoundary fallback={sessionErrorFallback}>{sessionPanelContent()}</ErrorBoundary>
+        </SessionPanelFrame>
+      </div>
+    )
+  if (platform.bitsbytes)
+    return (
+      <SessionRouteFrame>
+        <SessionHeader />
+        <ChatWorkspace
+          sessionID={params.id}
+          review={newSessionDesign() ? reviewPanelV2 : reviewPanel}
+          sideChat={(id) => <EmbeddedSession sessionID={id} directory={sdk().directory} />}
+          chat={(headerActions) => (
+            <SessionPanelFrame newLayout raised={!!params.id}>
+              <ErrorBoundary fallback={sessionErrorFallback}>{sessionPanelContent(headerActions)}</ErrorBoundary>
+            </SessionPanelFrame>
+          )}
+        />
+      </SessionRouteFrame>
+    )
 
   return (
     <SessionRouteFrame>
@@ -2425,5 +2492,41 @@ function EmbeddedSession(props: { sessionID: string; directory: string }) {
   const language = useLanguage()
   const history = createMemoryHistory()
   history.set({ value: `/${base64Encode(props.directory)}/session/${props.sessionID}`, replace: true })
-  return <div class="bb-embedded-chat" data-bb-chat={props.sessionID}><ErrorBoundary fallback={(_, reset) => <div class="bb-side-state" role="alert"><span>{language.t("common.requestFailed")}</span><button onClick={reset}>{language.t("bitsbytes.retry")}</button></div>}><Suspense fallback={<div class="bb-side-state" role="status">{language.t("common.loading")}</div>}><MemoryRouter history={history}><Route path="/:dir/session/:id" component={() => <CommandProvider scopeID={props.sessionID}><ModelsProvider directory={() => props.directory}><SDKProvider directory={() => props.directory}><DirectoryDataProvider directory={() => props.directory}><SessionPage embedded /></DirectoryDataProvider></SDKProvider></ModelsProvider></CommandProvider>} /></MemoryRouter></Suspense></ErrorBoundary></div>
+  return (
+    <div class="bb-embedded-chat" data-bb-chat={props.sessionID}>
+      <ErrorBoundary
+        fallback={(_, reset) => (
+          <div class="bb-side-state" role="alert">
+            <span>{language.t("common.requestFailed")}</span>
+            <button onClick={reset}>{language.t("bitsbytes.retry")}</button>
+          </div>
+        )}
+      >
+        <Suspense
+          fallback={
+            <div class="bb-side-state" role="status">
+              {language.t("common.loading")}
+            </div>
+          }
+        >
+          <MemoryRouter history={history}>
+            <Route
+              path="/:dir/session/:id"
+              component={() => (
+                <CommandProvider scopeID={props.sessionID}>
+                  <ModelsProvider directory={() => props.directory}>
+                    <SDKProvider directory={() => props.directory}>
+                      <DirectoryDataProvider directory={() => props.directory}>
+                        <SessionPage embedded />
+                      </DirectoryDataProvider>
+                    </SDKProvider>
+                  </ModelsProvider>
+                </CommandProvider>
+              )}
+            />
+          </MemoryRouter>
+        </Suspense>
+      </ErrorBoundary>
+    </div>
+  )
 }

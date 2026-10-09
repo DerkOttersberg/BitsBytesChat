@@ -33,6 +33,13 @@ export type FatalRendererErrorLog = {
 type PlatformBase = {
   applicationName?: string
   settingsPanels?: { id: string; title: string; component: Component }[]
+  settingsSearchEntries?: () => {
+    id: string
+    tab: string
+    title: string
+    description?: string
+    target?: string
+  }[]
   documentPanel?: Component<{ id: string; revision?: number }>
   runPanel?: Component<{ sessionID: string; kind: "plan" | "goal" }>
   browserPanel?: Component<{ id: string; active: boolean; home?: JSX.Element }>

@@ -1,4 +1,5 @@
 import type { PromptInputV2HistoryEntry, PromptInputV2PersistedState, PromptInputV2Suggestion } from "./types"
+import { composerCommand } from "@opencode-ai/core/util/composer-command"
 
 export type PromptInputV2InteractionState = {
   mode: "normal" | "shell"
@@ -102,9 +103,9 @@ function inputChanged(
     ])
   }
 
-  const command = value.match(/^\/(\S*)$/)
+  const command = composerCommand(value, persist ? value.length : cursor)
   if (command) {
-    const query = command[1] ?? ""
+    const query = command.query
     return changed({ ...state, popover: { type: "command-inline", query }, focus: "editor" }, [
       ...setText,
       { type: "popover.filter", popover: "command", query },
@@ -205,6 +206,15 @@ function keyDown(
   }
   if (event.key === "Escape") {
     return changed({ ...state, popover: { type: "closed" }, focus: "editor" }, [{ type: "focus.editor" }], true)
+  }
+  if (
+    !event.composing &&
+    event.key === " " &&
+    state.popover.type === "command-inline" &&
+    ["plan", "goal"].includes(state.popover.query)
+  ) {
+    const id = `bitsbytes.${state.popover.query}`
+    if (event.ids.includes(id)) return unchanged(state, true, [{ type: "suggestion.select", id }])
   }
   if (event.key === "Tab" || (event.key === "Enter" && !event.composing)) {
     if (!state.popover.activeID) return unchanged(state, true)

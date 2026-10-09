@@ -38,6 +38,13 @@ const user = (id: string) => {
 }
 
 describe("getSessionContext", () => {
+  test("uses the economic Recommended budget when a turn has no saved limit, while preserving recorded overrides", () => {
+    const message = assistant("context", { input: 100_000, output: 0, reasoning: 0, read: 0, write: 0 }, 0)
+    const providers = [{ id: "openai", models: { "gpt-4.1": { limit: { context: 1_050_000, output: 128_000 }, cost: { input: 0, output: 0, cache: { read: 0, write: 0 } } } } }]
+    expect(getSessionContext([message], providers)?.limit).toBe(250_000)
+    expect(getSessionContext([message], providers)?.usage).toBe(40)
+    expect(getSessionContext([{ ...message, contextWindow: 1_050_000 } as Message], providers)?.limit).toBe(1_050_000)
+  })
   test("computes token totals and usage from latest assistant with tokens", () => {
     const messages = [
       user("u1"),

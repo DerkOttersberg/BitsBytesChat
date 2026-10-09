@@ -631,6 +631,7 @@ const layer = Layer.effect(
           modelID: ModelV2.ID.make(current.model.id),
           ...(current.model.variant && current.model.variant !== "default" ? { variant: current.model.variant } : {}),
           contextWindow: current.model.contextWindow,
+          recommendedContextWindow: current.model.recommendedContextWindow,
         }
       }
       const match = yield* sessions
@@ -652,10 +653,10 @@ const layer = Layer.effect(
       }
 
       const model: typeof ModelRef.Type = input.model ?? ag.model ?? (yield* currentModel(input.sessionID))
-      if (model.contextWindow !== undefined) {
+      if (model.contextWindow !== undefined || model.recommendedContextWindow !== undefined) {
         const resolved = yield* provider.getModel(model.providerID, model.modelID).pipe(Effect.orDie)
         const cfg = yield* config.get()
-        yield* Effect.try({ try: () => applyContextWindow(resolved, model.contextWindow, cfg.compaction?.reserved), catch: error => new InputError({ message: (error as Error).message }) })
+        yield* Effect.try({ try: () => applyContextWindow(resolved, model.contextWindow, cfg.compaction?.reserved, model.recommendedContextWindow), catch: error => new InputError({ message: (error as Error).message }) })
       }
       const same = ag.model && model.providerID === ag.model.providerID && model.modelID === ag.model.modelID
       const full =
@@ -678,6 +679,7 @@ const layer = Layer.effect(
           modelID: model.modelID,
           variant,
           contextWindow: model.contextWindow,
+          recommendedContextWindow: model.recommendedContextWindow,
         },
         system: input.system,
         format: input.format,
@@ -689,7 +691,8 @@ const layer = Layer.effect(
         current.model?.providerID !== info.model.providerID ||
         current.model?.id !== info.model.modelID ||
         (current.model?.variant === "default" ? undefined : current.model?.variant) !== info.model.variant ||
-        current.model?.contextWindow !== info.model.contextWindow
+        current.model?.contextWindow !== info.model.contextWindow ||
+        current.model?.recommendedContextWindow !== info.model.recommendedContextWindow
       ) {
         yield* sessions.setAgentModel({
           sessionID: input.sessionID,
@@ -699,6 +702,7 @@ const layer = Layer.effect(
             providerID: info.model.providerID,
             variant: info.model.variant ?? "default",
             contextWindow: info.model.contextWindow,
+            recommendedContextWindow: info.model.recommendedContextWindow,
           },
           time: info.time.created,
         })
@@ -1242,7 +1246,7 @@ const layer = Layer.effect(
             }).pipe(Effect.ignore, Effect.forkIn(scope))
 
           const originalModel = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
-          const model = applyContextWindow(originalModel, lastUser.model.contextWindow, (yield* config.get()).compaction?.reserved)
+          const model = applyContextWindow(originalModel, lastUser.model.contextWindow, (yield* config.get()).compaction?.reserved, lastUser.model.recommendedContextWindow)
           const task = tasks.pop()
 
           if (task?.type === "subtask") {
@@ -1294,7 +1298,7 @@ const layer = Layer.effect(
             mode: agent.name,
             agent: agent.name,
             variant: lastUser.model.variant,
-            contextWindow: lastUser.model.contextWindow,
+            contextWindow: model.contextWindow ?? model.limit.context,
             path: { cwd: ctx.directory, root: ctx.worktree },
             cost: 0,
             tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
@@ -1650,6 +1654,7 @@ const ModelRef = Schema.Struct({
   providerID: ProviderV2.ID,
   modelID: ModelV2.ID,
   contextWindow: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
+  recommendedContextWindow: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
 })
 
 export const PromptInput = Schema.Struct({

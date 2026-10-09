@@ -108,12 +108,6 @@ export const DESKTOP_MENU: DesktopMenu[] = [
       },
       {
         type: "item",
-        labelKey: "desktop.menu.openProject",
-        command: "project.open",
-        accelerator: { macos: "Cmd+O" },
-      },
-      {
-        type: "item",
         labelKey: "desktop.menu.settings",
         command: "settings.open",
         accelerator: { windows: "Ctrl+," },

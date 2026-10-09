@@ -7,7 +7,7 @@ import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { useProviders } from "@/hooks/use-providers"
 import { resolveDefaultModel } from "@/hooks/provider-catalog"
-import { contextWindowOptions } from "@opencode-ai/core/util/context-window"
+import { contextWindowOptions, recommendedContextWindow } from "@opencode-ai/core/util/context-window"
 
 export function createPromptModelSelection(input: { agent: () => { model?: ModelKey; variant?: string } | undefined }) {
   const sdk = useSDK()
@@ -106,6 +106,10 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
       },
       list(item: ModelKey) {
         return contextWindowOptions(models.find(item)?.limit, sync().data.config.compaction?.reserved)
+      },
+      recommended(item: ModelKey) {
+        const value = models.find(item)
+        return value ? recommendedContextWindow(value, sync().data.config.compaction?.reserved) : undefined
       },
       set(item: ModelKey, value: number | undefined) {
         prompt.model.context.set(JSON.stringify([item.providerID, item.modelID]), value)

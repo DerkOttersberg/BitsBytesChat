@@ -34,6 +34,24 @@ test("goal parameters come from explicit prompt constraints, not a previous draf
   expect(f.runs.get("ses_test").goal?.minActiveDurationMs).toBe(0)
 })
 
+test("queued Recommended snapshots survive restart, exact retries and explicit Resume without changing the UI choice", async () => {
+  const f = await fixture(); f.runs.close()
+  const original: RunPrompt = { ...f.prompt("msg_recommended"), recommendedContextWindow: 180_000 }
+  await f.runs.call("admit", { prompt: original })
+  await f.runs.call("admit", { prompt: original })
+  expect(f.runs.get("ses_test").queue).toHaveLength(1)
+  await expect(f.runs.call("admit", { prompt: { ...original, recommendedContextWindow: 250_000 } })).rejects.toThrow("deliveryConflict")
+  const restored = new BBRuns(f.folder, async () => structuredClone(f.state), async prompt => { f.sent.push(structuredClone(prompt)); f.state.busy = true }, () => undefined)
+  fixtures.push({ runs: restored, folder: f.folder }); await restored.start(); restored.close()
+  expect(restored.get("ses_test").queue[0].prompt.recommendedContextWindow).toBe(180_000)
+  expect(restored.get("ses_test").queue[0].prompt.model?.contextWindow).toBeUndefined()
+  f.state.busy = false
+  await restored.call("resume", { sessionID: "ses_test" })
+  for (let attempt = 0; attempt < 30 && f.sent.length === 0; attempt++) await new Promise(resolve => setTimeout(resolve, 5))
+  expect(f.sent[0].recommendedContextWindow).toBe(180_000)
+  expect(f.sent[0].model?.contextWindow).toBeUndefined()
+})
+
 test.each(["failed", "uncertain"] as const)("fresh Send proceeds past an idle %s input without replaying it", async status => {
   const f = await fixture(); f.runs.close()
   await f.runs.call("admit", { prompt: f.prompt("msg_previous") })

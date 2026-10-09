@@ -556,6 +556,66 @@ const verifyPartialFlushOnInterruption = (kind: FragmentKind) =>
   })
 
 describe("SessionRunnerLLM", () => {
+  it.effect("diagnostic sessions advertise only inspection tools and reject forged write or aliased MCP calls", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const applications = yield* ApplicationTools.Service
+      const session = yield* SessionV2.Service
+      const db = (yield* Database.Service).db
+      const invoked: string[] = []
+      const tool = (name: string) =>
+        Tool.make({
+          description: "Tracked tool",
+          input: Schema.Struct({ text: Schema.String }),
+          output: Schema.String,
+          execute: () =>
+            Effect.sync(() => {
+              invoked.push(name)
+              return name
+            }),
+        })
+      yield* applications.register({
+        read: tool("read"),
+        write: tool("write"),
+        mcp_read: Tool.withPermission(tool("mcp"), "read"),
+      })
+      yield* insertSession(otherSessionID)
+      yield* db
+        .update(SessionTable)
+        .set({
+          parent_id: otherSessionID,
+          metadata: {
+            bitsbytesDiagnostic: { key: "a".repeat(32), parentID: otherSessionID, ownerID: otherSessionID },
+          },
+        })
+        .where(eq(SessionTable.id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Explain the parent's work." }), resume: false })
+      requests.length = 0
+      responses = [
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id: "forged-write", name: "write", input: { text: "Modify files" } }),
+          LLMEvent.toolCall({ id: "forged-mcp", name: "mcp_read", input: { text: "Bypass filtering" } }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ],
+        [],
+      ]
+      yield* session.resume(sessionID)
+      expect(requests[0]?.tools.map((value) => value.name)).toEqual(["read", "parent_progress"])
+      expect(invoked).toEqual([])
+      expect(JSON.stringify(requests[0]?.system)).toContain(
+        "Do not pursue, resume, delegate or rebuild the parent task",
+      )
+      expect((yield* session.context(sessionID)).filter((message) => message.type === "assistant")[0]).toMatchObject({
+        content: [{ state: { status: "error" } }, { state: { status: "error" } }],
+      })
+      requests.length = 0
+    }),
+  )
+
   it.effect("advertises and executes a globally attached application tool", () =>
     Effect.gen(function* () {
       yield* setup

@@ -5,6 +5,86 @@
 .bb-composer-stack {
   gap: 0;
 }
+.bb-mode-row {
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.bb-mode-chip {
+  height: 28px;
+  padding: 2px 6px;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text-weak);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.bb-mode-chip:hover {
+  background: var(--surface-base-hover);
+  color: var(--text-strong);
+}
+.bb-mode-chip:focus-visible,
+.bb-send-controls button:focus-visible,
+.bb-composer-changes:focus-visible {
+  outline: 2px solid var(--v2-border-border-focus);
+  outline-offset: 2px;
+}
+.bb-composer-changes {
+  display: flex;
+  align-items: center;
+  align-self: center;
+  gap: 5px;
+  height: 32px;
+  margin: 0 12px 8px;
+  padding: 0 12px;
+  border: 1px solid var(--border-weak-base);
+  border-radius: 12px;
+  font-size: 12px;
+  color: var(--text-weak);
+  font-variant-numeric: tabular-nums;
+}
+.bb-composer-changes:hover {
+  background: var(--surface-base-hover);
+}
+.bb-lines-added {
+  color: var(--text-diff-add-base);
+}
+.bb-lines-removed {
+  color: var(--text-diff-delete-base);
+}
+.bb-send-controls {
+  gap: 4px;
+}
+.bb-send-controls button {
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.bb-send-primary,
+.bb-send-stop {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  transition: opacity 120ms ease;
+}
+.bb-send-primary:disabled {
+  cursor: default;
+}
+.bb-send-primary:not(:disabled):hover,
+.bb-send-stop:hover {
+  opacity: 0.8;
+}
+.bb-send-alt {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+}
+.bb-send-stop[data-secondary="true"] {
+  background: transparent;
+  color: var(--text-weak);
+}
+.bb-send-stop[data-secondary="true"]:hover {
+  background: var(--surface-base-hover);
+}
 .bb-run-queue {
   /* The composer covers the lower edge, as in the supplied queue reference. */
   align-self: stretch;
@@ -45,10 +125,16 @@
 .bb-queue-list[data-saving="true"] .bb-queue-row {
   transition: none;
 }
-.bb-queue-row[data-landing="true"] { animation: bb-queue-landing 160ms ease-out; }
+.bb-queue-row[data-landing="true"] {
+  animation: bb-queue-landing 160ms ease-out;
+}
 @keyframes bb-queue-landing {
-  from { transform: translate3d(0, var(--bb-queue-landing-offset), 0); }
-  to { transform: translate3d(0, 0, 0); }
+  from {
+    transform: translate3d(0, var(--bb-queue-landing-offset), 0);
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+  }
 }
 .bb-queue-reordering,
 .bb-queue-reordering * {
@@ -67,11 +153,33 @@
   font-size: 13px;
   line-height: 20px;
 }
-.bb-queue-paused > svg { flex-shrink: 0; }
-.bb-queue-paused > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bb-queue-paused > button { display: flex; align-items: center; gap: 5px; height: 28px; padding-inline: 4px; border-radius: 6px; font-size: 12px; cursor: pointer; }
-.bb-queue-paused > button:hover { background: var(--surface-base-hover); }
-.bb-queue-paused > button:focus-visible { outline: 2px solid var(--v2-border-border-focus); outline-offset: -1px; }
+.bb-queue-paused > svg {
+  flex-shrink: 0;
+}
+.bb-queue-paused > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bb-queue-paused > button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding-inline: 4px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.bb-queue-paused > button:hover {
+  background: var(--surface-base-hover);
+}
+.bb-queue-paused > button:focus-visible {
+  outline: 2px solid var(--v2-border-border-focus);
+  outline-offset: -1px;
+}
 .bb-queue-text {
   font-family: "Segoe UI", system-ui, sans-serif;
   font-weight: 600;
@@ -148,12 +256,19 @@
   border-color: #3b3b3b;
   color: #ffffff;
 }
-:root[data-color-scheme="dark"] .bb-queue-paused { color: #969696; border-color: #363636; }
-:root[data-color-scheme="dark"] .bb-queue-row[data-dragging="true"] { background: #363636; }
+:root[data-color-scheme="dark"] .bb-queue-paused {
+  color: #969696;
+  border-color: #363636;
+}
+:root[data-color-scheme="dark"] .bb-queue-row[data-dragging="true"] {
+  background: #363636;
+}
 :root[data-color-scheme="dark"] :is(.bb-queue-icon, .bb-queue-actions > button) {
   color: #969696;
 }
-:root[data-color-scheme="dark"] .bb-composer-stack :is([data-component="prompt-input-v2"], [data-dock-surface="shell"]) {
+:root[data-color-scheme="dark"]
+  .bb-composer-stack
+  :is([data-component="prompt-input-v2"], [data-dock-surface="shell"]) {
   background: #363636;
   --dock-shell-border-underlay-background: #363636;
 }

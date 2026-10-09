@@ -17,6 +17,42 @@ function persisted(value = ""): PromptInputV2PersistedState {
 }
 
 describe("prompt input v2 interaction machine", () => {
+  test("space accepts exact mode commands without submitting or accepting a custom command", () => {
+    const state = {
+      ...createPromptInputV2InteractionState(),
+      popover: { type: "command-inline" as const, query: "plan", activeID: "custom.plan" },
+    }
+    const key = {
+      type: "key.down" as const,
+      key: " ",
+      ctrl: false,
+      composing: false,
+      ids: ["custom.plan", "bitsbytes.plan"],
+    }
+    expect(transitionPromptInputV2(state, key, persisted("Do work /plan")).commands).toContainEqual({
+      type: "suggestion.select",
+      id: "bitsbytes.plan",
+    })
+    expect(transitionPromptInputV2(state, { ...key, composing: true }, persisted("Do work /plan")).handled).toBe(false)
+  })
+  test("offers mode commands after existing text and at the current caret", () => {
+    const value = "Build a game /pl next"
+    const input = persisted(value)
+    input.cursor = 16
+    const open = transitionPromptInputV2(
+      createPromptInputV2InteractionState(),
+      { type: "input.changed", value, persist: false },
+      input,
+    )
+    expect(open.state.popover).toEqual({ type: "command-inline", query: "pl" })
+    expect(
+      transitionPromptInputV2(
+        createPromptInputV2InteractionState(),
+        { type: "input.changed", value: "Build a game /goal" },
+        persisted(),
+      ).state.popover,
+    ).toEqual({ type: "command-inline", query: "goal" })
+  })
   test("opens inline commands only when slash is the entire prompt", () => {
     const state = createPromptInputV2InteractionState()
     const open = transitionPromptInputV2(state, { type: "input.changed", value: "/re" }, persisted())

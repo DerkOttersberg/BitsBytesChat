@@ -211,6 +211,7 @@ import type {
   SessionDeleteMessageErrors,
   SessionDeleteMessageResponses,
   SessionDeleteResponses,
+  SessionDiagnostic,
   SessionDiffErrors,
   SessionDiffResponses,
   SessionForkErrors,
@@ -359,6 +360,8 @@ import type {
   V2ReferenceListResponses,
   V2SessionActiveErrors,
   V2SessionActiveResponses,
+  V2SessionChildrenErrors,
+  V2SessionChildrenResponses,
   V2SessionCompactErrors,
   V2SessionCompactResponses,
   V2SessionContextErrors,
@@ -367,6 +370,8 @@ import type {
   V2SessionCreateResponses,
   V2SessionEventsErrors,
   V2SessionEventsResponses,
+  V2SessionForkErrors,
+  V2SessionForkResponses,
   V2SessionGetErrors,
   V2SessionGetResponses,
   V2SessionHistoryErrors,
@@ -395,6 +400,8 @@ import type {
   V2SessionQuestionRejectResponses,
   V2SessionQuestionReplyErrors,
   V2SessionQuestionReplyResponses,
+  V2SessionRemoveErrors,
+  V2SessionRemoveResponses,
   V2SessionResumeErrors,
   V2SessionResumeResponses,
   V2SessionRevertClearErrors,
@@ -3500,6 +3507,7 @@ export class Session2 extends HeyApiClient {
         providerID: string
         variant?: string
         contextWindow?: number
+        recommendedContextWindow?: number
       }
       metadata?: {
         [key: string]: unknown
@@ -3831,6 +3839,7 @@ export class Session2 extends HeyApiClient {
         providerID: string
         modelID: string
         contextWindow?: number
+        recommendedContextWindow?: number
       }
       agent?: string
       noReply?: boolean
@@ -4191,6 +4200,7 @@ export class Session2 extends HeyApiClient {
         providerID: string
         modelID: string
         contextWindow?: number
+        recommendedContextWindow?: number
       }
       agent?: string
       noReply?: boolean
@@ -4315,6 +4325,7 @@ export class Session2 extends HeyApiClient {
         providerID: string
         modelID: string
         contextWindow?: number
+        recommendedContextWindow?: number
       }
       command?: string
     },
@@ -5520,6 +5531,98 @@ export class Question2 extends HeyApiClient {
 
 export class Session3 extends HeyApiClient {
   /**
+   * List owned child sessions
+   */
+  public children<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).get<V2SessionChildrenResponses, V2SessionChildrenErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/children",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Fork completed conversation history
+   *
+   * Create an independent root from a completed response without copying pending inputs or starting execution.
+   */
+  public fork<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      messageID?: string
+      inclusive?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "body", key: "messageID" },
+            { in: "body", key: "inclusive" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2SessionForkResponses, V2SessionForkErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/fork",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Permanently delete a conversation
+   *
+   * Interrupt owned execution and delete this session and its parent-owned descendants. Independent forks are retained.
+   */
+  public remove<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).delete<V2SessionRemoveResponses, V2SessionRemoveErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get session
+   *
+   * Retrieve a session by ID.
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).get<V2SessionGetResponses, V2SessionGetErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * List sessions
    *
    * Retrieve sessions in the requested order. Items keep that order across pages; use cursor.next or cursor.previous to move through the ordered list.
@@ -5572,6 +5675,7 @@ export class Session3 extends HeyApiClient {
       agent?: string
       model?: ModelRef
       location?: LocationRef
+      diagnostic?: SessionDiagnostic
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -5584,6 +5688,7 @@ export class Session3 extends HeyApiClient {
             { in: "body", key: "agent" },
             { in: "body", key: "model" },
             { in: "body", key: "location" },
+            { in: "body", key: "diagnostic" },
           ],
         },
       ],
@@ -5609,25 +5714,6 @@ export class Session3 extends HeyApiClient {
     return (options?.client ?? this.client).get<V2SessionActiveResponses, V2SessionActiveErrors, ThrowOnError>({
       url: "/api/session/active",
       ...options,
-    })
-  }
-
-  /**
-   * Get session
-   *
-   * Retrieve a session by ID.
-   */
-  public get<ThrowOnError extends boolean = false>(
-    parameters: {
-      sessionID: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
-    return (options?.client ?? this.client).get<V2SessionGetResponses, V2SessionGetErrors, ThrowOnError>({
-      url: "/api/session/{sessionID}",
-      ...options,
-      ...params,
     })
   }
 

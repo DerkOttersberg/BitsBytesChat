@@ -115,6 +115,7 @@ const layer = Layer.effectDiscard(
                 }
                 yield* permission.assert({
                   action: "edit",
+                  metadata: { operation: "patch", destructive: targets.some(({ hunk }) => hunk.type === "delete") },
                   resources: [...new Set(targets.map(({ target }) => target.resource))],
                   save: ["*"],
                   sessionID: context.sessionID,

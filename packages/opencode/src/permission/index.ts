@@ -69,7 +69,8 @@ const layer = Layer.effect(
       const { approved, pending } = yield* InstanceState.get(state)
       const { ruleset, ...request } = input
       let needsAsk = false
-      const desktop = yield* Effect.promise(() => DesktopBridge.permission(request.sessionID, request.permission))
+      const instance = yield* InstanceState.context
+      const desktop = yield* Effect.promise(() => DesktopBridge.permission(request.sessionID, request.permission, { directory: instance.worktree, resources: request.patterns, metadata: request.metadata }))
 
       for (const pattern of request.patterns) {
         const configured = evaluate(request.permission, pattern, ruleset)

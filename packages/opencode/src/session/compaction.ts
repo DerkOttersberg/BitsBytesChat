@@ -361,7 +361,7 @@ const layer = Layer.effect(
         ? yield* provider.getModel(agent.model.providerID, agent.model.modelID).pipe(Effect.orDie)
         : yield* provider.getModel(userMessage.model.providerID, userMessage.model.modelID).pipe(Effect.orDie)
       const cfg = yield* config.get()
-      const model = applyContextWindow(originalModel, agent.model ? undefined : userMessage.model.contextWindow, cfg.compaction?.reserved)
+      const model = applyContextWindow(originalModel, agent.model ? undefined : userMessage.model.contextWindow, cfg.compaction?.reserved, agent.model ? undefined : userMessage.model.recommendedContextWindow)
       const history = compactionPart && messages.at(-1)?.info.id === input.parentID ? messages.slice(0, -1) : messages
       const prior = completedCompactions(history)
       const hidden = new Set(prior.flatMap((item) => [item.userIndex, item.assistantIndex]))

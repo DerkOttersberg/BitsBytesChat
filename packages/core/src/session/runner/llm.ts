@@ -31,6 +31,7 @@ import { SessionHistory } from "../history"
 import { SessionInput } from "../input"
 import { SessionSchema } from "../schema"
 import { SessionStore } from "../store"
+import { SessionDiagnostic } from "../diagnostic"
 import { type RunError, type OwnershipCallback, Service } from "./index"
 import { SessionRunnerModel } from "./model"
 import { createLLMEventPublisher } from "./publish-llm-event"
@@ -206,7 +207,22 @@ const layer = Layer.effect(
       const inputID = context.findLast((message) => message.type === "user")?.id
       if (onOwnership && inputID) yield* onOwnership({ inputID })
       const isLastStep = agent.info?.steps !== undefined && currentStep >= agent.info.steps
-      const toolMaterialization = isLastStep ? undefined : yield* tools.materialize(agent.info?.permissions)
+      const materialization = isLastStep
+        ? undefined
+        : yield* tools.materialize(
+            session.diagnostic ? SessionDiagnostic.permissions : agent.info?.permissions,
+            session.diagnostic ? { parent_progress: SessionDiagnostic.progressTool } : undefined,
+          )
+      const toolMaterialization =
+        session.diagnostic && materialization
+          ? {
+              definitions: materialization.definitions.filter((tool) => SessionDiagnostic.allowed(tool.name)),
+              settle: (input: ToolRegistry.ExecuteInput) =>
+                SessionDiagnostic.allowed(input.call.name)
+                  ? materialization.settle(input)
+                  : Effect.succeed({ result: { type: "error" as const, value: "bb.error.sideReadOnly" } }),
+            }
+          : materialization
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
       const request = LLM.request({
         model,
@@ -220,7 +236,7 @@ const layer = Layer.effect(
           },
         },
         providerOptions: { openai: { promptCacheKey } },
-        system: [agent.info?.system, system.baseline]
+        system: [agent.info?.system, system.baseline, session.diagnostic ? SessionDiagnostic.instruction : undefined]
           .filter((part): part is string => part !== undefined && part.length > 0)
           .map(SystemPart.make),
         messages: [...toLLMMessages(context, model), ...(isLastStep ? [Message.assistant(MAX_STEPS_PROMPT)] : [])],
@@ -237,7 +253,9 @@ const layer = Layer.effect(
           id: ModelV2.ID.make(model.id),
           providerID: ProviderV2.ID.make(model.provider),
           ...(session.model?.variant === undefined ? {} : { variant: session.model.variant }),
-          ...(session.model?.contextWindow === undefined ? {} : { contextWindow: session.model.contextWindow }),
+          ...(model.route.defaults.limits?.context === undefined
+            ? {}
+            : { contextWindow: model.route.defaults.limits.context }),
         },
         snapshot: startSnapshot,
         ...(onOwnership && inputID

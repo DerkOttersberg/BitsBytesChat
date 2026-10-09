@@ -9,6 +9,7 @@ import type { SessionV1 } from "@opencode-ai/core/v1/session"
 export type RunPrompt = {
   sessionID: string; directory: string; id: string; text: string; agent?: string
   model?: { providerID: string; modelID: string; contextWindow?: number }; variant?: string
+  recommendedContextWindow?: number
   legacyParts?: unknown[]; files?: { uri: string; name?: string }[]; agents?: { name: string }[]
   draft?: unknown; protocol?: "v1" | "v2"; mode?: "normal" | "plan"; goal?: boolean; delivery?: "queue" | "steer"; prepared?: boolean; turnID?: string; resume?: boolean; revision?: number; diagnosticPrepared?: boolean
 }
@@ -164,6 +165,7 @@ export class BBRuns {
         (!Number.isSafeInteger(prompt.model.contextWindow) || prompt.model.contextWindow <= 0)
       )
         throw new Error("bb.error.invalidRequest")
+      if (prompt.recommendedContextWindow !== undefined && (!Number.isSafeInteger(prompt.recommendedContextWindow) || prompt.recommendedContextWindow <= 0)) throw new Error("bb.error.invalidRequest")
       prompt.mode ??= chat.mode
       if (prompt.mode === "plan" && !prompt.prepared) {
         prompt.agent = "plan"

@@ -36,6 +36,7 @@ type PluralKey =
   | "session.followupDock.summary"
   | "session.revertDock.summary"
   | "organization.chatCount"
+  | "composerRefinements.changes"
 type Source = { dict: Record<string, string> }
 
 function cookie(locale: Locale) {

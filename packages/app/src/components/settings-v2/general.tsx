@@ -508,7 +508,7 @@ export const SettingsGeneralV2: Component<{
           title={language.t("settings.updates.row.check.title")}
           description={language.t("settings.updates.row.check.description")}
         >
-          <ButtonV2 size="normal" variant="neutral" disabled={!updater.action().run} onClick={() => updater.run()}>
+          <ButtonV2 data-action="settings-check-updates" size="normal" variant="neutral" disabled={!updater.action().run} onClick={() => updater.run()}>
             {language.t(updater.action().label)}
           </ButtonV2>
         </SettingsRowV2>

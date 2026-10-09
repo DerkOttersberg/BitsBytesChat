@@ -71,7 +71,7 @@ export function ImageGenerationSettings() {
     clearTimeout(timer)
   })
   return (
-    <section data-bb-image-settings>
+    <section data-bb-image-settings data-setting-key="tools-images">
       <h3>{bbt("imageGeneration.title")}</h3>
       <p class="bb-subtle">{bbt("imageGeneration.hint")}</p>
       <Show when={store.error || store.data?.error}>
@@ -79,7 +79,7 @@ export function ImageGenerationSettings() {
           {store.error || bbError(store.data?.error)}
         </p>
       </Show>
-      <label>
+      <label data-setting-key="tools-image-key">
         {bbt("imageGeneration.key")}
         <input
           type="password"
@@ -90,7 +90,7 @@ export function ImageGenerationSettings() {
           onInput={(event) => setStore("key", event.currentTarget.value)}
         />
       </label>
-      <label>
+      <label data-setting-key="tools-image-model">
         {bbt("imageGeneration.model")}
         <select
           value={store.model}
@@ -105,6 +105,7 @@ export function ImageGenerationSettings() {
           {bbt("imageGeneration.save")}
         </ButtonV2>
         <ButtonV2
+          data-setting-key="tools-image-test"
           variant="neutral"
           disabled={store.busy || !store.data?.configured || !!store.key || store.model !== store.data?.model}
           onClick={() => void run("verify")}

@@ -56,6 +56,7 @@ export const WriteTool = Tool.define(
             patterns: [path.relative(instance.worktree, filepath)],
             always: ["*"],
             metadata: {
+              operation: "write", destructive: contentNew.length === 0,
               filepath,
               diff,
             },

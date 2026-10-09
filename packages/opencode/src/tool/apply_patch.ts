@@ -208,6 +208,7 @@ export const ApplyPatchTool = Tool.define(
         patterns: relativePaths,
         always: ["*"],
         metadata: {
+          operation: "patch", destructive: fileChanges.some(change => change.type === "delete" || change.type === "move"),
           filepath: relativePaths.join(", "),
           diff: totalDiff,
           files,

@@ -3,7 +3,7 @@ export * as SessionV2 from "./session"
 export * from "./session/schema"
 
 import { DateTime, Effect, Layer, Schema, Context, Stream } from "effect"
-import { ListAnchor } from "@opencode-ai/schema/session"
+import { ListAnchor, type Diagnostic } from "@opencode-ai/schema/session"
 import { and, asc, desc, eq, gt, like, lt, or, type SQL } from "drizzle-orm"
 import { ProjectV2 } from "./project"
 import { WorkspaceV2 } from "./workspace"
@@ -84,6 +84,7 @@ type CreateInput = {
   agent?: AgentV2.ID
   model?: ModelV2.Ref
   location: Location.Ref
+  diagnostic?: Diagnostic
 }
 
 type CompactInput = {
@@ -129,7 +130,7 @@ export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>
   readonly create: (
     input: CreateInput,
-  ) => Effect.Effect<SessionSchema.Info, SessionRunnerModel.ContextWindowUnavailableError>
+  ) => Effect.Effect<SessionSchema.Info, NotFoundError | SessionRunnerModel.ContextWindowUnavailableError>
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info, NotFoundError>
   readonly messages: (input: {
     sessionID: SessionSchema.ID
@@ -255,6 +256,10 @@ const layer = Layer.effect(
         const sessionID = input.id ?? SessionSchema.ID.create()
         const recorded = yield* store.get(sessionID)
         if (recorded) return recorded
+        if (input.diagnostic) {
+          yield* result.get(input.diagnostic.parentID)
+          yield* result.get(input.diagnostic.ownerID)
+        }
         if (input.model)
           yield* SessionRunnerModel.validateContext(input.model).pipe(Effect.provide(locations.get(input.location)))
         const project = yield* projects.resolve(input.location.directory)
@@ -271,6 +276,12 @@ const layer = Layer.effect(
           version: InstallationVersion,
           projectID: project.id,
           directory: input.location.directory,
+          parentID: input.diagnostic?.parentID,
+          metadata: input.diagnostic ? { bitsbytesDiagnostic: input.diagnostic } : undefined,
+          permission: input.diagnostic ? [
+            { permission: "*", pattern: "*", action: "deny" },
+            ...["read", "glob", "grep", "parent_progress"].map(permission => ({ permission, pattern: "*", action: "allow" as const })),
+          ] : undefined,
           path: path.relative(project.directory, input.location.directory).replaceAll("\\", "/"),
           workspaceID: input.location.workspaceID ? WorkspaceV2.ID.make(input.location.workspaceID) : undefined,
           title: `New session - ${new Date(now).toISOString()}`,
@@ -281,6 +292,7 @@ const layer = Layer.effect(
                 providerID: input.model.providerID,
                 variant: input.model.variant,
                 contextWindow: input.model.contextWindow,
+                recommendedContextWindow: input.model.recommendedContextWindow,
               }
             : undefined,
           cost: 0,
@@ -410,7 +422,7 @@ const layer = Layer.effect(
         Effect.uninterruptible(
           Effect.gen(function* () {
             const session = yield* result.get(input.sessionID)
-            if (session.model)
+            if (session.model && (session.model.contextWindow !== undefined || session.model.recommendedContextWindow !== undefined))
               yield* SessionRunnerModel.validateContext(session.model).pipe(
                 Effect.provide(locations.get(session.location)),
               )
@@ -459,7 +471,8 @@ const layer = Layer.effect(
           session.model?.providerID === input.model.providerID &&
           session.model.id === input.model.id &&
           (session.model.variant ?? "default") === (input.model.variant ?? "default") &&
-          session.model.contextWindow === input.model.contextWindow
+          session.model.contextWindow === input.model.contextWindow &&
+          session.model.recommendedContextWindow === input.model.recommendedContextWindow
         )
           return
         yield* events.publish(SessionEvent.ModelSwitched, {
