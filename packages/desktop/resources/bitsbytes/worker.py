@@ -17,6 +17,7 @@ import wave
 import math
 import array
 import subprocess
+import base64
 from io import BytesIO
 
 RATE = 16000
@@ -31,6 +32,8 @@ CANCEL = {}
 RECORD = None
 ROOT = Path(os.environ.get("BITSBYTES_DATA", Path.home() / "AppData/Local/BitsBytesChat"))
 ASSETS = Path(__file__).parent
+OPENROUTER_STT_URL = "https://openrouter.ai/api/v1/audio/transcriptions"
+AUDIO_DEFAULT_MODEL = "openai/whisper-large-v3-turbo"
 
 
 def emit(value):
@@ -83,6 +86,8 @@ def create_job(args):
            "created": time.time(), "updated": time.time(), "status": "ready", "chunks": [],
            "duration": 0, "skill": args.get("skill", ""), "engine": args.get("engine", "parakeet"),
            "segments": [], "transcript": "", "error": "", "recording": False}
+    if job["engine"] == "openrouter":
+        job.update(audioModel=args.get("audioModel", AUDIO_DEFAULT_MODEL), audioLanguage=args.get("audioLanguage", ""))
     directory = job_dir(job["id"])
     directory.mkdir(parents=True)
     if args.get("template"):
@@ -284,23 +289,94 @@ def model(engine, acceleration="auto"):
     return MODELS[key]
 
 
+def openrouter_request(chunk, args, endpoint=OPENROUTER_STT_URL):
+    import httpx
+    payload = {"model": args["audioModel"], "input_audio": {
+        "data": base64.b64encode(Path(chunk["path"]).read_bytes()).decode("ascii"), "format": "wav"},
+        "response_format": "json"}
+    if args.get("audioLanguage"):
+        payload["language"] = args["audioLanguage"]
+    try:
+        # Stream a bounded response; never include upstream bodies, credentials or audio in errors.
+        with httpx.stream("POST", endpoint, headers={"Authorization": "Bearer " + args["key"],
+                          "X-Title": "Bits & Bytes Chat"}, json=payload, timeout=60) as response:
+            errors = {401: "audioKeyRejected", 403: "audioKeyRejected", 402: "audioCredits",
+                      429: "audioQuota", 400: "audioModelRejected", 404: "audioModelRejected", 422: "audioModelRejected",
+                      408: "audioUncertain", 504: "audioUncertain"}
+            if response.status_code != 200:
+                raise RuntimeError("bb.error." + errors.get(response.status_code, "audioProviderError"))
+            body = bytearray()
+            for part in response.iter_bytes():
+                body.extend(part)
+                if len(body) > 1024 * 1024:
+                    raise RuntimeError("bb.error.audioResponse")
+    except httpx.ConnectError:
+        raise RuntimeError("bb.error.audioNetwork") from None
+    except httpx.HTTPError:
+        # A timed-out POST might have been processed. Leave this chunk uncommitted for explicit retry.
+        raise RuntimeError("bb.error.audioUncertain") from None
+    try:
+        result = json.loads(body)
+    except (ValueError, UnicodeError):
+        raise RuntimeError("bb.error.audioResponse") from None
+    if not isinstance(result, dict) or not isinstance(result.get("text"), str) or len(result["text"]) > 262144:
+        raise RuntimeError("bb.error.audioResponse")
+    return [{"start": chunk["start"], "end": chunk["start"] + chunk["duration"], "text": result["text"].strip()}]
+
+
+class AudioCancelled(Exception):
+    pass
+
+
+def transcribe_cloud(chunk, args):
+    if not isinstance(args.get("key"), str) or not args["key"].strip():
+        raise ValueError("bb.error.audioKey")
+    cancellation = args.get("_cancellation") or threading.Event()
+    if cancellation.is_set():
+        raise AudioCancelled()
+    # The key travels over a private pipe, never process arguments, disk or job events.
+    child = subprocess.Popen([sys.executable, str(ASSETS / "worker.py"), "--openrouter-transcribe"],
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             env={**os.environ, "PYTHONUTF8": "1"},
+                             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+    request = json.dumps({"chunk": chunk, "args": {key: args.get(key) for key in ("key", "audioModel", "audioLanguage")},
+                          "endpoint": OPENROUTER_STT_URL}).encode("utf-8")
+    deadline = time.monotonic() + 65
+    try:
+        while True:
+            if cancellation.is_set():
+                raise AudioCancelled()
+            if time.monotonic() >= deadline:
+                raise RuntimeError("bb.error.audioUncertain")
+            try:
+                output, _ = child.communicate(input=request, timeout=0.1)
+                break
+            except subprocess.TimeoutExpired:
+                request = None
+        if cancellation.is_set():
+            raise AudioCancelled()
+        try:
+            result = json.loads(output)
+        except (ValueError, UnicodeError):
+            raise RuntimeError("bb.error.audioResponse") from None
+        if child.returncode or not isinstance(result, dict):
+            raise RuntimeError("bb.error.audioResponse")
+        if result.get("error"):
+            raise RuntimeError(result["error"])
+        if not isinstance(result.get("segments"), list):
+            raise RuntimeError("bb.error.audioResponse")
+        return result["segments"]
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.communicate()
+
+
 def transcribe_chunk(chunk, engine, args):
+    if engine == "openrouter":
+        return transcribe_cloud(chunk, {"audioModel": AUDIO_DEFAULT_MODEL, "audioLanguage": "", **args})
     if engine == "groq":
-        import httpx
-        if not args.get("key"):
-            raise ValueError("bb.error.groqKey")
-        with open(chunk["path"], "rb") as audio:
-            response = httpx.post("https://api.groq.com/openai/v1/audio/transcriptions",
-                headers={"Authorization": "Bearer " + args["key"]},
-                files={"file": ("audio.wav", audio, "audio/wav")},
-                data={"model": "whisper-large-v3-turbo", "language": "nl", "response_format": "verbose_json", "temperature": "0"},
-                timeout=120)
-        if response.status_code == 429:
-            raise RuntimeError("bb.error.groqQuota")
-        response.raise_for_status()
-        result = response.json()
-        return [{"start": chunk["start"] + row.get("start", 0), "end": chunk["start"] + row.get("end", chunk["duration"]), "text": row["text"]}
-                for row in result.get("segments", [{"text": result.get("text", "")}])]
+        raise ValueError("bb.error.audioRetired")
     acceleration = args.get("acceleration", "auto")
     def run_local(target):
         value = model(engine, target)
@@ -310,6 +386,8 @@ def transcribe_chunk(chunk, engine, args):
         return value.recognize(chunk["path"])
     try:
         result = run_local(acceleration)
+    except ModuleNotFoundError:
+        raise ValueError("bb.error.audioLocalSetup") from None
     except Exception:
         if acceleration == "cpu":
             raise
@@ -343,7 +421,10 @@ def transcribe(args):
                         time.sleep(0.5)
                         continue
                     break
-                segments = transcribe_chunk(chunk, job["engine"], args)
+                segments = transcribe_chunk(chunk, job["engine"], {**args, "_cancellation": cancellation,
+                    "audioModel": job.get("audioModel", AUDIO_DEFAULT_MODEL), "audioLanguage": job.get("audioLanguage", "")})
+                if cancellation.is_set():
+                    break
                 with LOCK:
                     job = read_job(job_id)
                     index = next(i for i, row in enumerate(job["chunks"]) if row["path"] == chunk["path"])
@@ -353,6 +434,8 @@ def transcribe(args):
                     job["transcript"] = "\n".join(row["text"].strip() for row in job["segments"] if row["text"].strip())
                     (job_dir(job_id) / "transcript.txt").write_text(job["transcript"], encoding="utf-8")
                     save_job(job)
+        except AudioCancelled:
+            cancellation.set()
         except Exception as exc:
             update_job(job_id, status="error", error=str(exc))
             raise
@@ -580,7 +663,7 @@ def create_generic(args):
 def dispatch(method, args):
     global RECORD
     if method == "health":
-        return {"python": sys.version.split()[0], "root": str(ROOT), "engines": ["parakeet", "whisper", "groq"]}
+        return {"python": sys.version.split()[0], "root": str(ROOT), "engines": ["parakeet", "whisper", "openrouter"]}
     if method == "devices":
         import sounddevice
         return [{"id": i, "name": row["name"]} for i, row in enumerate(sounddevice.query_devices()) if row["max_input_channels"] > 0]
@@ -607,18 +690,25 @@ def dispatch(method, args):
             os.replace(staging, snapshot)
             return update_job(job["id"], template=str(snapshot), templateHash=hashlib.sha256(snapshot.read_bytes()).hexdigest(), error="")
     if method == "job.update":
-        allowed = {"sessionID", "engine", "skill"}
+        allowed = {"sessionID", "engine", "skill", "audioModel", "audioLanguage"}
         values = {key: value for key, value in args["values"].items() if key in allowed}
-        if "engine" in values and values["engine"] != read_job(args["id"])["engine"]:
-            with LOCK:
-                job = read_job(args["id"])
+        with LOCK:
+            job = read_job(args["id"])
+            changed = (values.get("engine", job["engine"]) != job["engine"] or
+                       values.get("engine", job["engine"]) == "openrouter" and any(
+                           key in values and values[key] != job.get(key, default)
+                           for key, default in (("audioModel", AUDIO_DEFAULT_MODEL), ("audioLanguage", ""))))
+            if changed:
+                if job.get("recording") or job.get("status") == "transcribing":
+                    raise ValueError("bb.error.activeJob")
                 for chunk in job["chunks"]:
                     chunk["done"] = False
                     chunk.pop("segments", None)
                 job.update(values, segments=[], transcript="", status="recorded", error="")
+                (job_dir(job["id"]) / "transcript.txt").write_text("", encoding="utf-8")
                 save_job(job)
                 return job
-        return update_job(args["id"], **values)
+            return update_job(args["id"], **values)
     if method == "import":
         return import_audio(args)
     if method == "import.resume":
@@ -653,8 +743,11 @@ def dispatch(method, args):
         CANCEL.setdefault(args["id"], threading.Event()).set()
         return {"cancelled": True}
     if method == "model.download":
-        with ASR_LOCK:
-            model(args["engine"], "cpu")
+        try:
+            with ASR_LOCK:
+                model(args["engine"], "cpu")
+        except ModuleNotFoundError:
+            raise ValueError("bb.error.audioLocalSetup") from None
         return {"ready": True}
     if method == "docx.create":
         return create_document(args)
@@ -717,6 +810,14 @@ def recover():
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 2 and sys.argv[1] == "--openrouter-transcribe":
+        try:
+            request = json.load(sys.stdin)
+            print(json.dumps({"segments": openrouter_request(request["chunk"], request["args"], request["endpoint"])}, ensure_ascii=False))
+        except Exception as exc:
+            message = str(exc)
+            print(json.dumps({"error": message if message.startswith("bb.error.audio") else "bb.error.audioResponse"}))
+        sys.exit(0)
     if len(sys.argv) == 3 and sys.argv[1] == "--preview":
         print(json.dumps(export_preview({"path": sys.argv[2]})))
         sys.exit(0)

@@ -11,6 +11,7 @@ import { planRequest, openrouterRequest } from "./bitsbytes-request"
 import { catalogModels } from "./bitsbytes-models"
 import { readState, stateRecord } from "./bitsbytes-state"
 import type { ImageConfiguration } from "./bitsbytes-images"
+import { openrouterAudioKey } from "./bitsbytes-audio"
 
 type Credentials = {
   images?: ImageConfiguration
@@ -35,6 +36,7 @@ export class BBProvider {
   private refreshing?: Promise<string>
   private signing?: Promise<void>
   constructor(private root: string, private changed: () => void) {}
+  get openrouterKey() { return openrouterAudioKey(this.credentials) }
 
   async start() {
     const raw = await readFile(join(this.root, "credentials.bin")).catch(() => null)
@@ -95,12 +97,13 @@ export class BBProvider {
     await writeFile(temp, safeStorage.encryptString(JSON.stringify(this.credentials)))
     await rename(temp, target)
   }
-  async keys(args: { openrouter?: string; groq?: string; providers?: Record<string, unknown>; nativeCredentials?: { id: string; integrationID: string; label: string; value: unknown }[] }) {
+  async keys(args: { openrouter?: string; providers?: Record<string, unknown>; nativeCredentials?: { id: string; integrationID: string; label: string; value: unknown }[] }) {
     if (args.openrouter?.trim()) {
       this.credentials.openrouter = args.openrouter.trim()
       this.credentials.providers = { ...this.credentials.providers, openrouter: { type: "api", key: args.openrouter.trim() } }
+      this.credentials.nativeCredentials = this.credentials.nativeCredentials?.map(row => row.integrationID === "openrouter" && stateRecord(row.value) && row.value.type === "key"
+        ? { ...row, value: { ...row.value, key: args.openrouter!.trim() } } : row)
     }
-    if (args.groq?.trim()) this.credentials.groq = args.groq.trim()
     await this.persist()
     this.changed()
   }

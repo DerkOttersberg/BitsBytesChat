@@ -123,7 +123,7 @@ export const mobileCopy = {
   noContent: "No content yet.",
   noFiles: "No generated files in this chat.",
   noUploads: "Upload a recording from this phone. Transcription uses the provider selected on the computer.",
-  onlineAudio: "Groq is selected: audio is uploaded to Groq for transcription.",
+  onlineAudio: "OpenRouter is selected: audio is uploaded to OpenRouter for transcription using your computer’s saved API connection and audio model.",
   localAudio: "Local transcription is selected: audio is processed on the computer.",
   chooseChat: "Select or create a chat before attaching a transcript.",
   logout: "Disconnect this device",

@@ -250,7 +250,7 @@ function drawer() {
   if (state.tab === "uploads") {
     root.append(
       node("p", C.uploadLimit, "muted"),
-      node("p", state.overview?.engine === "groq" ? C.onlineAudio : C.localAudio, "muted"),
+      node("p", state.overview?.engine === "openrouter" ? C.onlineAudio : C.localAudio, "muted"),
       button(C.audioRecord, () => { $("#drawer").hidden = true; $("#record-button").click() }, "list-row"),
       button(C.choose, () => $("#audio-file").click(), "list-row"),
     )

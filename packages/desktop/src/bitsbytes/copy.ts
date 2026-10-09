@@ -33,9 +33,15 @@ export const copy = {
   brand: "Bits & Bytes Chat", chats: "Chats", skills: "Skills", recordings: "Recordings", settings: "Settings",
   record: "Record", stop: "Stop", pause: "Pause", resume: "Resume", importAudio: "Import audio", microphone: "Microphone",
   systemMicrophone: "System default", engine: "Transcription",
-  parakeet: "Local · Parakeet (default)", whisper: "Local · Whisper Turbo", groq: "Online · Groq Whisper",
+  parakeet: "Local · Parakeet (default)", whisper: "Local · Whisper Turbo", openrouterAudio: "Online · OpenRouter",
   localHint: "Audio is transcribed on this laptop. Chat uses your selected AI provider.",
-  onlineHint: "Audio will be uploaded to Groq. Its free plan has quotas; an API key is required.",
+  openrouterAudioHint: "Audio is uploaded to OpenRouter for transcription. An OpenRouter API key and available credits are required; charges are separate from your ChatGPT plan.",
+  audioModel: "Transcription model", audioModelHint: "These models support audio transcription. This choice does not change your chat model.",
+  audioModelUnavailable: "The saved transcription model is no longer listed. Refresh or select an available model before transcribing.",
+  audioLanguage: "Audio language (optional)", audioAutoLanguage: "Detect automatically", audioLanguageHint: "Leave blank to detect the language, or enter a two-letter language code such as nl or en.",
+  audioKeyHint: "Uses the same encrypted OpenRouter connection as chat. An existing OpenRouter key is reused; saving a replacement updates both.",
+  audioCloudSetupHint: "Local components capture and prepare audio. OpenRouter transcription does not require a local speech-model download.",
+  previousAudioProvider: "Previous cloud provider",
   emptyRecordings: "Record a conversation or import an audio file. Long sessions are saved in recoverable chunks.",
   transcript: "Transcript", preview: "Document preview", closePreview: "Close preview", openWord: "Open in Word", showFolder: "Show in folder",
   retryServer: "Retry saving to server", savedLocal: "Saved locally", savedServer: "Saved to server", retry: "Resume transcription",
@@ -50,7 +56,7 @@ export const copy = {
   provider: "Chat provider", chatgpt: "ChatGPT plan", openrouter: "OpenRouter API", connect: "Continue with ChatGPT",
   disconnect: "Disconnect ChatGPT", verify: "Verify connection", manageUsage: "Manage usage", verified: "ChatGPT plan verified",
   notConnected: "Not connected", model: "Model", refreshModels: "Refresh models", key: "API key", saveKeys: "Save keys securely",
-  openrouterKey: "OpenRouter API key", groqKey: "Groq API key", keyStored: "A key is stored. Leave blank to keep it.",
+  openrouterKey: "OpenRouter API key", keyStored: "A key is stored. Leave blank to keep it.",
   server: "Server and intake paths", shareRoot: "Share root", intakeFolder: "Intake folder relative to share", templateName: "Template filename",
   testShare: "Test template and write access", shareOK: "Template verified; server read/write check passed.",
   localWorker: "Local transcription and documents", setup: "Install local components", setupReady: "Local components are ready",
@@ -81,13 +87,26 @@ export const copy = {
   transcribing: "Transcribing…", paused: "Paused", recordingHint: "Stop to add the transcript to your draft. Send it when ready.",
   cancelledRecording: "Recording cancelled. Saved audio remains in Recordings.",
   transcriptAdded: "Transcript added to your chat draft. Add your request and send when ready.",
-  audioSettings: "Audio transcription", recordingOnline: "Record audio · uploaded to Groq", transcriptionHint: "Used for the microphone and imported audio. Save to apply your choice.",
+  audioSettings: "Audio transcription", recordingOpenrouter: "Record audio · uploaded to OpenRouter", transcriptionHint: "Used for the microphone and imported audio. Save to apply your choice.",
   missingProvider: "Connect a chat provider in Settings before running a skill.",
   "bb.error.invalidJob": "The recording identifier is invalid.", "bb.error.invalidEngine": "Select a supported transcription engine.",
   "bb.error.workerMissing": "Install the local components in Settings first.", "bb.error.alreadyRecording": "A recording is already running.",
   "bb.error.noRecording": "There is no active recording.", "bb.error.recordingOverflow": "Some microphone data could not be saved. Check the recording before using it.",
-  "bb.error.recordingFlush": "The last audio chunk could not finish saving.", "bb.error.groqKey": "Add a Groq API key in Settings.",
-  "bb.error.groqQuota": "Groq's quota has been reached. Resume later or select local transcription.",
+  "bb.error.recordingFlush": "The last audio chunk could not finish saving.",
+  "bb.error.audioRetired": "The previous cloud transcription option was removed. Select OpenRouter or a local engine in Settings → Audio, then resume this recording.",
+  "bb.error.audioKey": "Add an OpenRouter API key in Settings → Audio, then resume transcription. Your audio is saved.",
+  "bb.error.audioKeyRejected": "OpenRouter rejected this key or its access. Update the connection in Settings → Audio, then resume transcription.",
+  "bb.error.audioCredits": "OpenRouter has insufficient credits. Add credits or select local transcription, then resume this recording.",
+  "bb.error.audioQuota": "OpenRouter transcription reached a rate limit. Resume later or select local transcription; completed chunks are kept.",
+  "bb.error.audioModel": "Select a valid OpenRouter transcription model in Settings → Audio.",
+  "bb.error.audioLanguage": "Use a two-letter audio language code, or leave it blank for automatic detection.",
+  "bb.error.audioModelRejected": "OpenRouter could not use this transcription model or language. Refresh models or choose another in Settings → Audio, then resume.",
+  "bb.error.audioModelsUnavailable": "Transcription models could not be loaded from OpenRouter. Check your connection and refresh models; the saved choice is kept.",
+  "bb.error.audioNetwork": "OpenRouter could not be reached. Check your connection and resume transcription; your audio is saved.",
+  "bb.error.audioUncertain": "The transcription response was interrupted. OpenRouter may have processed this chunk; it will not be retried automatically. Resume when ready.",
+  "bb.error.audioProviderError": "OpenRouter could not complete transcription. Resume later or choose another transcription model; your audio is saved.",
+  "bb.error.audioResponse": "OpenRouter returned an invalid transcription response. This chunk remains saved for retry.",
+  "bb.error.audioLocalSetup": "Install local components with a local transcription engine selected, then download its speech model.",
   "bb.error.templateChanged": "The template snapshot changed. Check the configured template, then use Refresh template snapshot in Recordings.",
   "bb.error.verifySave": "The saved file did not pass verification.", "bb.error.activeJob": "Stop or cancel this job before deleting it.",
   "bb.error.unknownMethod": "This operation is not supported.", "bb.error.interrupted": "Processing was interrupted. Your saved audio is recoverable.",
@@ -110,9 +129,11 @@ export const copy = {
   "bb.error.audioChanged": "The imported audio file changed. Import it as a new recording.",
   "bb.error.importIncomplete": "The audio import was interrupted. Resume transcription to finish importing the original file first.",
 } as const
+const errorKeys = (Object.keys(copy) as (keyof typeof copy)[]).filter(key => key.startsWith("bb.error.")).sort((a, b) => b.length - a.length)
 export function bbt(key: keyof typeof copy) { return copy[key] }
 export function bbError(value: unknown) {
   const message = value instanceof Error ? value.message : String(value)
-  const key = Object.keys(copy).find((item) => item.startsWith("bb.error.") && message.includes(item)) as keyof typeof copy | undefined
+  if (message.includes("bb.error.groq")) return copy["bb.error.audioRetired"]
+  const key = errorKeys.find(item => message.includes(item))
   return key ? copy[key] : message
 }

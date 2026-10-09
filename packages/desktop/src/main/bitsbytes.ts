@@ -28,9 +28,10 @@ import { readState, stateRecord } from "./bitsbytes-state"
 import { bbt } from "../bitsbytes/copy"
 import type { ServerReadyData } from "../preload/types"
 import { freezeRecommendedContext, readPromptContext, validatePromptContext } from "./bitsbytes-context"
+import { AUDIO_DEFAULT_MODEL, audioModels, audioPreferences, migrateAudioPreferences } from "./bitsbytes-audio"
 
 export const DEFAULTS: Settings = { shareRoot: "\\\\10.10.1.3\\AdminShare", intakeFolder: "documenten beheer administratief\\2. Intakegesprekken",
-  templateName: "Intakegesprek blanco.docx", engine: "parakeet", acceleration: "auto", provider: "chatgpt", model: "", browserControl: true, computerControl: false, microphone: null }
+  templateName: "Intakegesprek blanco.docx", engine: "parakeet", audioModel: AUDIO_DEFAULT_MODEL, audioLanguage: "", acceleration: "auto", provider: "chatgpt", model: "", browserControl: true, computerControl: false, microphone: null }
 
 function validID(value: unknown): string {
   if (typeof value !== "string" || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(value)) throw new Error("bb.error.invalidSkill")
@@ -105,9 +106,13 @@ export class BitsBytes {
     await this.runs.start()
     this.settings = { ...DEFAULTS, ...await readState(this.root, "settings.json", {}, value => stateRecord(value)
       && Object.entries(DEFAULTS).every(([key, sample]) => value[key] === undefined
+        || key === "audioModel" || key === "audioLanguage"
         || (key === "microphone" ? value[key] === null || Number.isInteger(value[key]) : typeof value[key] === typeof sample))
-      && (value.engine === undefined || ["parakeet", "whisper", "groq"].includes(String(value.engine)))
+      && (value.engine === undefined || ["parakeet", "whisper", "groq", "openrouter"].includes(String(value.engine)))
       && (value.acceleration === undefined || ["auto", "cpu"].includes(String(value.acceleration)))) }
+    const retiredAudio = String(this.settings.engine) === "groq"
+    this.settings = { ...this.settings, ...migrateAudioPreferences(this.settings) }
+    if (retiredAudio) await this.persistState("settings.json", () => this.settings)
     this.progress("skill packages")
     const intake = join(this.root, "skills/bits-en-bytes-intake")
     if (!existsSync(join(intake, "SKILL.md"))) {
@@ -248,7 +253,7 @@ export class BitsBytes {
   async state(): Promise<State> {
     return { modelsUpdated: this.provider.modelsUpdated, modelError: this.provider.modelError, settings: this.settings, jobs: this.worker ? await this.rpc<Job[]>("jobs") : [], skills: await this.skills(), models: this.provider.models,
       root: this.root, workerReady: Boolean(this.worker), workerError: this.workerError, account: this.provider.credentials.email ?? "", planVerified: Boolean(this.provider.credentials.verified),
-      openrouterSet: Boolean(this.provider.credentials.openrouter), groqSet: Boolean(this.provider.credentials.groq) }
+      openrouterSet: Boolean(this.provider.openrouterKey) }
   }
   async skills(): Promise<Skill[]> {
     const dirs = await readdir(join(this.root, "skills"), { withFileTypes: true })
@@ -655,7 +660,8 @@ export class BitsBytes {
       const operation = this.preferenceSaving.catch(() => undefined).then(async () => {
         const previous = this.settings, settings = { ...previous, ...args } as Settings
         intakePaths(settings)
-        if (!["parakeet", "whisper", "groq"].includes(settings.engine) || !["chatgpt", "openrouter"].includes(settings.provider) || settings.questionAutoResolve !== undefined && typeof settings.questionAutoResolve !== "boolean") throw new Error("bb.error.invalidSettings")
+        audioPreferences(settings)
+        if (!["chatgpt", "openrouter"].includes(settings.provider) || settings.questionAutoResolve !== undefined && typeof settings.questionAutoResolve !== "boolean") throw new Error("bb.error.invalidSettings")
         await this.persistState("settings.json", () => settings)
         this.settings = settings
         this.provider.select(settings.provider)
@@ -663,7 +669,7 @@ export class BitsBytes {
         if (timerChanged) this.questionSettings = undefined
         // Optional-question preferences belong to the host. Applying them must
         // preserve the pending request and every running chat/tool fiber.
-        if (Object.keys(args).some(key => key !== "questionAutoResolve" && !Object.is(settings[key as keyof Settings], previous[key as keyof Settings]))) await this.configure()
+        if (Object.keys(args).some(key => !["questionAutoResolve", "engine", "audioModel", "audioLanguage", "microphone", "acceleration"].includes(key) && !Object.is(settings[key as keyof Settings], previous[key as keyof Settings]))) await this.configure()
         if (timerChanged) await this.configureQuestionSettings(await this.engine(), join(this.root, "workspace"))
         this.emit({ type: "refresh" }); return this.settings
       })
@@ -671,6 +677,7 @@ export class BitsBytes {
       return operation
     }
     if (method === "keys.save") return this.provider.keys(args)
+    if (method === "audio.models") return audioModels()
     if (method === "auth.connect") { await this.provider.signIn(); this.settings.provider = "chatgpt"; await this.modelConfig(); return this.state() }
     if (method === "auth.disconnect") {
       await this.provider.disconnect(); this.provider.select(this.settings.provider)
@@ -683,7 +690,7 @@ export class BitsBytes {
     if (method === "artifact.setup") { await this.artifacts.runtime.setup(); return { ready: true } }
     if (method === "setup") {
       await new Promise<void>((done, fail) => {
-        const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(this.assets, "setup.ps1"), ...(args.computer ? ["-ComputerTools"] : [])], { windowsHide: true, stdio: "pipe" })
+        const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(this.assets, "setup.ps1"), ...(args.computer ? ["-ComputerTools"] : (typeof args.audioCloud === "boolean" ? args.audioCloud : this.settings.engine === "openrouter") ? ["-CloudAudio"] : [])], { windowsHide: true, stdio: "pipe" })
         child.stdout.resume()
         child.stderr.resume()
         child.once("error", fail)
@@ -774,9 +781,11 @@ export class BitsBytes {
       return choice.filePaths[0] ?? null
     }
     if (method === "record.start") {
-      const job = await this.rpc<Job>(method, { engine: this.settings.engine, device: this.settings.microphone ?? undefined })
+      const preferences = audioPreferences(this.settings)
+      const options = { acceleration: this.settings.acceleration, key: preferences.engine === "openrouter" ? this.provider.openrouterKey : undefined }
+      const job = await this.rpc<Job>(method, { ...preferences, device: this.settings.microphone ?? undefined })
       this.blocker = powerSaveBlocker.start("prevent-app-suspension")
-      void this.once("transcribe:" + job.id, () => this.rpc("transcribe", { id: job.id, acceleration: this.settings.acceleration, key: this.provider.credentials.groq })).catch((error: Error) => this.emit({ type: "notice", message: error.message }))
+      void this.once("transcribe:" + job.id, () => this.rpc("transcribe", { id: job.id, ...options })).catch((error: Error) => this.emit({ type: "notice", message: error.message }))
       return job
     }
     if (method === "record.stop" || method === "record.cancel") {
@@ -794,14 +803,20 @@ export class BitsBytes {
     if (method === "audio.import") {
       const choice = await dialog.showOpenDialog({ title: bbt("importAudio"), properties: ["openFile"], filters: [{ name: bbt("recordings"), extensions: ["mp3", "wav", "m4a", "mp4", "ogg", "flac", "webm"] }] })
       if (!choice.filePaths[0]) return null
-      const job = await this.rpc<Job>("import", { path: choice.filePaths[0], title: basename(choice.filePaths[0]), engine: this.settings.engine })
-      await this.once("transcribe:" + job.id, () => this.rpc("transcribe", { id: job.id, acceleration: this.settings.acceleration, key: this.provider.credentials.groq }))
+      const preferences = audioPreferences(this.settings)
+      const options = { acceleration: this.settings.acceleration, key: preferences.engine === "openrouter" ? this.provider.openrouterKey : undefined }
+      const job = await this.rpc<Job>("import", { path: choice.filePaths[0], title: basename(choice.filePaths[0]), ...preferences })
+      await this.once("transcribe:" + job.id, () => this.rpc("transcribe", { id: job.id, ...options }))
       return this.rpc<Job>("job", { id: job.id })
     }
     if (method === "transcribe") {
-      await this.rpc("import.resume", { id: args.id })
-      await this.rpc("job.update", { id: args.id, values: { engine: this.settings.engine } })
-      await this.once("transcribe:" + args.id, () => this.rpc("transcribe", { ...args, acceleration: this.settings.acceleration, key: this.provider.credentials.groq }))
+      const preferences = audioPreferences(this.settings)
+      const options = { acceleration: this.settings.acceleration, key: preferences.engine === "openrouter" ? this.provider.openrouterKey : undefined }
+      await this.once("transcribe:" + args.id, async () => {
+        await this.rpc("import.resume", { id: args.id })
+        await this.rpc("job.update", { id: args.id, values: preferences })
+        return this.rpc("transcribe", { id: args.id, ...options })
+      })
       return this.rpc<Job>("job", { id: args.id })
     }
     if (method === "template.refresh") {
@@ -909,7 +924,18 @@ export class BitsBytes {
       }
       if (name === "credentials.v2.update") { const item = values.find(row => row.id === args.id); if (item) { if (args.value) item.value = args.value; if (args.label) item.label = String(args.label) } }
       if (name === "credentials.v2.remove") this.provider.credentials.nativeCredentials = values.filter(row => row.id !== args.id)
+      const changed = this.provider.credentials.nativeCredentials?.find(row => row.id === args.id)
+      if (changed?.integrationID === "openrouter" && stateRecord(changed.value) && changed.value.type === "key" && typeof changed.value.key === "string") {
+        this.provider.credentials.openrouter = changed.value.key
+        this.provider.credentials.providers = { ...this.provider.credentials.providers, openrouter: { type: "api", key: changed.value.key } }
+      }
+      const removed = name === "credentials.v2.remove" ? values.find(row => row.id === args.id) : undefined
+      if (removed?.integrationID === "openrouter" && stateRecord(removed.value) && removed.value.key === this.provider.credentials.openrouter && !this.provider.credentials.nativeCredentials?.some(row => row.integrationID === "openrouter")) {
+        delete this.provider.credentials.openrouter
+        delete this.provider.credentials.providers?.openrouter
+      }
       await this.provider.persist()
+      this.emit({ type: "refresh" })
       return this.provider.credentials.nativeCredentials?.find(row => row.id === args.id) ?? { saved: true }
     }
     if (name === "credentials.all") return this.provider.credentials.providers ?? {}

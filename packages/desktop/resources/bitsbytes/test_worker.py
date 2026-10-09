@@ -172,17 +172,12 @@ class DurableWorkflow(unittest.TestCase):
         worker.recover()
         self.assertEqual(worker.read_job(job["id"])["duration"], 35)
 
-    def test_gpu_decode_failure_uses_cpu_and_groq_quota_is_visible(self):
+    def test_gpu_decode_failure_uses_cpu(self):
         gpu = SimpleNamespace(recognize=lambda _: (_ for _ in ()).throw(RuntimeError("CUDA failure")))
         cpu = SimpleNamespace(recognize=lambda _: "Dit is een test.")
         with patch.object(worker, "model", side_effect=lambda engine, target: cpu if target == "cpu" else gpu):
             result = worker.transcribe_chunk({"path":"fixture.wav","start":30,"duration":10}, "parakeet", {})
         self.assertEqual(result[0]["text"], "Dit is een test.")
-        source = worker.ROOT / "small.wav"
-        source.write_bytes(b"fixture")
-        with patch("httpx.post", return_value=SimpleNamespace(status_code=429)):
-            with self.assertRaisesRegex(RuntimeError, "groqQuota"):
-                worker.transcribe_chunk({"path":str(source)}, "groq", {"key":"fixture"})
 
     def test_interrupted_import_resumes_without_dropping_or_repeating_audio(self):
         source = worker.ROOT / "source.wav"

@@ -104,11 +104,11 @@ export function BitsBytesShell(props: ParentProps<{ audio: { insert: (job: Job) 
         <div class="bb-chat">{props.children}</div>
         <Show when={utilityHost()}>{host => <Portal mount={host()}>
         <Show when={tab() === "recordings"}>
-          <section class="bb-page"><h1>{bbt("recordings")}</h1><p class="bb-subtle">{state()?.settings.engine === "groq" ? bbt("onlineHint") : bbt("localHint")}</p>
+          <section class="bb-page"><h1>{bbt("recordings")}</h1><p class="bb-subtle">{state()?.settings.engine === "openrouter" ? bbt("openrouterAudioHint") : bbt("localHint")}</p>
             <button disabled={Boolean(busy()) || Boolean(active()) || !state()?.workerReady} onClick={() => void run("audio.import")}>{bbt("importAudio")}</button>
             <Show when={state()?.jobs.length} fallback={<div class="bb-empty">{bbt("emptyRecordings")}</div>}>
               <For each={state()?.jobs}>{(job) => <article class="bb-card bb-job">
-                <div><h2>{job.title}</h2><p class="bb-subtle">{time(job.duration)} · {job.engine} · {job.status} · {job.chunks.filter((chunk) => chunk.done).length}/{job.chunks.length}</p><Show when={job.error}><p class="bb-error">{bbError(job.error)}</p></Show></div>
+                <div><h2>{job.title}</h2><p class="bb-subtle">{time(job.duration)} · {job.engine === "groq" ? bbt("previousAudioProvider") : job.engine} · {job.status} · {job.chunks.filter((chunk) => chunk.done).length}/{job.chunks.length}</p><Show when={job.error}><p class="bb-error">{bbError(job.error)}</p></Show></div>
                 <div class="bb-actions"><Show when={job.recording}><button onClick={() => void run("record.cancel", { id: job.id })}>{bbt("cancelRecording")}</button></Show><button onClick={() => setTranscript(job)}>{bbt("transcript")}</button>
                   <Show when={job.sessionID}><button onClick={() => navigate({ sessionID: job.sessionID, directory: state()!.root + "\\workspace" })}>{bbt("openChat")}</button></Show>
                   <Show when={job.artifact}>{(artifact) => <><button onClick={() => void showDocument(job)}>{bbt("preview")}</button><button onClick={() => void run("file.open", { path: artifact().path })}>{bbt("openWord")}</button><span class="bb-badge">{bbt(artifact().used_fallback ? "savedLocal" : "savedServer")}</span><Show when={artifact().used_fallback}><button onClick={() => void run("docx.retry", { id: job.id })}>{bbt("retryServer")}</button></Show></>}</Show>

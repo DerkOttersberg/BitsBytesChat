@@ -1,4 +1,4 @@
-param([switch]$ComputerTools, [switch]$ArtifactTools)
+param([switch]$ComputerTools, [switch]$ArtifactTools, [switch]$CloudAudio)
 $ErrorActionPreference = 'Stop'
 $runtimeRoot = Join-Path $env:LOCALAPPDATA 'BitsBytesChat\runtime'
 New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
@@ -25,5 +25,5 @@ if ($LASTEXITCODE -ne 0) { throw 'Python installation failed' }
 $environment = Join-Path $runtimeRoot $(if ($ArtifactTools) { 'artifacts' } else { 'worker' })
 & $uvExe venv --allow-existing --python (Join-Path $runtimeRoot 'python\cpython-3.12.11-windows-x86_64-none\python.exe') $environment
 if ($LASTEXITCODE -ne 0) { throw 'Speech environment creation failed' }
-& $uvExe pip install --quiet --python (Join-Path $environment 'Scripts\python.exe') --requirements (Join-Path $PSScriptRoot $(if ($ArtifactTools) { 'artifact-requirements.txt' } else { 'requirements.txt' }))
+& $uvExe pip install --quiet --python (Join-Path $environment 'Scripts\python.exe') --requirements (Join-Path $PSScriptRoot $(if ($ArtifactTools) { 'artifact-requirements.txt' } elseif ($CloudAudio) { 'requirements-audio-cloud.txt' } else { 'requirements.txt' }))
 if ($LASTEXITCODE -ne 0) { throw 'Speech libraries installation failed' }

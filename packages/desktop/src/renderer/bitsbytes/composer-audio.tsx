@@ -97,7 +97,7 @@ export function createComposerAudio() {
     return <div ref={element} class="bb-composer-audio" classList={{ "bb-audio-active": owns() && Boolean(state.job?.recording || state.busy === "stop" || state.busy === "cancel") }}>
       <Show when={owns() && (state.job?.recording || state.busy === "stop" || state.busy === "cancel")} fallback={
         <><Show when={state.error}><span class="bb-audio-error" role="status" title={state.error}>{state.error}</span></Show>
-        <button type="button" class="bb-audio-button" data-action="record-audio" disabled={Boolean(state.busy || state.job?.recording)} aria-label={bbt("recordAudio")} title={!state.ready ? bbt("setupHint") : bbt(state.engine === "groq" ? "recordingOnline" : "recordAudio")} onClick={() => void start(props.capture, props.identity?.())}>
+        <button type="button" class="bb-audio-button" data-action="record-audio" disabled={Boolean(state.busy || state.job?.recording)} aria-label={bbt("recordAudio")} title={!state.ready ? bbt(state.engine === "openrouter" ? "audioCloudSetupHint" : "setupHint") : bbt(state.engine === "openrouter" ? "recordingOpenrouter" : "recordAudio")} onClick={() => void start(props.capture, props.identity?.())}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M6 11v1a6 6 0 0 0 12 0v-1M12 18v3M9 21h6"/></svg>
         </button></>
       }>
