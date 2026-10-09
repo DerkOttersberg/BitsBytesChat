@@ -159,10 +159,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.bb-draft-folder-picker {
-  border-radius: 6px;
-  padding: 4px 6px;
-}
 .bb-draft-project-controls button:hover {
   background: var(--surface-raised-base-hover);
 }

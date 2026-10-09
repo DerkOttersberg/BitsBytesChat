@@ -7,15 +7,16 @@ import { useTabs } from "@/context/tabs"
 import { useServerSDK } from "@/context/server-sdk"
 import { usePlatform } from "@/context/platform"
 import { useLanguage } from "@/context/language"
+import { useGlobal } from "@/context/global"
 import { createOrganizationClient } from "@/utils/organization-api"
-import type { PromptProjectController } from "@/components/prompt-project-selector"
 import { createStore } from "solid-js/store"
 
 /** Collection membership is independent of the execution folder. */
-export function ChatProjectPicker(props: { folder: PromptProjectController; onDone: () => void }) {
+export function ChatProjectPicker(props: { onDone: () => void }) {
   const tabs = useTabs(),
     sdk = useServerSDK(),
     platform = usePlatform(),
+    global = useGlobal(),
     language = useLanguage()
   const [search] = useSearchParams<{ draftId?: string }>()
   const [state, setState] = createStore({ error: false, projects: [] as ChatProject.Info[] })
@@ -72,8 +73,18 @@ export function ChatProjectPicker(props: { folder: PromptProjectController; onDo
                 <MenuV2.Item
                   onSelect={() => {
                     if (!search.draftId) return
-                    tabs.updateDraft(search.draftId, { projectID: project.id })
-                    if (project.directory) props.folder.select({ worktree: project.directory })
+                    if (project.directory) {
+                      const target = global.ensureServerCtx(sdk().server)
+                      target.projects.open(project.directory)
+                      target.projects.touch(project.directory)
+                    }
+                    // Commit collection and exact folder together. The legacy
+                    // workspace picker can treat folders in one repository as
+                    // the same project and leave the previous folder selected.
+                    tabs.updateDraft(search.draftId, {
+                      projectID: project.id,
+                      ...(project.directory ? { directory: project.directory } : {}),
+                    })
                     props.onDone()
                   }}
                 >
@@ -97,14 +108,6 @@ export function ChatProjectPicker(props: { folder: PromptProjectController; onDo
           </MenuV2.Content>
         </MenuV2.Portal>
       </MenuV2>
-      <button
-        type="button"
-        class="bb-draft-folder-picker"
-        title={props.folder.selected()?.worktree}
-        onClick={() => props.folder.add()}
-      >
-        {language.t("organization.workingFolder")}
-      </button>
     </div>
   )
 }

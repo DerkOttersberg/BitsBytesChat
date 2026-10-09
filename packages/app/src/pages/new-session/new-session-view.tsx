@@ -88,7 +88,7 @@ export function NewSessionView(props: {
                   </>
                 }
               >
-                <ChatProjectPicker folder={props.project} onDone={props.input.restoreFocus} />
+                <ChatProjectPicker onDone={props.input.restoreFocus} />
               </Show>
             </div>
           </div>
