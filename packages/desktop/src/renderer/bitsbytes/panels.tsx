@@ -1,4 +1,4 @@
-import { createEffect, For, onCleanup, onMount, Show, untrack } from "solid-js"
+import { createEffect, For, onCleanup, onMount, Show, untrack, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import type { DocumentArtifact, SpreadsheetGrid } from "../../bitsbytes/types"
 import { bbt, bbError } from "../../bitsbytes/copy"
@@ -84,14 +84,17 @@ export function DocumentPanel(props: { id: string; revision?: number }) {
   </div>
 }
 
-export function BrowserPanel(props: { id: string; active: boolean }) {
+export function BrowserPanel(props: { id: string; active: boolean; home?: JSX.Element }) {
   const api = window.api.bitsbytes
-  const [store, setStore] = createStore({ url: "", address: "", editing: false, title: "", loading: false, canBack: false, canForward: false, error: "" })
+  const [store, setStore] = createStore({ url: "", address: "", editing: false, dirty: false, title: "", loading: false, canBack: false, canForward: false, error: "" })
   let host!: HTMLDivElement
   let frame = 0
   let lastBounds = ""
   let generation = 0, disposed = false
+  const blank = () => !store.url || store.url === "about:blank"
+  const address = () => blank() ? "" : store.url
   const run = async (action: string, args: Record<string, unknown> = {}) => {
+    if (action === "navigate") setStore({ editing: false, dirty: false })
     try { await api.call("browser." + action, { id: props.id, ...args }); if (action !== "bounds" && action !== "hide") setStore("error", "") }
     catch (error) { setStore("error", bbError(error)) }
   }
@@ -99,7 +102,7 @@ export function BrowserPanel(props: { id: string; active: boolean }) {
     if (!host) return
     const rect = host.getBoundingClientRect()
     const modal = Array.from(document.querySelectorAll('[role="dialog"],[aria-modal="true"],[role="menu"]')).some(element => !!(element as HTMLElement).offsetParent)
-    const args = { bounds: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, visible: props.active && !modal && rect.width > 0 && rect.height > 0 }
+    const args = { bounds: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, visible: props.active && !blank() && !modal && rect.width > 0 && rect.height > 0 }
     const key = JSON.stringify(args)
     if (key === lastBounds) return
     lastBounds = key
@@ -107,9 +110,9 @@ export function BrowserPanel(props: { id: string; active: boolean }) {
   }
   const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(bounds) }
   onMount(() => {
-    const unsubscribe = api.subscribe(event => { if (event.type === "browser" && event.id === props.id) { generation++; setStore({ url: event.url, ...(!store.editing ? { address: event.url } : {}), title: event.title, loading: event.loading, canBack: event.canBack, canForward: event.canForward }) } })
+    const unsubscribe = api.subscribe(event => { if (event.type === "browser" && event.id === props.id) { generation++; setStore({ url: event.url, ...(!store.editing ? { address: event.url === "about:blank" ? "" : event.url } : {}), title: event.title, loading: event.loading, canBack: event.canBack, canForward: event.canForward }) } })
     const token = generation
-    void api.call<{ id: string; url: string; title: string; loading: boolean; canBack: boolean; canForward: boolean }[]>("browser.list").then(items => { if (disposed || token !== generation) return; const item = items.find(item => item.id === props.id); if (item) setStore({ ...item, address: item.url }) }).catch(error => { if (!disposed && token === generation) setStore("error", bbError(error)) })
+    void api.call<{ id: string; url: string; title: string; loading: boolean; canBack: boolean; canForward: boolean }[]>("browser.list").then(items => { if (disposed || token !== generation) return; const item = items.find(item => item.id === props.id); if (item) setStore({ ...item, address: item.url === "about:blank" ? "" : item.url }) }).catch(error => { if (!disposed && token === generation) setStore("error", bbError(error)) })
     const resize = new ResizeObserver(schedule); resize.observe(host)
     const overlay = '[role="dialog"],[aria-modal="true"],[role="menu"]'
     const observer = new MutationObserver(records => {
@@ -121,13 +124,65 @@ export function BrowserPanel(props: { id: string; active: boolean }) {
     onCleanup(() => { disposed = true; generation++; unsubscribe(); resize.disconnect(); observer.disconnect(); cancelAnimationFrame(frame); window.removeEventListener("resize", schedule); void api.call("browser.hide", { id: props.id }).catch(() => undefined) })
     bounds()
   })
-  createEffect(() => { props.active; schedule() })
-  return <div class="bb-browser-panel"><form class="bb-browser-toolbar" onSubmit={event => { event.preventDefault(); setStore("editing", false); void run("navigate", { url: store.address }) }}>
-    <button type="button" title={bbt("back")} aria-label={bbt("back")} disabled={!store.canBack} onClick={() => void run("back")}><Icon name="arrow-left" size="small" /></button>
-    <button type="button" title={bbt("forward")} aria-label={bbt("forward")} disabled={!store.canForward} onClick={() => void run("forward")}><Icon name="arrow-right" size="small" /></button>
-    <button type="button" title={bbt(store.loading ? "cancel" : "reload")} aria-label={bbt(store.loading ? "cancel" : "reload")} onClick={() => void run(store.loading ? "stop" : "reload")}><Icon name={store.loading ? "close-small" : "reset"} size="small" /></button>
-    <input aria-label={bbt("address")} value={store.address} spellcheck={false} onFocus={event => { setStore("editing", true); event.currentTarget.select() }} onBlur={() => setStore("editing", false)} onInput={event => { generation++; setStore("address", event.currentTarget.value) }} onKeyDown={event => { if (event.key === "Escape") { setStore({ address: store.url, editing: false }); event.currentTarget.blur() } }} />
-    <MenuV2 placement="bottom-end" onOpenChange={schedule}><MenuV2.Trigger type="button" aria-label={bbt("organization.browserActions")}><Icon name="dot-grid" size="small" /></MenuV2.Trigger><MenuV2.Portal><MenuV2.Content><MenuV2.Item disabled={!store.url} onSelect={() => void navigator.clipboard.writeText(store.url).catch(error => setStore("error", bbError(error)))}>{bbt("organization.copyURL")}</MenuV2.Item><MenuV2.Item disabled={!store.url} onSelect={() => window.api.openExternal(store.url)}>{bbt("organization.externalBrowser")}</MenuV2.Item></MenuV2.Content></MenuV2.Portal></MenuV2>
-    <Show when={store.loading}><span class="bb-browser-loading" role="progressbar" aria-label={bbt("organization.loadingPage")} /></Show>
-  </form><Show when={store.error}><div class="bb-browser-error" role="alert"><span>{store.error}</span><button onClick={() => void run("navigate", { url: store.address || store.url })}>{bbt("retry")}</button></div></Show><div ref={host} class="bb-browser-host" /></div>
+  createEffect(() => { props.active; store.url; schedule() })
+  return (
+    <div class="bb-browser-panel">
+      <form class="bb-browser-toolbar" onSubmit={event => {
+        event.preventDefault()
+        void run("navigate", { url: store.address })
+      }}>
+        <div class="bb-browser-navigation">
+          <button type="button" title={bbt("back")} aria-label={bbt("back")} disabled={!store.canBack} onClick={() => void run("back")}>
+            <Icon name="arrow-left" size="small" />
+          </button>
+          <button type="button" title={bbt("forward")} aria-label={bbt("forward")} disabled={!store.canForward} onClick={() => void run("forward")}>
+            <Icon name="arrow-right" size="small" />
+          </button>
+          <span class="bb-browser-divider" aria-hidden="true" />
+          <button type="button" title={bbt(store.loading ? "cancel" : "reload")} aria-label={bbt(store.loading ? "cancel" : "reload")} onClick={() => void run(store.loading ? "stop" : "reload")}>
+            <Show when={store.loading} fallback={
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M16.67 3.33v5h-5M3.33 16.67v-5h5M4.22 7.5a6.67 6.67 0 0 1 11-2.5l1.45 1.67M3.33 13.33 4.78 15a6.67 6.67 0 0 0 11-2.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            }><Icon name="close-small" size="small" /></Show>
+          </button>
+        </div>
+        <input aria-label={bbt("address")} placeholder={bbt("organization.browserAddressPlaceholder")}
+          value={store.address} spellcheck={false} autocomplete="off"
+          onFocus={event => { setStore("editing", true); event.currentTarget.select() }}
+          onBlur={() => { if (!store.dirty) setStore("editing", false) }}
+          onInput={event => { generation++; setStore({ address: event.currentTarget.value, editing: true, dirty: true }) }}
+          onKeyDown={event => {
+            if (event.key !== "Escape") return
+            event.preventDefault()
+            event.stopPropagation()
+            setStore({ address: address(), editing: false, dirty: false })
+            event.currentTarget.blur()
+          }} />
+        <MenuV2 placement="bottom-end" onOpenChange={schedule}>
+          <MenuV2.Trigger type="button" class="bb-browser-actions" aria-label={bbt("organization.browserActions")} title={bbt("organization.browserActions")}>
+            <Icon name="dot-grid" size="small" />
+          </MenuV2.Trigger>
+          <MenuV2.Portal>
+            <MenuV2.Content>
+              <MenuV2.Item disabled={blank()} onSelect={() => void navigator.clipboard.writeText(store.url).catch(error => setStore("error", bbError(error)))}>
+                {bbt("organization.copyURL")}
+              </MenuV2.Item>
+              <MenuV2.Item disabled={blank()} onSelect={() => window.api.openExternal(store.url)}>
+                {bbt("organization.externalBrowser")}
+              </MenuV2.Item>
+            </MenuV2.Content>
+          </MenuV2.Portal>
+        </MenuV2>
+        <Show when={store.loading}><span class="bb-browser-loading" role="progressbar" aria-label={bbt("organization.loadingPage")} /></Show>
+      </form>
+      <Show when={store.error}>
+        <div class="bb-browser-error" role="alert"><span>{store.error}</span>
+          <button onClick={() => void run("navigate", { url: store.address || address() })}>{bbt("organization.browserRetry")}</button>
+        </div>
+      </Show>
+      <Show when={blank()}>{props.home}</Show>
+      <div ref={host} class="bb-browser-host" style={{ display: blank() ? "none" : undefined }} />
+    </div>
+  )
 }

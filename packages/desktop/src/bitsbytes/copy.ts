@@ -1,5 +1,7 @@
 // English is the initial product locale. All added product copy lives in this typed dictionary.
 export const copy = {
+  "organization.browserAddressPlaceholder": "Enter a URL",
+  "organization.browserRetry": "Retry",
   "organization.browserActions": "Browser actions", "organization.copyURL": "Copy address", "organization.externalBrowser": "Open in default browser", "organization.loadingPage": "Loading page",
   "bb.error.contextWindowInvalid": "This context window is no longer supported. Choose Recommended or another available size and resend.",
   "imageGeneration.title": "Image generation", "imageGeneration.hint": "Connect an OpenAI API key for image generation. API image charges are separate from your ChatGPT plan.",

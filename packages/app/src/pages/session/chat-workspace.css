@@ -3,9 +3,18 @@
 .bb-workspace-panel { position:relative; flex-shrink:0; min-width:0; min-height:0; flex-direction:column; border:1px solid var(--border-weak-base); border-radius:10px; overflow:visible; background:var(--background-base); }
 .bb-workspace-panel-overlay { position:absolute; inset:8px; z-index:1; }
 .bb-panel-header { display:flex; align-items:center; min-width:0; flex-shrink:0; padding:4px; gap:2px; border-bottom:1px solid var(--border-weak-base); }
-.bb-panel-tabs { display:flex; overflow:auto; min-width:0; gap:4px; }
+.bb-panel-tabs { display:flex; flex:1; overflow:auto; min-width:0; gap:4px; }
 .bb-panel-add { flex-shrink:0; display:flex; }
-.bb-panel-collapse { flex-shrink:0; display:flex; margin-left:auto; }
+.bb-panel-collapse { flex-shrink:0; display:flex; }
+.bb-panel-divider { display:block; flex-shrink:0; width:1px; height:18px; margin:0 5px; background:var(--border-weak-base); }
+.bb-panel-tools { padding:28px 24px; overflow:auto; height:100%; background:var(--surface-base); }
+.bb-panel-tools h2 { margin:0 0 24px; font-size:13px; font-weight:500; color:var(--text-strong); }
+.bb-panel-tools-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr)); gap:4px 16px; }
+.bb-panel-tools-grid>button { display:flex; align-items:center; gap:8px; min-width:0; min-height:40px; padding:8px 12px; border-radius:9px; background:var(--background-base); font-size:13px; text-align:left; }
+.bb-panel-tools-grid>button:hover:not(:disabled) { background:var(--surface-raised-base-hover); }
+.bb-panel-tools-grid>button:disabled { opacity:.45; }
+.bb-panel-tools-grid>button [data-component=icon] { flex-shrink:0; color:var(--text-weak); }
+.bb-panel-tools-grid>button [data-component=icon]:last-child:not(:first-child) { margin-left:auto; }
 .bb-panel-tabs>div { display:flex; max-width:220px; min-width:100px; align-items:center; border-radius:6px; color:var(--text-weak); }
 .bb-panel-tabs>div.active { background:var(--surface-raised-base); color:var(--text-strong); }
 .bb-panel-tabs button { height:29px; border-radius:5px; padding:0 6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }

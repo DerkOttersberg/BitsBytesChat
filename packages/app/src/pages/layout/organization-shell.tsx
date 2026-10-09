@@ -1217,68 +1217,65 @@ export function OrganizationShell(props: ParentProps) {
                 )}
               </Show>
             </Show>
-            <div class="bb-org-heading bb-org-heading-actions">
-              <span>{language.t("organization.recents")}</span>
-              <button
-                aria-label={language.t("organization.search")}
-                onClick={() => {
-                  setState("searchOpen", !state.searchOpen)
-                  queueMicrotask(() => searchInput?.focus())
-                }}
-              >
-                <Icon name="magnifying-glass" size="small" />
-              </button>
-              <MenuV2>
-                <MenuV2.Trigger aria-label={language.t("organization.filter")}>
-                  <Icon name="sliders" size="small" />
-                </MenuV2.Trigger>
-                <MenuV2.Portal>
-                  <MenuV2.Content>
-                    <MenuV2.Item onSelect={() => setState("sort", "updated")}>
-                      {language.t("organization.updated")}
-                    </MenuV2.Item>
-                    <MenuV2.Item onSelect={() => setState("sort", "created")}>
-                      {language.t("organization.created")}
-                    </MenuV2.Item>
-                    <MenuV2.Item onSelect={() => setState("archived", !state.archived)}>
-                      {language.t(state.archived ? "organization.showActive" : "organization.showArchived")}
-                    </MenuV2.Item>
-                  </MenuV2.Content>
-                </MenuV2.Portal>
-              </MenuV2>
-            </div>
-            <Show when={state.searchOpen}>
-              <input
-                ref={searchInput}
-                class="bb-org-search"
-                aria-label={language.t("organization.search")}
-                placeholder={language.t("organization.search")}
-                value={state.search}
-                onInput={(event) => setState("search", event.currentTarget.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") setState({ search: "", searchOpen: false })
-                }}
-              />
-            </Show>
-            <For each={visibleRecents()}>{chatRow}</For>
-            <Show when={!state.loading && !visibleRecents().length}>
-              <p class="bb-org-empty">{language.t("organization.noChats")}</p>
-            </Show>
-            <Show when={state.next}>
-              {pager(
-                () => refresh(true),
-                () => state.loading,
-              )}
-            </Show>
-            <Show when={state.drag?.projectID}>
-              <div
-                class="bb-org-unassign"
-                data-project-drop=""
-                classList={{ "drop-target": state.drag?.target === "" }}
-              >
-                {language.t("organization.removeFromProject")}
+            <section
+              class="bb-org-recents"
+              data-project-drop={state.drag?.projectID ? "" : undefined}
+              classList={{ "drop-target": !!state.drag?.projectID && state.drag.target === "" }}
+            >
+              <div class="bb-org-heading bb-org-heading-actions">
+                <span>{language.t("organization.recents")}</span>
+                <button
+                  aria-label={language.t("organization.search")}
+                  onClick={() => {
+                    setState("searchOpen", !state.searchOpen)
+                    queueMicrotask(() => searchInput?.focus())
+                  }}
+                >
+                  <Icon name="magnifying-glass" size="small" />
+                </button>
+                <MenuV2>
+                  <MenuV2.Trigger aria-label={language.t("organization.filter")}>
+                    <Icon name="sliders" size="small" />
+                  </MenuV2.Trigger>
+                  <MenuV2.Portal>
+                    <MenuV2.Content>
+                      <MenuV2.Item onSelect={() => setState("sort", "updated")}>
+                        {language.t("organization.updated")}
+                      </MenuV2.Item>
+                      <MenuV2.Item onSelect={() => setState("sort", "created")}>
+                        {language.t("organization.created")}
+                      </MenuV2.Item>
+                      <MenuV2.Item onSelect={() => setState("archived", !state.archived)}>
+                        {language.t(state.archived ? "organization.showActive" : "organization.showArchived")}
+                      </MenuV2.Item>
+                    </MenuV2.Content>
+                  </MenuV2.Portal>
+                </MenuV2>
               </div>
-            </Show>
+              <Show when={state.searchOpen}>
+                <input
+                  ref={searchInput}
+                  class="bb-org-search"
+                  aria-label={language.t("organization.search")}
+                  placeholder={language.t("organization.search")}
+                  value={state.search}
+                  onInput={(event) => setState("search", event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") setState({ search: "", searchOpen: false })
+                  }}
+                />
+              </Show>
+              <For each={visibleRecents()}>{chatRow}</For>
+              <Show when={!state.loading && !visibleRecents().length}>
+                <p class="bb-org-empty">{language.t("organization.noChats")}</p>
+              </Show>
+              <Show when={state.next}>
+                {pager(
+                  () => refresh(true),
+                  () => state.loading,
+                )}
+              </Show>
+            </section>
           </div>
         </div>
         <footer class="bb-org-account">

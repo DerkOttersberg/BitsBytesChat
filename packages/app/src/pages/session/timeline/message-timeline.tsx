@@ -1501,7 +1501,6 @@ export function MessageTimeline(props: {
                       placement="bottom"
                       buttonAppearance={settings.general.newLayoutDesigns() ? "v2" : "default"}
                     />
-                    {props.headerActions}
                     <Show when={!parentID()}>
                       <Show
                         when={settings.general.newLayoutDesigns()}
@@ -1837,6 +1836,7 @@ export function MessageTimeline(props: {
                         </KobaltePopover.Portal>
                       </KobaltePopover>
                     </Show>
+                    {props.headerActions}
                   </div>
                 )}
               </Show>

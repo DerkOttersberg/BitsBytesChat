@@ -1,4 +1,16 @@
-import { For, Show, Switch, Match, createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type JSX } from "solid-js"
+import {
+  For,
+  Show,
+  Switch,
+  Match,
+  createEffect,
+  createMemo,
+  createSignal,
+  onCleanup,
+  onMount,
+  untrack,
+  type JSX,
+} from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
 import { Icon } from "@opencode-ai/ui/icon"
@@ -116,8 +128,10 @@ export function ChatWorkspace(props: {
     }
     if (tab.kind === "file") session.tabs().close(tab.id)
     if (tab.kind === "browser") void platform.bitsbytes!.call("browser.close", { id: tab.id }).catch(fail)
-    remove(tab.id)
+    // Close the terminal's source state before removing its tab, otherwise the
+    // open-terminal effect can recreate the tab during the removal update.
     if (tab.kind === "terminal") session.view().terminal.close()
+    remove(tab.id)
   }
   const remove = (id: string) => {
     const index = store.tabs.findIndex((tab) => tab.id === id)
@@ -198,7 +212,9 @@ export function ChatWorkspace(props: {
       const detail = (event as CustomEvent).detail
       if (!detail || detail.handled || typeof detail.sessionID !== "string") return
       const imageOwner = detail.sessionID
-      const belongs = () => imageOwner === owner() || store.tabs.some(tab => tab.kind === "chat" && tab.id === imageOwner && tab.owner === owner())
+      const belongs = () =>
+        imageOwner === owner() ||
+        store.tabs.some((tab) => tab.kind === "chat" && tab.id === imageOwner && tab.owner === owner())
       if (!belongs()) return
       detail.handled = true
       const token = generation,
@@ -570,10 +586,45 @@ export function ChatWorkspace(props: {
     </MenuV2>
   )
   const panelToggle = () => (
-    <PanelToggle
-      expanded={!store.collapsed}
-      onToggle={() => setStore({ collapsed: !store.collapsed, menu: !store.tabs.length && store.collapsed })}
-    />
+    <PanelToggle expanded={!store.collapsed} onToggle={() => setStore({ collapsed: !store.collapsed, menu: false })} />
+  )
+  const panelTools = () => (
+    <div class="bb-panel-tools">
+      <h2>{language.t("organization.panelTools")}</h2>
+      <div class="bb-panel-tools-grid">
+        <button disabled={store.busy || !props.sessionID} onClick={() => void open("chat")}>
+          <Icon name="bubble-5" size="small" />
+          {language.t("bitsbytes.sideChat")}
+        </button>
+        <button disabled={store.busy} onClick={() => void open("terminal")}>
+          <Icon name="console" size="small" />
+          {language.t("bitsbytes.terminal")}
+        </button>
+        <button disabled={store.busy} onClick={() => void open("browser")}>
+          <Icon name="window-cursor" size="small" />
+          {language.t("organization.newPage")}
+        </button>
+        <MenuV2 placement="bottom-end" gutter={6}>
+          <MenuV2.Trigger disabled={store.busy}>
+            <Icon name="dot-grid" size="small" />
+            {language.t("organization.moreTools")}
+            <Icon name="chevron-down" size="small" />
+          </MenuV2.Trigger>
+          <MenuV2.Portal>
+            <MenuV2.Content>
+              <MenuV2.Item onSelect={() => void open("review")}>
+                <Icon name="branch" />
+                {language.t("bitsbytes.review")}
+              </MenuV2.Item>
+              <MenuV2.Item onSelect={() => void open("file")}>
+                <Icon name="open-file" />
+                {language.t("bitsbytes.file")}
+              </MenuV2.Item>
+            </MenuV2.Content>
+          </MenuV2.Portal>
+        </MenuV2>
+      </div>
+    </div>
   )
   return (
     <div class="bb-workspace" ref={workspace}>
@@ -583,7 +634,12 @@ export function ChatWorkspace(props: {
         inert={panelLayout().overlay && !store.collapsed}
         aria-hidden={panelLayout().overlay && !store.collapsed ? true : undefined}
       >
-        {props.chat(panelToggle())}
+        {props.chat(
+          <Show when={store.collapsed}>
+            <span class="bb-panel-divider" aria-hidden="true" />
+            {panelToggle()}
+          </Show>,
+        )}
       </div>
       <Show when={store.tabs.length || !store.collapsed}>
         <aside
@@ -634,11 +690,11 @@ export function ChatWorkspace(props: {
             <Show when={!store.collapsed}>
               <div class="bb-panel-add">{panelMenu()}</div>
             </Show>
-            <Show when={panelLayout().overlay}>
-              <div class="bb-panel-collapse">{panelToggle()}</div>
-            </Show>
+            <span class="bb-panel-divider" aria-hidden="true" />
+            <div class="bb-panel-collapse">{panelToggle()}</div>
           </div>
           <div class="bb-panel-body">
+            <Show when={!store.tabs.length}>{panelTools()}</Show>
             <For each={store.tabs}>
               {(tab) => (
                 <div class="bb-panel-content" style={{ display: tab.id === store.active ? "flex" : "none" }}>
@@ -676,6 +732,7 @@ export function ChatWorkspace(props: {
                         component={platform.browserPanel}
                         id={tab.id}
                         active={!store.collapsed && tab.id === store.active}
+                        home={panelTools()}
                       />
                     </Match>
                     <Match when={tab.kind === "source"}>

@@ -1,6 +1,6 @@
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import type { AsyncStorage, SyncStorage } from "@solid-primitives/storage"
-import type { Accessor, Component } from "solid-js"
+import type { Accessor, Component, JSX } from "solid-js"
 import type { DesktopMenuAction } from "../desktop-menu"
 import { ServerConnection } from "./server"
 import type { WslServersPlatform } from "../wsl/types"
@@ -35,7 +35,7 @@ type PlatformBase = {
   settingsPanels?: { id: string; title: string; component: Component }[]
   documentPanel?: Component<{ id: string; revision?: number }>
   runPanel?: Component<{ sessionID: string; kind: "plan" | "goal" }>
-  browserPanel?: Component<{ id: string; active: boolean }>
+  browserPanel?: Component<{ id: string; active: boolean; home?: JSX.Element }>
   providerSettings?: Component
   bitsbytes?: {
     call: <T = unknown>(method: string, args?: Record<string, unknown>) => Promise<T>

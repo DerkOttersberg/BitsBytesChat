@@ -21,12 +21,15 @@ export class BBBrowser {
   }
   private state(tab: Tab) {
     const web = tab.view.webContents
-    return { type: "browser" as const, id: tab.id, sessionID: tab.sessionID, url: web.getURL(), title: web.getTitle(), loading: web.isLoading(), canBack: web.navigationHistory.canGoBack(), canForward: web.navigationHistory.canGoForward() }
+    const url = web.getURL()
+    return { type: "browser" as const, id: tab.id, sessionID: tab.sessionID, url, title: url === "about:blank" ? "" : web.getTitle(), loading: web.isLoading(), canBack: web.navigationHistory.canGoBack(), canForward: web.navigationHistory.canGoForward() }
   }
   async open(sessionID: string, url: string, windowID?: number, signal?: AbortSignal) {
     signal?.throwIfAborted()
     if (!sessionID) throw new Error("bb.error.browserMissing")
-    const address = this.url(url || "https://www.google.com")
+    // Only our new-tab landing may be blank; user/agent navigation still uses
+    // the HTTP(S) validator below.
+    const address = url ? this.url(url) : "about:blank"
     const window = (windowID ? BrowserWindow.fromId(windowID) : BrowserWindow.getAllWindows()[0])
     if (!window) throw new Error("bb.error.browserMissing")
     const profile = session.fromPartition("persist:bitsbytes-browser")

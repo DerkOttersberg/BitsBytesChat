@@ -88,25 +88,15 @@
 .bb-org-row.dragging {
   opacity: 0.45;
 }
-.bb-org-project-group {
+.bb-org-project-group,
+.bb-org-recents {
   border-radius: 7px;
 }
 .bb-org-project-group.drop-target,
-.bb-org-unassign.drop-target {
+.bb-org-recents.drop-target {
   background: var(--surface-raised-base-hover);
   outline: 1px solid var(--border-focus);
   outline-offset: -1px;
-}
-.bb-org-unassign {
-  position: sticky;
-  bottom: 6px;
-  margin: 6px;
-  padding: 10px;
-  border: 1px dashed var(--border-weak-base);
-  border-radius: 7px;
-  background: var(--bb-navigation-background);
-  font-size: 12px;
-  text-align: center;
 }
 .bb-org-drag-preview {
   position: fixed;
