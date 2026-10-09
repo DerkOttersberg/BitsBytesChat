@@ -76,7 +76,6 @@
 }
 .bb-org-new-chat {
   flex-shrink: 0;
-  margin-bottom: 8px;
 }
 .bb-org-row.unread .bb-org-chat-link {
   font-weight: 600;
@@ -89,7 +88,10 @@
 .bb-org-row.dragging {
   opacity: 0.45;
 }
-.bb-org-row.drop-target,
+.bb-org-project-group {
+  border-radius: 7px;
+}
+.bb-org-project-group.drop-target,
 .bb-org-unassign.drop-target {
   background: var(--surface-raised-base-hover);
   outline: 1px solid var(--border-focus);
@@ -218,6 +220,21 @@
   place-items: center;
   width: 20px;
   height: 20px;
+}
+.bb-org-project-add {
+  opacity: 0;
+  pointer-events: none;
+}
+.bb-org-projects-heading:hover .bb-org-project-add,
+.bb-org-projects-heading:focus-within .bb-org-project-add {
+  opacity: 1;
+  pointer-events: auto;
+}
+@media (hover: none) {
+  .bb-org-project-add {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 .bb-org-row {
   display: flex;

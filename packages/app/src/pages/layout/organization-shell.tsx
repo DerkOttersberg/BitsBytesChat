@@ -71,7 +71,9 @@ export function OrganizationShell(props: ParentProps) {
     searchOpen: false,
     visitEpoch: 0,
     childLoading: {} as Record<string, boolean>,
-    drag: undefined as undefined | { id: string; title: string; x: number; y: number; target?: string },
+    drag: undefined as
+      | undefined
+      | { id: string; title: string; projectID?: string; x: number; y: number; target?: string },
   })
   const currentServer = createMemo(() => server.current ?? global.servers.list()[0])
   const client = createMemo(() =>
@@ -197,8 +199,8 @@ export function OrganizationShell(props: ParentProps) {
         : language.t("organization.error.request"),
     )
   const closeDrawer = () => setState("drawer", false)
-  const setView = (view: View) => {
-    setState({ view, drawer: false, error: "" })
+  const setView = (view: View, keepDrawer = false) => {
+    setState({ view, drawer: keepDrawer && state.drawer, error: "" })
     window.dispatchEvent(
       new CustomEvent("bitsbytes:utility-select", {
         detail: { tab: view === "skills" || view === "recordings" ? view : "chats" },
@@ -722,7 +724,8 @@ export function OrganizationShell(props: ParentProps) {
       hoverTimer: ReturnType<typeof setTimeout> | undefined,
       frame = 0
     const targetAt = (x: number, y: number) => {
-      const target = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-project-drop]")?.dataset.projectDrop
+      const hit = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-project-drop]")?.dataset.projectDrop
+      const target = hit === "" && !chat.projectID ? undefined : hit
       if (hoverTarget !== target) {
         hoverTarget = target
         if (hoverTimer) clearTimeout(hoverTimer)
@@ -741,12 +744,25 @@ export function OrganizationShell(props: ParentProps) {
         dragging = true
         source.setPointerCapture(event.pointerId)
         document.documentElement.dataset.bbSidebarDragging = "true"
-        setState("drag", { id: chat.id, title: chat.title, x: current.clientX, y: current.clientY })
+        setState("drag", {
+          id: chat.id,
+          title: chat.title,
+          projectID: chat.projectID,
+          x: current.clientX,
+          y: current.clientY,
+        })
         frame = requestAnimationFrame(scroll)
       }
       current.preventDefault()
       const target = targetAt(current.clientX, current.clientY)
-      setState("drag", { id: chat.id, title: chat.title, x: current.clientX, y: current.clientY, target })
+      setState("drag", {
+        id: chat.id,
+        title: chat.title,
+        projectID: chat.projectID,
+        x: current.clientX,
+        y: current.clientY,
+        target,
+      })
     }
     const scroll = () => {
       if (!state.drag || !scrollElement) return
@@ -1071,15 +1087,19 @@ export function OrganizationShell(props: ParentProps) {
         }}
       >
         <nav class="bb-org-utilities">
-          <button class="bb-org-utility" classList={{ active: state.view === "chat" }} onClick={home}>
+          <button
+            class="bb-org-utility bb-org-new-chat"
+            classList={{ active: state.view === "chat" && !activeID() }}
+            onClick={() => newChat()}
+          >
             <Icon name="bubble-5" size="small" />
-            {language.t("organization.home")}
+            {language.t("organization.newChat")}
           </button>
           <Show when={platform.bitsbytes}>
             <button
               class="bb-org-utility"
               classList={{ active: state.view === "recordings" }}
-              onClick={() => setView("recordings")}
+              onClick={() => setView("recordings", true)}
             >
               <Icon name="status" size="small" />
               {language.t("organization.recordings")}
@@ -1087,7 +1107,7 @@ export function OrganizationShell(props: ParentProps) {
             <button
               class="bb-org-utility"
               classList={{ active: state.view === "skills" }}
-              onClick={() => setView("skills")}
+              onClick={() => setView("skills", true)}
             >
               <Icon name="brain" size="small" />
               {language.t("organization.skills")}
@@ -1096,7 +1116,7 @@ export function OrganizationShell(props: ParentProps) {
               class="bb-org-utility"
               classList={{ active: state.view === "artifacts" }}
               onClick={() => {
-                setView("artifacts")
+                setView("artifacts", true)
                 void platform
                   .bitsbytes!.call<Artifact[]>("artifacts.list")
                   .then((artifacts) => setState("artifacts", artifacts))
@@ -1108,16 +1128,13 @@ export function OrganizationShell(props: ParentProps) {
             </button>
           </Show>
         </nav>
-        <div class="bb-org-chat-navigation" style={{ display: state.view === "chat" ? "flex" : "none" }}>
-          <button class="bb-org-utility bb-org-new-chat" onClick={() => newChat()}>
-            <Icon name="plus-small" size="small" />
-            {language.t("organization.newChat")}
-          </button>
+        <div class="bb-org-chat-navigation">
           <div class="bb-org-scroll" ref={scrollElement}>
             <Show when={!state.archived && !state.search}>
-              <div class="bb-org-heading bb-org-heading-actions">
+              <div class="bb-org-heading bb-org-heading-actions bb-org-projects-heading">
                 <span>{language.t("organization.projects")}</span>
                 <button
+                  class="bb-org-project-add"
                   aria-label={language.t("organization.newProject")}
                   onClick={() => setState("dialog", { kind: "project", value: "", directory: "" })}
                 >
@@ -1126,12 +1143,13 @@ export function OrganizationShell(props: ParentProps) {
               </div>
               <For each={orderedProjects()}>
                 {(project) => (
-                  <section data-project-id={project.id}>
-                    <div
-                      class="bb-org-row"
-                      data-project-drop={project.id}
-                      classList={{ "drop-target": state.drag?.target === project.id }}
-                    >
+                  <section
+                    class="bb-org-project-group"
+                    data-project-id={project.id}
+                    data-project-drop={project.id}
+                    classList={{ "drop-target": state.drag?.target === project.id }}
+                  >
+                    <div class="bb-org-row">
                       <button
                         class="bb-org-project-link"
                         aria-expanded={saved.expanded[project.id] !== false}
@@ -1236,7 +1254,7 @@ export function OrganizationShell(props: ParentProps) {
                 () => state.loading,
               )}
             </Show>
-            <Show when={state.drag}>
+            <Show when={state.drag?.projectID}>
               <div
                 class="bb-org-unassign"
                 data-project-drop=""

@@ -17,7 +17,7 @@ const data = join(profile, "BitsBytesChat")
 const directory = join(data, "workspace")
 const research = join(data, "Research folder")
 const design = join(data, "Design folder")
-const basename = process.env.BB_QA_REPORT || "sidebar-navigation"
+const basename = process.env.BB_QA_REPORT || "sidebar-refinement"
 const output = join(root, ".tools/qa/results")
 const report = { profile, checks: [], errors: [], screenshots: [], geometry: [], queryTimings: [], requests: 0 }
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -60,7 +60,7 @@ const heldRoutes = []
 let app, page, api, call
 try {
   app = await _electron.launch({
-    executablePath: process.env.BB_QA_EXECUTABLE || join(root, ".tools/qa/sidebar-navigation-package/win-unpacked/BitsBytesChat.exe"),
+    executablePath: process.env.BB_QA_EXECUTABLE || join(root, ".tools/qa/sidebar-refinement-package/win-unpacked/BitsBytesChat.exe"),
     ...(process.env.BB_QA_MAIN ? { args: [process.env.BB_QA_MAIN] } : {}),
     env: { ...process.env, BB_QA_ISOLATED: "1", BB_QA_HIDDEN: "1", BB_QA_CAPTURE: "1", LOCALAPPDATA: profile },
     timeout: 90000,
@@ -213,18 +213,19 @@ try {
   check("Repeatable migration preserves saved conversations; empty sessions have no sidebar row or project count")
 
   const utilities = page.locator(".bb-org-utilities")
-  assert.deepEqual((await utilities.getByRole("button").allTextContents()).map(text => text.trim()), ["Home", "Recordings", "Skills", "Artifacts"])
+  assert.deepEqual((await utilities.getByRole("button").allTextContents()).map(text => text.trim()), ["New chat", "Recordings", "Skills", "Artifacts"])
+  assert.equal(await utilities.getByRole("button", { name: "Home", exact: true }).count(), 0)
   assert.equal(await utilities.getByRole("button", { name: "Projects", exact: true }).count(), 0)
   assert.equal(await page.locator(".bb-org-sidebar").getByRole("button", { name: "View all", exact: true }).count(), 0)
   const newButton = page.locator(".bb-org-sidebar").getByRole("button", { name: "New chat", exact: true }).first()
   const utilityBox = await utilities.boundingBox()
   const newBox = await newButton.boundingBox()
-  assert.ok(newBox.y >= utilityBox.y + utilityBox.height - 1)
+  assert.ok(Math.abs(newBox.y - utilityBox.y) <= 1)
+  assert.equal(await page.locator(".bb-org-new-chat").count(), 1)
   await open(home)
-  await utilities.getByRole("button", { name: "Home", exact: true }).click()
   assert.match(await currentRoute(), new RegExp("/session/" + home.id + "$"))
   assert.equal(await page.locator(".bb-org-page").count(), 0)
-  check("Home is the chat workspace; New chat follows four utilities and Projects/View all dashboards are absent")
+  check("New chat replaces Home at the top; no duplicate New chat, Projects or View all navigation remains")
 
   await newButton.click()
   const draftURL = await poll(currentRoute, route => route.startsWith("/new-session?"), "ordinary draft route")
@@ -249,8 +250,9 @@ try {
   await editor().evaluate(node => { node.dataset.qaRetained = "ordinary" })
   for (const name of ["Recordings", "Skills", "Artifacts"]) {
     await utilities.getByRole("button", { name, exact: true }).click()
-    assert.equal(await page.locator(".bb-org-sidebar .bb-org-row[data-session-id]:visible").count(), 0)
-    assert.equal(await newButton.isVisible(), false)
+    assert.equal(await page.locator(".bb-org-sidebar .bb-org-row[data-session-id]:visible").count(), 5)
+    assert.equal(await page.locator(".bb-org-project-link:visible").count(), 2)
+    assert.equal(await newButton.isVisible(), true)
     assert.equal(await page.locator('[data-qa-retained="ordinary"]').count(), 1)
     assert.equal(await page.locator(".bb-org-account").isVisible(), true)
     const utilityFooter = await page.locator(".bb-org-sidebar").evaluate(element => {
@@ -265,12 +267,19 @@ try {
         await captures(`${scheme}-utility-navigation`)
       }
     }
-    await utilities.getByRole("button", { name: "Home", exact: true }).click()
+    await newButton.click()
     assert.equal(await currentRoute(), draftURL)
     assert.equal(await editor().textContent(), "Unsent ordinary conversation")
     assert.equal(await page.locator(".bb-org-chat-content").getByText("sidebar-draft.txt", { exact: true }).isVisible(), true)
   }
-  check("No project is the default; repeated New chat reuses the unsent draft and utilities hide chat navigation while retaining it")
+  await utilities.getByRole("button", { name: "Recordings", exact: true }).click()
+  await row(home).getByRole("button").first().click()
+  await editor().waitFor()
+  assert.match(await currentRoute(), new RegExp("/session/" + home.id + "$"))
+  await newButton.click()
+  assert.equal(await currentRoute(), draftURL)
+  assert.equal(await editor().textContent(), "Unsent ordinary conversation")
+  check("All utilities retain visible projects/chats; New chat reuses the draft and clicking a conversation restores its workspace")
   await page.reload()
   await page.locator(".bb-org-sidebar").waitFor({ timeout: 90000 })
   await poll(currentRoute, route => route === draftURL, "restored draft route")
@@ -300,7 +309,7 @@ try {
   const ordinary = await poll(() => org("/chats/query", "POST", { projectID: null }), result => result.data.length === 2, "ordinary first message").then(result => result.data.find(chat => chat.id !== home.id))
   await row(ordinary).waitFor()
   assert.equal(await page.locator(`.bb-org-row[data-session-id="${ordinary.id}"]`).count(), 1)
-  await page.locator(`.bb-workspace-chat[data-bb-chat="${ordinary.id}"]`).getByText("Completed the fictional sidebar QA request.", { exact: false }).waitFor({ timeout: 90000 })
+  await page.locator(`.bb-workspace-chat[data-bb-chat="${ordinary.id}"] p`).filter({ hasText: "Completed the fictional sidebar QA request." }).first().waitFor({ timeout: 90000 })
   await poll(async () => ({ run: await call("runs.get", { sessionID: ordinary.id }), status: (await api("/session/status"))[ordinary.id] }), value => !value.run.queue.length && !value.run.awaiting && (!value.status || value.status.type === "idle"), "completed ordinary fixture turn")
   check("Failed first Send retains its source; retry creates one durable unassigned conversation without an empty row")
   assert.equal((await draftTabs()).filter(tab => !tab.projectID).length, 0)
@@ -319,7 +328,20 @@ try {
     await dismiss.click()
   }
 
-  await page.locator(".bb-org-sidebar").getByRole("button", { name: "New project", exact: true }).click()
+  const projectAdd = page.locator(".bb-org-project-add")
+  await page.mouse.move(800, 400)
+  assert.equal(await projectAdd.evaluate(node => getComputedStyle(node).opacity), "0")
+  await page.locator(".bb-org-projects-heading").hover()
+  assert.equal(await projectAdd.evaluate(node => getComputedStyle(node).opacity), "1")
+  for (const scheme of ["dark", "light"]) {
+    await theme(scheme)
+    await captures(`${scheme}-project-add-hover`)
+  }
+  await page.mouse.move(800, 400)
+  await projectAdd.focus()
+  assert.equal(await projectAdd.evaluate(node => getComputedStyle(node).opacity), "1")
+  check("The project plus appears on heading hover and keyboard focus, while remaining hidden at rest")
+  await projectAdd.click()
   await page.getByRole("dialog").getByLabel("Name", { exact: true }).fill("Creative work")
   assert.equal(await page.getByRole("dialog").getByLabel("Default folder", { exact: true }).inputValue(), "")
   for (const scheme of ["dark", "light"]) {
@@ -351,7 +373,7 @@ try {
   const child = await poll(() => org("/chats/query", "POST", { projectID: creative.id }), result => result.data.length === 1, "project first message").then(result => result.data[0])
   assert.equal(child.directory.toLowerCase(), directory.toLowerCase())
   await row(child).waitFor()
-  await page.locator(`.bb-workspace-chat[data-bb-chat="${child.id}"]`).getByText("Completed the fictional sidebar QA request.", { exact: false }).waitFor({ timeout: 90000 })
+  await page.locator(`.bb-workspace-chat[data-bb-chat="${child.id}"] p`).filter({ hasText: "Completed the fictional sidebar QA request." }).first().waitFor({ timeout: 90000 })
   check("Name-only projects and unpinned projects are visible; project New chat reuses its draft and first Send assigns membership")
 
   await menu(child, undefined, true)
@@ -444,6 +466,10 @@ try {
   if ((await projectButton(creative).getAttribute("aria-expanded")) === "true") await projectButton(creative).click()
   await drag(child, projectButton(creative), false)
   await poll(() => projectButton(creative).getAttribute("aria-expanded"), value => value === "true", "drag hover expands project")
+  assert.equal(await page.locator(".bb-org-unassign").count(), 0)
+  const creativeGroup = page.locator(`section[data-project-id="${creative.id}"]`)
+  assert.equal(await creativeGroup.evaluate(node => getComputedStyle(node).outlineWidth), "1px")
+  assert.ok((await creativeGroup.boundingBox()).height > (await projectButton(creative).boundingBox()).height)
   const dragState = await page.locator(".bb-org-sidebar").evaluate(element => ({ text: element.innerText, cursor: getComputedStyle(document.body).cursor }))
   report.drag = dragState
   assert.notEqual(dragState.cursor, "not-allowed")
@@ -459,8 +485,14 @@ try {
   assert.equal(await editor().textContent(), composerBeforeInvalidDrop)
   assert.equal(await page.evaluate(() => window.__qaNativeDrags), 0)
   assert.equal(await page.getByText("Drop files here", { exact: false }).isVisible().catch(() => false), false)
-  await drag(child, projectButton(creative))
+  await drag(child, creativeGroup.locator(".bb-org-children"))
   await poll(() => membership(child, creative.id), value => value, "pointer project assignment")
+  await drag(child, page.locator(`section[data-project-id="${migrated[0].id}"] .bb-org-children`), false)
+  assert.equal(await page.locator(`section[data-project-id="${migrated[0].id}"]`).evaluate(node => getComputedStyle(node).outlineWidth), "1px")
+  assert.equal(await page.locator(".bb-org-unassign").isVisible(), true)
+  await page.keyboard.press("Escape")
+  await page.mouse.up()
+  assert.equal(await membership(child, creative.id), true)
   // The removal target exists only while a project member is being dragged.
   await row(child).scrollIntoViewIfNeeded()
   const source = await row(child).getByRole("button").first().boundingBox()
@@ -474,7 +506,7 @@ try {
   await page.mouse.up()
   await poll(() => membership(child, null), value => value, "pointer removal")
   assert.equal((await api("/session/" + child.id)).directory.toLowerCase(), directory.toLowerCase())
-  check("Pointer drag previews a project drop, Escape cancels, removal unassigns, and internal dragging emits no file/native drag")
+  check("Entire expanded folders accept and outline drops, including child rows; unassigned chats have no removal target; Escape and member removal work")
 
   const rejectMove = async route => {
     if (route.request().method() !== "PATCH" || route.request().postDataJSON()?.projectID !== creative.id) return route.continue()
@@ -753,17 +785,15 @@ try {
   await page.locator(".bb-org-sidebar.drawer").waitFor()
   await captures("narrow-drawer")
   await utilities.getByRole("button", { name: "Recordings", exact: true }).click()
-  assert.equal(await page.locator(".bb-org-sidebar").isVisible(), false)
-  await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click()
   await page.locator(".bb-org-sidebar.drawer").waitFor()
-  assert.equal(await page.locator(".bb-org-row[data-session-id]:visible").count(), 0)
+  assert.ok(await page.locator(".bb-org-row[data-session-id]:visible").count() > 0)
   const drawerFooter = await page.locator(".bb-org-sidebar").evaluate(element =>
     element.getBoundingClientRect().bottom - element.querySelector(".bb-org-account").getBoundingClientRect().bottom)
   assert.ok(Math.abs(drawerFooter) <= 1)
-  await utilities.getByRole("button", { name: "Home", exact: true }).click()
+  await newButton.click()
   assert.equal(await page.locator(".bb-org-sidebar").isVisible(), false)
   assert.equal(await page.locator(".bb-org-backdrop").count(), 0)
-  check("Narrow drawer hides chat navigation on utility views and closes cleanly when returning Home")
+  check("Narrow utility navigation keeps the drawer and chats open; New chat closes the drawer cleanly")
   assert.deepEqual(report.errors, [])
   await hidden()
   check("Zero renderer errors; all QA windows stayed hidden/unfocused and account/clipboard surfaces remained isolated")
