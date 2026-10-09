@@ -1,5 +1,7 @@
 # Bits & Bytes Chat — interface feature screenshots
 
+The latest cosmetic follow-up is shown in [Sidebar and titlebar finish](SIDEBAR_FINISH_SCREENSHOTS.md), with the matching top-bar/sidebar tint, aligned controls and removed dividers. The feature examples below preserve the preceding complete-interface candidate's captures.
+
 These are unedited captures of the final 0.3.5 candidate, taken in hidden isolated profiles with fictional conversations and local provider fixtures. They show Bits & Bytes Chat, not ChatGPT or Codex. The supplied sidebar screenshot guided the geometry and behavior; these captures do not establish whole-image pixel identity with another renderer.
 
 The candidate is `.tools/qa/interface-patch-accepted-r1-package/BitsBytesChat-win-x64.exe`. [Verification](../VERIFICATION.md) records its build audit, scoped tests and 44 final packaged checks. This gallery contains visible features; crash, unsupported-request and other diagnostic captures remain private QA output.

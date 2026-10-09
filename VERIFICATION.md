@@ -2,6 +2,14 @@
 
 All source follow-up work is consolidated on `main`. Former branch names below identify historical verification runs; they are no longer active development branches. The published `v0.3.4` release remains unchanged.
 
+## Sidebar and titlebar finish — 9 October 2026
+
+The requested cosmetic follow-up removes the sidebar's right-edge divider and the account/settings footer's top divider. The full-width titlebar, including the background under Windows caption controls, now shares the sidebar's theme tint. Chat and right-panel surfaces use the separate content tint. Top-left buttons have consistent 28px square targets and an 8px outer inset; the menu icon shares the sidebar navigation's horizontal center.
+
+App typecheck and production compilation pass. The exact new package passes the existing **14 hidden organization/navigation/browser checks**, with zero renderer errors. Additional measurements in the isolated visual harness verify both dividers at `0px`, equal titlebar/sidebar/caption backgrounds, all four top buttons at 28px with uniform spacing, and exact menu/navigation alignment at x=22 CSS px in dark/light themes at 100% and 125% scaling. The resolved navigation tints are `rgb(18,18,18)` / `rgb(248,248,248)`. Right-panel background differs from navigation, and native bounds, narrow layouts and final-tab closure still pass. No session/timeline execution code changed; the previous production performance and broader execution checks are retained without repeating them.
+
+The unsigned, unpublished **0.3.5** installer is `.tools/qa/sidebar-chrome-package/BitsBytesChat-win-x64.exe`, **175,758,101 bytes**, SHA-256 `e48ec31cc0fbb8dd2644a5801f49d315ced931a6132c553af21ccc5917dba8d9`. Its audit matches **1,837 compiled/runtime files**. Reports are `.tools/qa/results/sidebar-chrome-package.json` and `sidebar-chrome-organization.json`; the temporary visual instrumentation remains in ignored QA output. [Dark/light screenshots](docs/SIDEBAR_FINISH_SCREENSHOTS.md) show the actual new executable. The user's running app, account state and focus were preserved; the owned QA app and fixture server were closed.
+
 ## Complete interface and reliability patch — 9 October 2026
 
 The accepted ten-item plan is implemented together on `main`: the reference-style sidebar and durable chat projects; a compact browser and final-tab panel closure; rendered Markdown with Source; recorded image cards; readable tool operations and verified recovery; authoritative activity ownership; actual context limits; complete local product branding; and a separate, capability-gated OpenAI image API adapter. The [feature gallery](docs/INTERFACE_PATCH_SCREENSHOTS.md) contains actual captures of the final candidate, using fictional local QA conversations.

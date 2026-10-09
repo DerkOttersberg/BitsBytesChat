@@ -1,3 +1,25 @@
+.bb-organization-layout {
+  --bb-navigation-background: var(--background-base);
+  background: var(--bb-navigation-background);
+}
+.bb-org-titlebar {
+  background: var(--bb-navigation-background);
+}
+.bb-org-titlebar-controls {
+  padding: 0 8px;
+  gap: 0;
+}
+.bb-org-titlebar-controls [data-component="desktop-icon-button"],
+.bb-org-titlebar-controls > [data-component="icon-button-v2"],
+.bb-org-titlebar-controls [data-component="desktop-icon-button"] > button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  flex-shrink: 0;
+}
+.bb-organization-layout .bb-workspace-panel {
+  --background-base: var(--v2-background-bg-base);
+}
 .bb-organization-shell {
   display: flex;
   position: relative;
@@ -16,13 +38,9 @@
   flex: 0 0 var(--organization-width);
   width: var(--organization-width);
   min-height: 0;
-  background: var(--surface-base);
-  border-right: 1px solid var(--border-weak-base);
+  background: var(--bb-navigation-background, var(--background-base));
   font-size: 13px;
   padding: 8px 8px 0;
-}
-:root[data-color-scheme="dark"] .bb-org-sidebar {
-  background: #111111;
 }
 .bb-org-sidebar.collapsed {
   display: none;
@@ -171,7 +189,6 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  border-top: 1px solid var(--border-weak-base);
   margin: 12px -8px 0;
   padding: 10px 12px;
   min-height: 48px;

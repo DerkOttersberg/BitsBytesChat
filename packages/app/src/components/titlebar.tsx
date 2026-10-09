@@ -177,6 +177,7 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
         "h-9 bg-v2-background-bg-deep overflow-visible": useV2Titlebar(),
         "h-10 bg-background-base overflow-hidden": !useV2Titlebar(),
         "order-last": bottom(),
+        "bb-org-titlebar": !!platform.bitsbytes && useV2Titlebar(),
       }}
       style={{
         "min-height": minHeight(),
@@ -402,6 +403,7 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
                   "pb-2": bottom(),
                   "md:pl-2": macTrafficLights(),
                   "md:pl-4": !macTrafficLights(),
+                  "bb-org-titlebar-controls": !!platform.bitsbytes,
                 }}
               >
                 <ChannelIndicator debugTools={props.debugTools} />
