@@ -73,7 +73,16 @@ export function OrganizationShell(props: ParentProps) {
     childLoading: {} as Record<string, boolean>,
     drag: undefined as
       | undefined
-      | { id: string; title: string; projectID?: string; x: number; y: number; target?: string },
+      | {
+          id: string
+          title: string
+          projectID?: string
+          x: number
+          y: number
+          anchorX: number
+          anchorY: number
+          target?: string
+        },
   })
   const currentServer = createMemo(() => server.current ?? global.servers.list()[0])
   const client = createMemo(() =>
@@ -719,6 +728,9 @@ export function OrganizationShell(props: ParentProps) {
     const source = event.currentTarget as HTMLElement,
       startX = event.clientX,
       startY = event.clientY
+    const bounds = source.getBoundingClientRect()
+    const anchorX = Math.max(0, Math.min(1, (startX - bounds.left) / Math.max(1, bounds.width)))
+    const anchorY = Math.max(0, Math.min(1, (startY - bounds.top) / Math.max(1, bounds.height)))
     let dragging = false,
       hoverTarget: string | undefined,
       hoverTimer: ReturnType<typeof setTimeout> | undefined,
@@ -750,6 +762,8 @@ export function OrganizationShell(props: ParentProps) {
           projectID: chat.projectID,
           x: current.clientX,
           y: current.clientY,
+          anchorX,
+          anchorY,
         })
         frame = requestAnimationFrame(scroll)
       }
@@ -761,6 +775,8 @@ export function OrganizationShell(props: ParentProps) {
         projectID: chat.projectID,
         x: current.clientX,
         y: current.clientY,
+        anchorX,
+        anchorY,
         target,
       })
     }
@@ -1461,7 +1477,14 @@ export function OrganizationShell(props: ParentProps) {
       <Show when={state.drag}>
         {(drag) => (
           <Portal>
-            <div class="bb-org-drag-preview" style={{ left: `${drag().x + 14}px`, top: `${drag().y + 12}px` }}>
+            <div
+              class="bb-org-drag-preview"
+              style={{
+                left: `${drag().x}px`,
+                top: `${drag().y}px`,
+                transform: `translate(${-drag().anchorX * 100}%, ${-drag().anchorY * 100}%)`,
+              }}
+            >
               <Icon name="bubble-5" size="small" />
               <span>{drag().title}</span>
             </div>

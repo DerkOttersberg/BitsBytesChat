@@ -2,6 +2,14 @@
 
 All source follow-up work is consolidated on `main`. Former branch names below identify historical verification runs; they are no longer active development branches. The published `v0.3.4` release remains unchanged.
 
+## Sidebar drag cursor anchor — 9 October 2026
+
+The compact chat drag card no longer adds a fixed 14px horizontal/12px vertical gap beside the mouse. Pointer-down records the pickup position within the source row; the card stays anchored at that relative position as it moves, including when its width differs from the original row. Drop hit-testing and edge scrolling continue to use the actual cursor coordinates.
+
+App typecheck, production build, script syntax and whitespace checks pass. Focused hidden native QA verifies **33 alignments**, short/long titles, pickup near either end, both themes and 100%/125% scaling, plus **16 Escape cancellations** and actual project assignment without changing the execution folder. The exact packaged candidate also passes **nine alignment checks**, four cancellations and a saved drop at 125%, with zero renderer errors. No screenshots were taken. All QA-owned windows/processes were closed; the user's app, credentials and focus were preserved. Existing broader sidebar/lifecycle checks and the production benchmark are retained; session/timeline code is unchanged.
+
+The unsigned, unpublished **0.3.5** installer is `.tools/qa/sidebar-drag-anchor-package/BitsBytesChat-win-x64.exe`, **175,759,044 bytes**, SHA-256 `56f0f138fc975f8fe6d8d4710f216fcc3f2608b6f2027e3a7a57aac9620f2af7`. Its audit matches **1,839 compiled/runtime files**. Reproduce from `packages/desktop` with `node scripts/verify-sidebar-drag-anchor.mjs`, `BB_QA_EXECUTABLE` pointing at the package's `win-unpacked/BitsBytesChat.exe`, and `BB_QA_REPORT` selecting the report name. `BB_QA_SMOKE=1` runs the shorter packaged check; leave it unset for the full theme/scale matrix. Raw reports remain private under `.tools/qa/results/sidebar-drag-anchor-*.json`.
+
 ## Persistent sidebar and full-folder drops — 9 October 2026
 
 This follow-up applies the revised navigation request: New chat replaces Home at the top and uses the same chat-bubble icon. The Projects, Pinned chats and Recents section remains visible on Recordings, Skills and Artifacts. Utility selection also preserves an already-open narrow drawer; opening a conversation or New chat closes that drawer normally. Draft reuse, optional project selection, mounted conversations and retained panels are preserved.
