@@ -247,6 +247,7 @@ export type OrganizationChatsOutput = {
     readonly projectID?: string
     readonly projectName?: string
     readonly pinned: boolean
+    readonly unread?: boolean
     readonly order: number
     readonly created: number
     readonly updated: number
@@ -261,6 +262,7 @@ export type OrganizationChatInput = {
     readonly title?: string
     readonly projectID?: string | null
     readonly pinned?: boolean
+    readonly unread?: boolean
     readonly order?: number
     readonly archived?: boolean
   }["title"]
@@ -268,6 +270,7 @@ export type OrganizationChatInput = {
     readonly title?: string
     readonly projectID?: string | null
     readonly pinned?: boolean
+    readonly unread?: boolean
     readonly order?: number
     readonly archived?: boolean
   }["projectID"]
@@ -275,13 +278,23 @@ export type OrganizationChatInput = {
     readonly title?: string
     readonly projectID?: string | null
     readonly pinned?: boolean
+    readonly unread?: boolean
     readonly order?: number
     readonly archived?: boolean
   }["pinned"]
+  readonly unread?: {
+    readonly title?: string
+    readonly projectID?: string | null
+    readonly pinned?: boolean
+    readonly unread?: boolean
+    readonly order?: number
+    readonly archived?: boolean
+  }["unread"]
   readonly order?: {
     readonly title?: string
     readonly projectID?: string | null
     readonly pinned?: boolean
+    readonly unread?: boolean
     readonly order?: number
     readonly archived?: boolean
   }["order"]
@@ -289,6 +302,7 @@ export type OrganizationChatInput = {
     readonly title?: string
     readonly projectID?: string | null
     readonly pinned?: boolean
+    readonly unread?: boolean
     readonly order?: number
     readonly archived?: boolean
   }["archived"]
@@ -301,6 +315,7 @@ export type OrganizationChatOutput = {
   readonly projectID?: string
   readonly projectName?: string
   readonly pinned: boolean
+  readonly unread?: boolean
   readonly order: number
   readonly created: number
   readonly updated: number
@@ -369,6 +384,96 @@ export type AgentsListOutput = {
     }>
   }>
 }
+
+export type SessionsChildrenInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type SessionsChildrenOutput = {
+  readonly data: ReadonlyArray<{
+    readonly id: string
+    readonly parentID?: string
+    readonly projectID: string
+    readonly agent?: string
+    readonly model?: {
+      readonly id: string
+      readonly providerID: string
+      readonly variant?: string
+      readonly contextWindow?: number
+    }
+    readonly cost: number
+    readonly tokens: {
+      readonly input: number
+      readonly output: number
+      readonly reasoning: number
+      readonly cache: { readonly read: number; readonly write: number }
+    }
+    readonly time: { readonly created: number; readonly updated: number; readonly archived?: number }
+    readonly title: string
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly subpath?: string
+    readonly revert?: {
+      readonly messageID: string
+      readonly partID?: string
+      readonly snapshot?: string
+      readonly diff?: string
+      readonly files?: ReadonlyArray<{
+        readonly path: string
+        readonly status: "added" | "modified" | "deleted"
+        readonly additions: number
+        readonly deletions: number
+        readonly patch: string
+      }>
+    }
+  }>
+}["data"]
+
+export type SessionsForkInput = {
+  readonly sessionID: { readonly sessionID: string }["sessionID"]
+  readonly messageID?: { readonly messageID?: string; readonly inclusive?: boolean }["messageID"]
+  readonly inclusive?: { readonly messageID?: string; readonly inclusive?: boolean }["inclusive"]
+}
+
+export type SessionsForkOutput = {
+  readonly data: {
+    readonly id: string
+    readonly parentID?: string
+    readonly projectID: string
+    readonly agent?: string
+    readonly model?: {
+      readonly id: string
+      readonly providerID: string
+      readonly variant?: string
+      readonly contextWindow?: number
+    }
+    readonly cost: number
+    readonly tokens: {
+      readonly input: number
+      readonly output: number
+      readonly reasoning: number
+      readonly cache: { readonly read: number; readonly write: number }
+    }
+    readonly time: { readonly created: number; readonly updated: number; readonly archived?: number }
+    readonly title: string
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly subpath?: string
+    readonly revert?: {
+      readonly messageID: string
+      readonly partID?: string
+      readonly snapshot?: string
+      readonly diff?: string
+      readonly files?: ReadonlyArray<{
+        readonly path: string
+        readonly status: "added" | "modified" | "deleted"
+        readonly additions: number
+        readonly deletions: number
+        readonly patch: string
+      }>
+    }
+  }
+}["data"]
+
+export type SessionsRemoveInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type SessionsRemoveOutput = void
 
 export type SessionsListInput = {
   readonly workspace?: {

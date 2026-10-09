@@ -14,8 +14,11 @@ import { assertAttachmentBudget, createPickedFileAuthorizations } from "./attach
 import { getStore } from "./store"
 import { createStoreHandlers } from "./store-handlers"
 import {
+  consumeInitialConversation,
+  createMainWindow,
   getPinchZoomEnabled,
   getWindowID,
+  isRendererUrl,
   openExternalURL,
   openLocalFileURL,
   setPinchZoomEnabled,
@@ -27,6 +30,7 @@ import { createUpdaterSubscriptions } from "./updater-subscriptions"
 import { createDesktopDraftStore } from "./draft-store"
 import { nativeT } from "./native-translations"
 import type { BitsBytes } from "./bitsbytes"
+import { parseConversationWindowTarget } from "./conversation-window"
 
 const pickerFilters = (ext?: string[]) => {
   if (!ext || ext.length === 0) return undefined
@@ -59,9 +63,28 @@ type Deps = {
 }
 
 export function registerIpcHandlers(deps: Deps) {
+  ipcMain.handle("open-conversation-window", (event, value: unknown) => {
+    const win = requireConversationWindowSender(event)
+    const target = parseConversationWindowTarget(value)
+    if (!target) throw new Error("organization.error.windowTarget")
+    if (win.isDestroyed()) throw new Error("organization.error.windowTarget")
+    createMainWindow(undefined, target)
+  })
+  ipcMain.handle("consume-initial-conversation", (event) =>
+    consumeInitialConversation(requireConversationWindowSender(event)),
+  )
+  ipcMain.handle("write-clipboard-text", (event, text: unknown) => {
+    requireConversationWindowSender(event)
+    if (typeof text !== "string" || text.length > 20_000_000) throw new Error("organization.error.actionFailed")
+    if (!suppressNativeUI("clipboard-write")) clipboard.writeText(text)
+  })
   ipcMain.handle("bitsbytes:call", (event, method: string, args: Record<string, unknown>) => {
-    if (event.senderFrame !== event.sender.mainFrame || !BrowserWindow.fromWebContents(event.sender)) throw new Error("Invalid desktop sender")
-    return deps.bitsbytes.call(method, method.startsWith("browser.") ? { ...args, windowID: BrowserWindow.fromWebContents(event.sender)!.id } : args)
+    if (event.senderFrame !== event.sender.mainFrame || !BrowserWindow.fromWebContents(event.sender))
+      throw new Error("Invalid desktop sender")
+    return deps.bitsbytes.call(
+      method,
+      method.startsWith("browser.") ? { ...args, windowID: BrowserWindow.fromWebContents(event.sender)!.id } : args,
+    )
   })
   const drafts = createDesktopDraftStore(join(app.getPath("userData"), "drafts.sqlite"))
   const updaterSubscriptions = createUpdaterSubscriptions()
@@ -292,6 +315,20 @@ export function registerIpcHandlers(deps: Deps) {
       relaunch: deps.relaunch,
     })
   })
+}
+
+function requireConversationWindowSender(event: IpcMainInvokeEvent) {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (
+    !win ||
+    win.isDestroyed() ||
+    !getWindowID(win) ||
+    event.senderFrame !== event.sender.mainFrame ||
+    !isRendererUrl(event.senderFrame.url)
+  ) {
+    throw new Error("organization.error.windowTarget")
+  }
+  return win
 }
 
 export function sendMenuCommand(win: BrowserWindow, id: string) {

@@ -23,6 +23,8 @@ import { NEW_SESSION_CONTENT_WIDTH } from "@/pages/session/new-session-layout"
 import { Persist, persisted } from "@/utils/persist"
 import type { NewSessionDraftController } from "./new-session-draft-controller"
 import type { NewSessionWorkspaceController } from "./new-session-workspace-controller"
+import { ChatProjectPicker } from "./chat-project-picker"
+import { usePlatform } from "@/context/platform"
 
 const providerTipDismissalDuration = 30 * 24 * 60 * 60 * 1000
 
@@ -32,6 +34,7 @@ export function NewSessionView(props: {
   workspace: NewSessionWorkspaceController
 }) {
   const language = useLanguage()
+  const platform = usePlatform()
   return (
     <div class="@container relative flex flex-col min-h-0 h-full flex-1">
       <div
@@ -40,10 +43,7 @@ export function NewSessionView(props: {
       >
         <div class="absolute inset-x-0 top-[25.375%] flex justify-center px-6">
           <div class={NEW_SESSION_CONTENT_WIDTH}>
-            <div
-              data-component="bitsbytes-wordmark"
-              class="w-full aspect-[5/1] overflow-hidden"
-            >
+            <div data-component="bitsbytes-wordmark" class="w-full aspect-[5/1] overflow-hidden">
               <img
                 src={bitsBytesWordmark}
                 alt={language.t("app.brand")}
@@ -55,28 +55,40 @@ export function NewSessionView(props: {
             </div>
             <div class="mt-8 flex flex-col gap-8">
               <PromptInputV2Composer controller={props.input} />
-              <Show when={props.project.empty()}>
-                <PromptProjectAddButton controller={props.project} />
-              </Show>
-              <Show when={props.project.selected()}>
-                <div class="flex min-h-7 min-w-0 flex-col items-center justify-center gap-0 text-v2-text-text-faint sm:flex-row">
-                  <PromptProjectSelector controller={props.project} placement="bottom" />
-                  <Show
-                    when={props.workspace.bar.visible()}
-                    fallback={
-                      <PromptGitStatus branch={props.workspace.bar.branch()} noGit={!props.workspace.project.git()} />
-                    }
-                  >
-                    <PromptWorkspaceSelector
-                      value={props.workspace.selection.value()}
-                      projectRoot={props.workspace.project.root()}
-                      workspaces={props.workspace.project.workspaces()}
-                      branch={props.workspace.bar.branch()}
-                      onChange={props.workspace.selection.set}
-                      onDone={props.input.restoreFocus}
-                    />
-                  </Show>
-                </div>
+              <Show
+                when={platform.bitsbytes}
+                fallback={
+                  <>
+                    <Show when={props.project.empty()}>
+                      <PromptProjectAddButton controller={props.project} />
+                    </Show>
+                    <Show when={props.project.selected()}>
+                      <div class="flex min-h-7 min-w-0 flex-col items-center justify-center gap-0 text-v2-text-text-faint sm:flex-row">
+                        <PromptProjectSelector controller={props.project} placement="bottom" />
+                        <Show
+                          when={props.workspace.bar.visible()}
+                          fallback={
+                            <PromptGitStatus
+                              branch={props.workspace.bar.branch()}
+                              noGit={!props.workspace.project.git()}
+                            />
+                          }
+                        >
+                          <PromptWorkspaceSelector
+                            value={props.workspace.selection.value()}
+                            projectRoot={props.workspace.project.root()}
+                            workspaces={props.workspace.project.workspaces()}
+                            branch={props.workspace.bar.branch()}
+                            onChange={props.workspace.selection.set}
+                            onDone={props.input.restoreFocus}
+                          />
+                        </Show>
+                      </div>
+                    </Show>
+                  </>
+                }
+              >
+                <ChatProjectPicker folder={props.project} onDone={props.input.restoreFocus} />
               </Show>
             </div>
           </div>

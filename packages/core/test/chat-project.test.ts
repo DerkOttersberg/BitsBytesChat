@@ -3,11 +3,13 @@ import { Effect } from "effect"
 import { eq, sql } from "drizzle-orm"
 import { ChatOrganization } from "@opencode-ai/core/chat-project"
 import { ChatTitleSearch } from "@opencode-ai/core/chat-project/search"
+import { ChatEligibility } from "@opencode-ai/core/chat-project/eligibility"
 import { Database } from "@opencode-ai/core/database/database"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
-import { SessionTable } from "@opencode-ai/core/session/sql"
+import { SessionInputTable, SessionTable } from "@opencode-ai/core/session/sql"
+import { SessionMessage } from "@opencode-ai/schema/session-message"
 import { EventTable } from "@opencode-ai/core/event/sql"
 import { Event } from "@opencode-ai/schema/event"
 import { ChatProject } from "@opencode-ai/schema/chat-project"
@@ -17,7 +19,7 @@ import { SessionID } from "@opencode-ai/schema/session-id"
 import { testEffect } from "./lib/effect"
 
 const it = testEffect(AppNodeBuilder.build(LayerNode.group([Database.node, ChatOrganization.node])))
-const seed = Effect.fn(function* (count = 3, global = false) {
+const seed = Effect.fn(function* (count = 3, global = false, populated = true) {
   const db = (yield* Database.Service).db
   const projectID = global ? Project.ID.global : Project.ID.make("organization_repo")
   yield* db
@@ -44,10 +46,85 @@ const seed = Effect.fn(function* (count = 3, global = false) {
       .insert(SessionTable)
       .values(rows.slice(offset, offset + 100))
       .run()
+  if (populated)
+    for (let offset = 0; offset < rows.length; offset += 100)
+      yield* db
+        .insert(SessionInputTable)
+        .values(
+          rows.slice(offset, offset + 100).map((row) => ({
+            id: SessionMessage.ID.make("msg_" + row.id),
+            session_id: row.id,
+            prompt: { text: row.title },
+            delivery: "steer" as const,
+            admitted_seq: 0,
+          })),
+        )
+        .run()
   return rows
 })
 
 describe("chat organization", () => {
+  it.effect("only durable user inputs become visible in lists and project counts across both protocols", () =>
+    Effect.gen(function* () {
+      const db = (yield* Database.Service).db
+      const service = yield* ChatOrganization.Service
+      const rows = yield* seed(7, false, false)
+      const project = yield* service.create({ name: "Eligible chats" })
+      for (const row of rows) yield* service.chat(row.id, { projectID: project.id })
+      expect((yield* service.chats({})).data).toEqual([])
+      expect((yield* service.projects)[0].count).toBe(0)
+      yield* db
+        .insert(SessionInputTable)
+        .values({
+          id: SessionMessage.ID.make("msg_admitted"),
+          session_id: rows[0].id,
+          prompt: { text: "Queued before execution" },
+          delivery: "queue",
+          admitted_seq: 1,
+        })
+        .run()
+      yield* db.run(sql`INSERT INTO message (id, session_id, time_created, time_updated, data)
+        VALUES ('msg_v1_user', ${rows[1].id}, 1, 1, '{"role":"user"}')`)
+      yield* db.run(sql`INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data)
+        VALUES ('msg_v2_user', ${rows[2].id}, 'user', 1, 1, 1, '{}'),
+          ('msg_v2_shell', ${rows[3].id}, 'shell', 1, 1, 1, '{}'),
+          ('msg_v2_assistant', ${rows[4].id}, 'assistant', 1, 1, 1, '{}')`)
+      yield* db.run(sql`INSERT INTO message (id, session_id, time_created, time_updated, data)
+        VALUES ('msg_v1_assistant', ${rows[5].id}, 1, 1, '{"role":"assistant"}'),
+          ('msg_v1_damaged', ${rows[6].id}, 1, 1, 'damaged optional history')`)
+      expect((yield* service.chats({})).data.map((chat) => chat.id)).toEqual(
+        rows
+          .slice(0, 4)
+          .toReversed()
+          .map((row) => row.id),
+      )
+      expect((yield* service.projects)[0].count).toBe(4)
+      yield* db.update(SessionTable).set({ parent_id: rows[0].id }).where(eq(SessionTable.id, rows[3].id)).run()
+      expect((yield* service.projects)[0].count).toBe(3)
+      yield* db.delete(SessionInputTable).where(eq(SessionInputTable.session_id, rows[0].id)).run()
+      expect((yield* service.chats({})).data).toHaveLength(2)
+    }),
+  )
+  it.effect("manual unread defaults false, persists durably, and survives unrelated metadata updates", () =>
+    Effect.gen(function* () {
+      const db = (yield* Database.Service).db
+      const service = yield* ChatOrganization.Service
+      const rows = yield* seed()
+      expect((yield* service.chats({})).data.every((chat) => chat.unread === false)).toBe(true)
+      expect((yield* service.chat(rows[0].id, { unread: true })).unread).toBe(true)
+      const project = yield* service.create({ name: "Reading" })
+      yield* service.chat(rows[0].id, { pinned: true, projectID: project.id, title: "Unread renamed" })
+      expect((yield* service.chats({ projectID: project.id })).data[0].unread).toBe(true)
+      yield* service.remove(project.id)
+      expect((yield* service.chats({ pinned: true })).data[0].unread).toBe(true)
+      expect((yield* service.chat(rows[0].id, { unread: false })).unread).toBe(false)
+      const events = (yield* db.select().from(EventTable).all()).filter(
+        (event) =>
+          event.type === Event.versionedType(ChatProject.ChatChanged.type, 1) && event.data.unread !== undefined,
+      )
+      expect(events.map((event) => event.data.unread)).toEqual([true, false])
+    }),
+  )
   it.effect("moving and removing a project preserve execution directories and conversation rows", () =>
     Effect.gen(function* () {
       const db = (yield* Database.Service).db,
@@ -169,9 +246,12 @@ describe("chat organization", () => {
         (yield* service.chats({ search: "Chat 1", limit: 100 })).data.every((chat) => chat.title.includes("Chat 1")),
       ).toBe(true)
       const plan = yield* db.all<{ detail: string }>(
-        sql`EXPLAIN QUERY PLAN SELECT id FROM session WHERE parent_id IS NULL AND time_archived IS NULL ORDER BY time_updated DESC, id DESC LIMIT 51`,
+        sql`EXPLAIN QUERY PLAN SELECT id FROM session WHERE parent_id IS NULL AND time_archived IS NULL AND ${ChatEligibility.condition()} ORDER BY time_updated DESC, id DESC LIMIT 51`,
       )
       expect(plan.some((row) => row.detail.includes("session_sidebar_updated_idx"))).toBe(true)
+      for (const table of ["session_input", "message", "session_message"])
+        expect(plan.some((row) => row.detail.includes("SEARCH " + table) && row.detail.includes("INDEX"))).toBe(true)
+      expect(plan.some((row) => /SCAN (session|session_input|message|session_message)\b/.test(row.detail))).toBe(false)
       const searchPlan = yield* db.all<{ detail: string }>(
         sql`EXPLAIN QUERY PLAN SELECT id FROM session WHERE ${ChatTitleSearch.condition("Chat 19")}`,
       )

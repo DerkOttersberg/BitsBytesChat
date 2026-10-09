@@ -23,6 +23,7 @@ import { BBProvider } from "./bitsbytes-provider"
 import { modelConfiguration } from "./bitsbytes-models"
 import { repairPythonHome } from "./bitsbytes-runtime"
 import { dispatchEngine, engineRequest, inspectEngine } from "./bitsbytes-engine"
+import { conversationProtocol, removeOwnedConversation } from "./bitsbytes-conversations"
 import { readState, stateRecord } from "./bitsbytes-state"
 import { bbt } from "../bitsbytes/copy"
 import type { ServerReadyData } from "../preload/types"
@@ -208,7 +209,9 @@ export class BitsBytes {
       if (value.error) { pending.reject(new Error(value.error)); return }
       pending.resolve(value.result)
     })
-    worker.stderr.on("data", () => { /* Model progress must not leak source audio or credentials to logs. */ })
+    worker.stderr.on("data", () => {
+      /* Model progress must not leak source audio or credentials to logs. */
+    })
     const died = () => {
       if (this.worker !== worker) return
       this.worker = undefined
@@ -538,11 +541,48 @@ export class BitsBytes {
     if (method === "images.verify") return this.images.verify()
     if (method === "images.job") return this.images.job(String(args.id), "")
     if (method === "branch.open") {
-      const sessionID = String(args.sessionID), directory = String(args.directory)
-      const fork = await this.engineFetch<{ id: string }>(`/session/${encodeURIComponent(sessionID)}/fork`, { method: "POST", body: JSON.stringify({ messageID: args.messageID, inclusive: true }) }, directory)
-      const access = await this.call("access.get", { sessionID }) as { mode: string }
+      const sessionID = String(args.sessionID),
+        directory = String(args.directory)
+      if (
+        !/^ses_[a-zA-Z0-9_-]+$/.test(sessionID) ||
+        !isAbsolute(directory) ||
+        (args.messageID !== undefined &&
+          (typeof args.messageID !== "string" || !/^msg_[a-zA-Z0-9_-]+$/.test(args.messageID)))
+      )
+        throw new Error("bb.error.invalidRequest")
+      const server = await this.engine()
+      const protocol =
+        args.protocol === "v1" || args.protocol === "v2"
+          ? args.protocol
+          : (this.protocols.get(sessionID) ?? (await conversationProtocol(server, directory)))
+      const result = await engineRequest<{ id: string } | { data: { id: string } }>(
+        server,
+        `${protocol === "v2" ? "/api" : ""}/session/${encodeURIComponent(sessionID)}/fork`,
+        { method: "POST", body: JSON.stringify({ messageID: args.messageID, inclusive: true }) },
+        directory,
+      )
+      const fork = "data" in result ? result.data : result
+      const access = (await this.call("access.get", { sessionID })) as { mode: string }
       await this.call("access.set", { sessionID: fork.id, mode: access.mode })
       return fork
+    }
+    if (method === "conversation.remove") {
+      const sessionID = String(args.sessionID),
+        directory = String(args.directory)
+      if (!/^ses_[a-zA-Z0-9_-]+$/.test(sessionID) || !isAbsolute(directory)) throw new Error("bb.error.invalidRequest")
+      const server = await this.engine()
+      const protocol =
+        args.protocol === "v1" || args.protocol === "v2"
+          ? args.protocol
+          : (this.protocols.get(sessionID) ?? (await conversationProtocol(server, directory)))
+      const ids = await removeOwnedConversation({ server, protocol, sessionID, directory, runs: this.runs })
+      ids.forEach((id) => {
+        delete this.accessModes[id]
+        this.protocols.delete(id)
+      })
+      await this.persistState("access-modes.json", () => this.accessModes)
+      this.emit({ type: "refresh" })
+      return ids
     }
     if (method === "side.open") { await this.recoverSides(); return this.side.open(String(args.parentID), String(args.ownerID), String(args.directory), bbt("sideChat")) }
     if (method === "side.progress") return this.side.progress(String(args.sessionID))

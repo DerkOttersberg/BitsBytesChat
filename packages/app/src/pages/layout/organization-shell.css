@@ -64,9 +64,121 @@
 .bb-org-utilities {
   display: flex;
   flex-direction: column;
-  padding-bottom: 18px;
+  padding-bottom: 12px;
   flex-shrink: 0;
   gap: 1px;
+}
+.bb-org-chat-navigation {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.bb-org-new-chat {
+  flex-shrink: 0;
+  margin-bottom: 8px;
+}
+.bb-org-row.unread .bb-org-chat-link {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.bb-org-row.unread .bb-org-status {
+  background: var(--text-strong);
+  border-color: var(--text-strong);
+}
+.bb-org-row.dragging {
+  opacity: 0.45;
+}
+.bb-org-row.drop-target,
+.bb-org-unassign.drop-target {
+  background: var(--surface-raised-base-hover);
+  outline: 1px solid var(--border-focus);
+  outline-offset: -1px;
+}
+.bb-org-unassign {
+  position: sticky;
+  bottom: 6px;
+  margin: 6px;
+  padding: 10px;
+  border: 1px dashed var(--border-weak-base);
+  border-radius: 7px;
+  background: var(--bb-navigation-background);
+  font-size: 12px;
+  text-align: center;
+}
+.bb-org-drag-preview {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  max-width: 270px;
+  border-radius: 8px;
+  background: var(--background-base);
+  color: var(--text-base);
+  border: 1px solid var(--border-weak-base);
+  box-shadow: 0 8px 24px #0003;
+  font-size: 13px;
+}
+.bb-org-drag-preview span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+:root[data-bb-sidebar-dragging] * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+.bb-org-pager {
+  height: 24px;
+  padding: 4px 6px;
+  font-size: 12px;
+  color: var(--text-weak);
+}
+[data-component="menu-v2-content"].bb-org-chat-menu {
+  width: 236px;
+  min-width: 236px;
+}
+.bb-org-chat-menu [data-slot="menu-v2-item-content"] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.bb-draft-project-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--text-weak);
+}
+.bb-draft-project-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px;
+  padding: 4px 6px;
+  max-width: 240px;
+}
+.bb-draft-project-picker span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bb-draft-folder-picker {
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+.bb-draft-project-controls button:hover {
+  background: var(--surface-raised-base-hover);
+}
+.bb-org-modal summary {
+  color: var(--text-weak);
+  font-size: 12px;
+  cursor: pointer;
+  margin-top: 14px;
 }
 .bb-org-utility {
   display: flex;
@@ -188,8 +300,9 @@
 .bb-org-account {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
   gap: 8px;
-  margin: 12px -8px 0;
+  margin: auto -8px 0;
   padding: 10px 12px;
   min-height: 48px;
 }

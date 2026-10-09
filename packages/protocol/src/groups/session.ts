@@ -109,6 +109,53 @@ export const SessionsQuery = Schema.Struct({
 export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLocationMiddleware: Context.Key<I, S>) =>
   HttpApiGroup.make("server.session")
     .add(
+      HttpApiEndpoint.get("session.children", "/api/session/:sessionID/children", {
+        params: { sessionID: Session.ID },
+        success: Schema.Struct({ data: Schema.Array(Session.Info) }),
+        error: SessionNotFoundError,
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({ identifier: "v2.session.children", summary: "List owned child sessions" }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.post("session.fork", "/api/session/:sessionID/fork", {
+        params: { sessionID: Session.ID },
+        payload: Schema.Struct({
+          messageID: SessionMessage.ID.pipe(optional),
+          inclusive: Schema.Boolean.pipe(optional),
+        }),
+        success: Schema.Struct({ data: Session.Info }),
+        error: [SessionNotFoundError, InvalidRequestError],
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.fork",
+            summary: "Fork completed conversation history",
+            description:
+              "Create an independent root from a completed response without copying pending inputs or starting execution.",
+          }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.delete("session.remove", "/api/session/:sessionID", {
+        params: { sessionID: Session.ID },
+        success: HttpApiSchema.NoContent,
+        error: SessionNotFoundError,
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.remove",
+            summary: "Permanently delete a conversation",
+            description:
+              "Interrupt owned execution and delete this session and its parent-owned descendants. Independent forks are retained.",
+          }),
+        ),
+    )
+    .add(
       HttpApiEndpoint.get("session.list", "/api/session", {
         query: SessionsQuery,
         success: Schema.Struct({

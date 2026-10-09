@@ -7,8 +7,11 @@ import { createHomeScrollController } from "./home/home-scroll-controller"
 import { createHomeSessionSearchController } from "./home/home-session-search-controller"
 import { createHomeSessionsController } from "./home/home-sessions-controller"
 import { HomeSessions } from "./home/home-sessions"
+import { usePlatform } from "@/context/platform"
 
 export function NewHome() {
+  // The organization shell resumes the selected chat or creates an unsent draft.
+  if (usePlatform().bitsbytes) return <div class="flex-1 min-h-0" />
   const home = createHomeController()
   const projects = createHomeProjectsController(home)
   const sessions = createHomeSessionsController(home)

@@ -6,11 +6,12 @@ import { SessionEvent } from "../src/session-event"
 import { SessionTodo } from "../src/session-todo"
 import { SessionV1 } from "../src/session-v1"
 import { WorkspaceEvent } from "../src/workspace-event"
+import { ChatProject } from "../src/chat-project"
 
 describe("public event manifest", () => {
   test("owns the complete public event surface", () => {
-    expect(EventManifest.ServerDefinitions.length).toBe(55)
-    expect(EventManifest.Definitions.length).toBe(85)
+    expect(EventManifest.ServerDefinitions.length).toBe(60)
+    expect(EventManifest.Definitions.length).toBe(90)
     expect(SessionV1.Event.Definitions).toEqual([
       SessionV1.Event.Created,
       SessionV1.Event.Updated,
@@ -23,8 +24,8 @@ describe("public event manifest", () => {
       SessionV1.Event.Diff,
       SessionV1.Event.Error,
     ])
-    expect(EventManifest.Latest.size).toBe(85)
-    expect(EventManifest.Durable.size).toBe(32)
+    expect(EventManifest.Latest.size).toBe(90)
+    expect(EventManifest.Durable.size).toBe(36)
   })
 
   test("uses canonical definitions for current public events", () => {
@@ -42,11 +43,15 @@ describe("public event manifest", () => {
     expect(Reference.Event.Definitions).toEqual([Reference.Event.Updated])
     expect(EventManifest.Latest.has("ide.installed")).toBe(false)
     expect(IdeEvent.Definitions).toEqual([IdeEvent.Installed])
-    expect(EventManifest.Definitions.slice(40, 43)).toEqual([
+    for (const definition of [
       SessionV1.Event.PartDelta,
       SessionV1.Event.Diff,
       SessionV1.Event.Error,
+      ChatProject.Changed,
+      ChatProject.ChatChanged,
     ])
+      expect(EventManifest.Latest.get(definition.type)).toBe(definition)
+    expect(EventManifest.Durable.get("organization.chat.updated.1")).toBe(ChatProject.ChatChanged)
     expect(EventManifest.Durable.has("session.next.step.ended.1")).toBe(false)
     expect(EventManifest.Durable.get("session.next.step.ended.2")).toBe(SessionEvent.Step.Ended)
   })

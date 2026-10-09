@@ -14,6 +14,7 @@ import { SessionTable } from "./session/sql"
 import { ProjectTable } from "./project/sql"
 import { ChatOrganizationStateTable, ChatOrganizationTable, ChatProjectTable } from "./chat-project/sql"
 import { ChatTitleSearch } from "./chat-project/search"
+import { ChatEligibility } from "./chat-project/eligibility"
 
 export class Invalid extends Schema.TaggedErrorClass<Invalid>()("ChatOrganization.Invalid", {
   message: Schema.String,
@@ -64,6 +65,7 @@ const layer = Layer.effect(
       projectID: ChatOrganizationTable.project_id,
       projectName: ChatProjectTable.name,
       pinned: ChatOrganizationTable.pinned,
+      unread: ChatOrganizationTable.unread,
       order: ChatOrganizationTable.position,
       created: SessionTable.time_created,
       updated: SessionTable.time_updated,
@@ -83,6 +85,7 @@ const layer = Layer.effect(
       projectID: string | null
       projectName: string | null
       pinned: boolean | null
+      unread: boolean | null
       order: number | null
       created: number
       updated: number
@@ -93,6 +96,7 @@ const layer = Layer.effect(
       projectID: row.projectID ?? undefined,
       projectName: row.projectName ?? undefined,
       pinned: row.pinned ?? false,
+      unread: row.unread ?? false,
       order: row.order ?? 0,
       archived: row.archived ?? undefined,
     })
@@ -112,13 +116,19 @@ const layer = Layer.effect(
             .run()
             .pipe(Effect.orDie)
         }
-        if (input.projectID !== undefined || input.pinned !== undefined || input.order !== undefined) {
+        if (
+          input.projectID !== undefined ||
+          input.pinned !== undefined ||
+          input.unread !== undefined ||
+          input.order !== undefined
+        ) {
           yield* db
             .insert(ChatOrganizationTable)
             .values({
               session_id: input.sessionID,
               project_id: input.projectID,
               pinned: input.pinned,
+              unread: input.unread,
               position: input.order,
             })
             .onConflictDoUpdate({
@@ -126,6 +136,7 @@ const layer = Layer.effect(
               set: {
                 ...(input.projectID !== undefined ? { project_id: input.projectID } : {}),
                 ...(input.pinned !== undefined ? { pinned: input.pinned } : {}),
+                ...(input.unread !== undefined ? { unread: input.unread } : {}),
                 ...(input.order !== undefined ? { position: input.order } : {}),
               },
             })
@@ -147,6 +158,7 @@ const layer = Layer.effect(
               eq(SessionTable.id, ChatOrganizationTable.session_id),
               isNull(SessionTable.time_archived),
               isNull(SessionTable.parent_id),
+              ChatEligibility.condition(),
             ),
           )
           .groupBy(ChatProjectTable.id)
@@ -210,6 +222,7 @@ const layer = Layer.effect(
         const column = input.sort === "created" ? SessionTable.time_created : SessionTable.time_updated
         const conditions: SQL[] = [
           isNull(SessionTable.parent_id),
+          ChatEligibility.condition(),
           input.archived ? isNotNull(SessionTable.time_archived) : isNull(SessionTable.time_archived),
         ]
         if (input.projectID !== undefined)

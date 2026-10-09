@@ -12,7 +12,12 @@ try {
   await app.evaluate(({ BrowserWindow }) => { for (const window of BrowserWindow.getAllWindows()) { window.webContents.setBackgroundThrottling(false); window.hide() } })
   const state = await page.evaluate(() => window.api.bitsbytes.call('state'))
   const server = await page.evaluate(() => window.api.awaitInitialization())
-  // Engine initialization can finish before the renderer's navigation listener mounts.
+  // The conversation shell can mount after engine initialization. Explicit New
+  // chat works with both the current sidebar and the preceding Home dashboard.
+  const newChat = page.locator('.bb-org-new-chat')
+  await page.locator('.bb-org-sidebar').waitFor({ timeout: 90000 })
+  if (await newChat.count()) await newChat.click()
+  else await page.evaluate(() => window.dispatchEvent(new CustomEvent('bitsbytes:new-chat')))
   await page.locator('[contenteditable=true]').first().waitFor({ timeout: 90000 })
   const directory = join(state.root, 'workspace')
   const headers = { 'content-type': 'application/json', 'x-opencode-directory': encodeURIComponent(directory) }

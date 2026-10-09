@@ -17,6 +17,12 @@ import type {
   LocationGetOutput,
   AgentsListInput,
   AgentsListOutput,
+  SessionsChildrenInput,
+  SessionsChildrenOutput,
+  SessionsForkInput,
+  SessionsForkOutput,
+  SessionsRemoveInput,
+  SessionsRemoveOutput,
   SessionsListInput,
   SessionsListOutput,
   SessionsCreateInput,
@@ -350,6 +356,7 @@ export function make(options: ClientOptions) {
               title: input["title"],
               projectID: input["projectID"],
               pinned: input["pinned"],
+              unread: input["unread"],
               order: input["order"],
               archived: input["archived"],
             },
@@ -401,6 +408,40 @@ export function make(options: ClientOptions) {
         ),
     },
     sessions: {
+      children: (input: SessionsChildrenInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsChildrenOutput }>(
+          {
+            method: "GET",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/children`,
+            successStatus: 200,
+            declaredStatuses: [404, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      fork: (input: SessionsForkInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsForkOutput }>(
+          {
+            method: "POST",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/fork`,
+            body: { messageID: input["messageID"], inclusive: input["inclusive"] },
+            successStatus: 200,
+            declaredStatuses: [404, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      remove: (input: SessionsRemoveInput, requestOptions?: RequestOptions) =>
+        request<SessionsRemoveOutput>(
+          {
+            method: "DELETE",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}`,
+            successStatus: 204,
+            declaredStatuses: [404, 400, 401],
+            empty: true,
+          },
+          requestOptions,
+        ),
       list: (input?: SessionsListInput, requestOptions?: RequestOptions) =>
         request<SessionsListOutput>(
           {

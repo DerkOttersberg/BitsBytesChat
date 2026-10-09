@@ -42,5 +42,6 @@ export const migrations = (
     import("./migration/20260622202450_simplify_session_input"),
     import("./migration/20261008210009_chat_organization"),
     import("./migration/20261008222000_chat_title_search"),
+    import("./migration/20261009080427_chat_unread"),
   ])
 ).map((module) => module.default) satisfies DatabaseMigration.Migration[]

@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "487662c7-5a5f-4bf6-80e6-d48e22bf7f32",
+  "id": "7a324e67-434d-4d17-8446-31b77af9bd95",
   "prevIds": [
-    "f14a9b18-8207-487e-a3d3-227e629ba9ad"
+    "487662c7-5a5f-4bf6-80e6-d48e22bf7f32"
   ],
   "ddl": [
     {
@@ -431,6 +431,16 @@
       "default": "false",
       "generated": null,
       "name": "pinned",
+      "entityType": "columns",
+      "table": "chat_organization"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "name": "unread",
       "entityType": "columns",
       "table": "chat_organization"
     },

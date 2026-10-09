@@ -11,6 +11,15 @@ import {
 } from "./bitsbytes-runs"
 import type { ServerReadyData } from "../preload/types"
 
+export class EngineResponseError extends Error {
+  constructor(
+    readonly status: number,
+    body: string,
+  ) {
+    super(`${bbt("brand")} ${status}: ${body.slice(0, 500)}`)
+  }
+}
+
 // Metadata is safe to poll again after a stalled read. Mutations can already
 // have been admitted, so they retain the caller's explicit cancellation policy.
 export async function engineRequest<T = unknown>(
@@ -33,7 +42,7 @@ export async function engineRequest<T = unknown>(
   const signal = deadline && options.signal ? AbortSignal.any([deadline, options.signal]) : (deadline ?? options.signal)
   return fetch(server.url + path, { ...options, headers, signal })
     .then(async (response) => {
-      if (!response.ok) throw new Error(`${bbt("brand")} ${response.status}: ${(await response.text()).slice(0, 500)}`)
+      if (!response.ok) throw new EngineResponseError(response.status, await response.text())
       return response.status === 204 ? (undefined as T) : ((await response.json()) as T)
     })
     .catch((error) => {
@@ -58,11 +67,19 @@ export async function inspectEngine(
   const protocol = prompt.protocol ?? protocols.get(prompt.sessionID) ?? (legacy?.healthy === true ? "v1" : "v2")
   protocols.set(prompt.sessionID, protocol)
   if (protocol === "v1") {
-    const waiting = options.readWaitingState ? await Promise.all([read<{ sessionID: string }[]>("/question"), read<{ sessionID: string }[]>("/permission")])
-      .then(groups => groups.some(rows => rows.some(row => row.sessionID === prompt.sessionID)), () => true) : undefined
+    const waiting = options.readWaitingState
+      ? await Promise.all([
+          read<{ sessionID: string }[]>("/question"),
+          read<{ sessionID: string }[]>("/permission"),
+        ]).then(
+          (groups) => groups.some((rows) => rows.some((row) => row.sessionID === prompt.sessionID)),
+          () => true,
+        )
+      : undefined
     const summary =
       options.readBusyMessages === false ? await read<Record<string, { type: string }>>("/session/status") : undefined
-    if (summary?.[prompt.sessionID] && summary[prompt.sessionID].type !== "idle") return { busy: true, waiting, messages: [] }
+    if (summary?.[prompt.sessionID] && summary[prompt.sessionID].type !== "idle")
+      return { busy: true, waiting, messages: [] }
     const state = await Promise.all([
       summary ?? read<Record<string, { type: string }>>("/session/status"),
       read<
@@ -93,14 +110,25 @@ export async function inspectEngine(
         receipt: row.info.execution,
         assistant: row.info.role === "assistant",
         parentID: typeof row.info.parentID === "string" ? row.info.parentID : undefined,
-        created: typeof row.info.time?.created === "number" && Number.isFinite(row.info.time.created) && row.info.time.created >= 0 ? row.info.time.created : undefined,
-        aborted: Boolean(row.info.error && typeof row.info.error === "object" && "name" in row.info.error && row.info.error.name === "MessageAbortedError"),
+        created:
+          typeof row.info.time?.created === "number" &&
+          Number.isFinite(row.info.time.created) &&
+          row.info.time.created >= 0
+            ? row.info.time.created
+            : undefined,
+        aborted: Boolean(
+          row.info.error &&
+            typeof row.info.error === "object" &&
+            "name" in row.info.error &&
+            row.info.error.name === "MessageAbortedError",
+        ),
         text: row.parts
           .filter((part) => part.type === "text")
           .map((part) => part.text ?? "")
           .join("\n"),
         tokens: (row.info.tokens?.input ?? 0) + (row.info.tokens?.output ?? 0),
-        tools: row.parts.filter((part) => part.type === "tool" && !/(?:goal_progress|get_goal)$/.test(part.tool ?? "")).length,
+        tools: row.parts.filter((part) => part.type === "tool" && !/(?:goal_progress|get_goal)$/.test(part.tool ?? ""))
+          .length,
         progress: row.parts.some((part) => part.type === "tool" && !/(?:goal_progress|get_goal)$/.test(part.tool ?? ""))
           ? createHash("sha256")
               .update(
@@ -121,10 +149,15 @@ export async function inspectEngine(
       })),
     }
   }
-  const waiting = options.readWaitingState ? await Promise.all([
-    read<{ data: unknown[] }>(`/api/session/${encodeURIComponent(prompt.sessionID)}/question`),
-    read<{ data: unknown[] }>(`/api/session/${encodeURIComponent(prompt.sessionID)}/permission`),
-  ]).then(groups => groups.some(group => group.data.length > 0), () => true) : undefined
+  const waiting = options.readWaitingState
+    ? await Promise.all([
+        read<{ data: unknown[] }>(`/api/session/${encodeURIComponent(prompt.sessionID)}/question`),
+        read<{ data: unknown[] }>(`/api/session/${encodeURIComponent(prompt.sessionID)}/permission`),
+      ]).then(
+        (groups) => groups.some((group) => group.data.length > 0),
+        () => true,
+      )
+    : undefined
   const summary =
     options.readBusyMessages === false
       ? await read<{ data: Record<string, unknown> }>("/api/session/active")
@@ -162,8 +195,12 @@ export async function inspectEngine(
           .join("\n") ??
         "",
       tokens: (row.tokens?.input ?? 0) + (row.tokens?.output ?? 0),
-      tools: row.content?.filter((part) => part.type === "tool" && !/(?:goal_progress|get_goal)$/.test(part.name ?? "")).length ?? 0,
-      progress: row.content?.some((part) => part.type === "tool" && !/(?:goal_progress|get_goal)$/.test(part.name ?? ""))
+      tools:
+        row.content?.filter((part) => part.type === "tool" && !/(?:goal_progress|get_goal)$/.test(part.name ?? ""))
+          .length ?? 0,
+      progress: row.content?.some(
+        (part) => part.type === "tool" && !/(?:goal_progress|get_goal)$/.test(part.name ?? ""),
+      )
         ? createHash("sha256")
             .update(
               JSON.stringify(
@@ -199,7 +236,12 @@ export async function dispatchEngine(
     if (options.signal?.aborted) return "not-sent"
     if (options.protocol === "v2" && prompt.resume) {
       attempted = true
-      await engineRequest(server, `/api/session/${encodeURIComponent(prompt.sessionID)}/resume`, { method: "POST", signal: options.signal }, prompt.directory)
+      await engineRequest(
+        server,
+        `/api/session/${encodeURIComponent(prompt.sessionID)}/resume`,
+        { method: "POST", signal: options.signal },
+        prompt.directory,
+      )
       return
     }
     // Source preparation can outlast Stop. Check the same cancellation signal
@@ -253,7 +295,12 @@ export async function dispatchEngine(
           method: "POST",
           signal: options.signal,
           body: JSON.stringify({
-            model: { id: prompt.model.modelID, providerID: prompt.model.providerID, variant: prompt.variant, contextWindow: prompt.model.contextWindow },
+            model: {
+              id: prompt.model.modelID,
+              providerID: prompt.model.providerID,
+              variant: prompt.variant,
+              contextWindow: prompt.model.contextWindow,
+            },
           }),
         },
         prompt.directory,

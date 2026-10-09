@@ -3,6 +3,7 @@ import type { WslServersPlatform } from "@opencode-ai/app/wsl/types"
 import type { UpdaterState } from "@opencode-ai/app/updater"
 import type { DesktopNativeBundle } from "@opencode-ai/app/i18n/desktop-native"
 import type { BBAPI } from "../bitsbytes/types"
+import type { ConversationWindowTarget } from "@opencode-ai/app/conversation-window"
 export type {
   WslDistroProbe,
   WslInstalledDistro,
@@ -73,6 +74,9 @@ export type ElectronAPI = {
   draftBlobGet: (id: string) => Promise<ArrayBuffer | null>
 
   getWindowID: () => Promise<string>
+  openConversationWindow: (target: ConversationWindowTarget) => Promise<void>
+  consumeInitialConversation: () => Promise<ConversationWindowTarget | null>
+  writeClipboardText: (text: string) => Promise<void>
   onMenuCommand: (cb: (id: string) => void) => () => void
   onDeepLink: (cb: (urls: string[]) => void) => () => void
 

@@ -17,6 +17,8 @@ import { createWindowRegistry } from "./window-registry"
 import { safeWindowURL } from "./window-state"
 import { resolveExternalURL, resolveLocalFilePath } from "./external-url"
 import { hiddenQA, offscreenQA, suppressNativeUI } from "./qa-mode"
+import type { ConversationWindowTarget } from "@opencode-ai/app/conversation-window"
+import { createConversationWindowTargets } from "./conversation-window"
 
 const root = dirname(fileURLToPath(import.meta.url))
 const rendererRoot = join(root, "../renderer")
@@ -54,6 +56,7 @@ let relaunchHandler = () => {
 const titlebarThemes = new WeakMap<BrowserWindow, Partial<TitlebarTheme>>()
 const pinchZoomEnabled = new WeakMap<BrowserWindow, boolean>()
 const windowIDs = new WeakMap<BrowserWindow, string>()
+const conversationTargets = createConversationWindowTargets<BrowserWindow>()
 const registry = createWindowRegistry<BrowserWindow>({
   read: () => getStore().get(WINDOW_IDS_KEY),
   write: (ids) => getStore().set(WINDOW_IDS_KEY, ids),
@@ -147,6 +150,10 @@ export function getWindowID(win: BrowserWindow) {
   return windowIDs.get(win)
 }
 
+export function consumeInitialConversation(win: BrowserWindow) {
+  return conversationTargets.consume(win)
+}
+
 export function getLastFocusedWindow() {
   const focused = BrowserWindow.getFocusedWindow()
   if (focused) return focused
@@ -166,7 +173,7 @@ export function setDockIcon() {
   if (!icon.isEmpty()) app.dock?.setIcon(icon)
 }
 
-export function createMainWindow(id: string = randomUUID()) {
+export function createMainWindow(id: string = randomUUID(), target?: ConversationWindowTarget) {
   const state = windowState({
     file: windowStateFile(id),
     defaultWidth: 1280,
@@ -226,6 +233,7 @@ export function createMainWindow(id: string = randomUUID()) {
 
   state.manage(win)
   registerWindow(win, id)
+  if (target) conversationTargets.seed(win, target)
   wireFullscreen(win)
   loadWindow(win, "index.html")
   wireZoom(win)
@@ -485,20 +493,27 @@ function addDocumentPolicy(response: Response, file: string) {
 }
 
 function allowRendererPermissions(win: BrowserWindow) {
-  const webContentsId = win.webContents.id
-
   win.webContents.session.setPermissionRequestHandler((webContents, permission, callback, details) => {
-    if (hiddenQA() && permission === notificationPermission) { callback(false); return }
+    if (hiddenQA() && permission === notificationPermission) {
+      callback(false)
+      return
+    }
+    const owner = BrowserWindow.fromWebContents(webContents)
     callback(
       rendererPermissions.has(permission) &&
         isTrustedRendererUrl(details.requestingUrl) &&
-        webContents.id === webContentsId,
+        !!owner &&
+        !owner.isDestroyed() &&
+        !!getWindowID(owner) &&
+        owner.webContents === webContents,
     )
   })
   win.webContents.session.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
     if (hiddenQA() && permission === notificationPermission) return false
     if (!rendererPermissions.has(permission)) return false
-    if (webContents && webContents.id !== webContentsId) return false
+    if (!webContents) return false
+    const owner = BrowserWindow.fromWebContents(webContents)
+    if (!owner || owner.isDestroyed() || !getWindowID(owner) || owner.webContents !== webContents) return false
     return isTrustedRendererUrl(details.requestingUrl) || isTrustedRendererUrl(requestingOrigin)
   })
 }
@@ -513,7 +528,7 @@ function addRendererHeaders(value: string, headers: Record<string, any>) {
   if (isRendererUrl(value, true)) upsertKeyValue(headers, documentPolicyHeader, [jsCallStacksDocumentPolicy])
 }
 
-function isRendererUrl(value?: string, html = false) {
+export function isRendererUrl(value?: string, html = false) {
   if (!value || !URL.canParse(value)) return false
   const url = new URL(value)
   if (html && !url.pathname.endsWith(".html")) return false

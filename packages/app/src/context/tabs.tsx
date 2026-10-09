@@ -4,7 +4,7 @@ import { createStore, produce } from "solid-js/store"
 import { Persist, persisted, removePersisted, draftPersistedKeys } from "@/utils/persist"
 import { ServerConnection, useServer } from "./server"
 import { createEffect, getOwner, onCleanup, startTransition } from "solid-js"
-import { useLocation, useNavigate, useParams } from "@solidjs/router"
+import { useLocation, useNavigate } from "@solidjs/router"
 import { usePlatform } from "./platform"
 import { uuid } from "@/utils/uuid"
 import { SessionTabsRemovedDetail } from "@/components/titlebar-session-events"
@@ -13,6 +13,7 @@ import { createTabMemory } from "./tab-memory"
 import { nextTabAfterClose, pushClosedTab, removeClosedTabs, takeClosedTab, type ClosedTab } from "./closed-tabs"
 import { createDraftPromptSession, type PromptModel } from "./prompt-state"
 import { migrateTabs } from "./tab-migration"
+import { removeConversationTabs } from "./tab-removal"
 
 export type SessionTab = {
   type: "session"
@@ -70,12 +71,12 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
     const [info, setInfo] = persisted(Persist.window("tabs.info"), createStore<Record<string, TabInfo>>({}))
     const [closed, setClosed, , closedReady] = persisted(Persist.window("tabs.closed"), createStore<ClosedTab[]>([]))
 
-    const params = useParams()
     const navigate = useNavigate()
     const location = useLocation()
     const memory = createTabMemory(getOwner())
 
     const closing = new Set<string>()
+    const openingDrafts = new Map<string, Promise<DraftTab>>()
     let recentWrite = 0
     let recentValue: string | undefined
 
@@ -222,6 +223,28 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
         })
         return tab
       },
+      openDraft(draft: Omit<DraftTab, "type" | "draftID">, model?: PromptModel) {
+        const key = JSON.stringify([draft.server, draft.projectID ?? null])
+        const pending = openingDrafts.get(key)
+        if (pending) return pending
+        const operation = (async () => {
+          if (!ready()) await ready.promise
+          const existing = [...store]
+            .reverse()
+            .find((tab) => tab.type === "draft" && tab.server === draft.server && tab.projectID === draft.projectID)
+          if (existing?.type === "draft") {
+            navigateTab(existing)
+            return existing
+          }
+          return actions.newDraft(draft, "", model)
+        })().finally(() => openingDrafts.delete(key))
+        openingDrafts.set(key, operation)
+        return operation
+      },
+      homeTab(server?: ServerConnection.Key) {
+        const available = store.filter((tab) => !server || tab.server === server)
+        return available.find((tab) => tabKey(tab) === recentKey()) ?? available.at(-1)
+      },
       updateDraft(draftID: string, draft: Partial<Omit<DraftTab, "type" | "draftID">>) {
         void startTransition(() => {
           setStore(
@@ -235,7 +258,11 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
         // after its backing draft tab has been removed from the store.
         const active = location.pathname === "/new-session" && location.query.draftId === draftID
         const draft = store.find((tab) => tab.type === "draft" && tab.draftID === draftID)
-        const next = { type: "session" as const, ...session, pendingProjectID: draft?.type === "draft" ? draft.projectID : undefined }
+        const next = {
+          type: "session" as const,
+          ...session,
+          pendingProjectID: draft?.type === "draft" ? draft.projectID : undefined,
+        }
         void startTransition(() => {
           setStore(
             produce((tabs) => {
@@ -249,10 +276,13 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
         memory.remove(`draft:${draftID}`)
         removeDraftPersisted(draftID)
       },
-      projectAssigned(sessionId: string) {
-        setStore((tab) => tab.type === "session" && tab.sessionId === sessionId, produce((tab) => {
-          if (tab.type === "session") delete tab.pendingProjectID
-        }))
+      projectAssigned(sessionId: string, targetServer = server.key) {
+        setStore(
+          (tab) => tab.type === "session" && tab.server === targetServer && tab.sessionId === sessionId,
+          produce((tab) => {
+            if (tab.type === "session") delete tab.pendingProjectID
+          }),
+        )
       },
       removeTab,
       // User-initiated close: records the tab so it can be reopened.
@@ -314,40 +344,19 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
         void startTransition(() => {
           setStore(
             produce((tabs) => {
-              const sessionIDs = new Set(input.sessionIDs)
-              const currentHref =
-                targetServer === server.key && params.dir && params.id
-                  ? tabHref({
-                      type: "session",
-                      server: targetServer,
-                      sessionId: params.id,
-                    })
-                  : undefined
-              const currentIndex = currentHref
-                ? tabs.findIndex(
-                    (tab) => tab.type === "session" && tab.server === targetServer && tabHref(tab) === currentHref,
-                  )
-                : -1
-              const currentTab = tabs[currentIndex]
-              const removedCurrent =
-                currentTab?.type === "session" &&
-                currentTab.server === targetServer &&
-                sessionIDs.has(currentTab.sessionId)
-
-              for (let i = tabs.length - 1; i >= 0; i--) {
-                const tab = tabs[i]
-                if (!tab || tab.type !== "session") continue
-                if (tab.server !== targetServer) continue
-                if (!sessionIDs.has(tab.sessionId)) continue
-                tabs.splice(i, 1)
+              const result = removeConversationTabs({
+                tabs,
+                server: targetServer,
+                sessionIDs: input.sessionIDs,
+                pathname: location.pathname,
+                activeServer: server.key,
+              })
+              tabs.splice(0, tabs.length, ...result.tabs)
+              if (result.next) navigateTab(result.next)
+              else if (result.next === null) {
+                setRecentKey(undefined)
+                navigate("/")
               }
-
-              if (!removedCurrent) return
-              const nextTab =
-                tabs.slice(currentIndex).find((tab) => tab.type === "session") ??
-                tabs.slice(0, currentIndex).findLast((tab) => tab.type === "session")
-              if (nextTab) navigateTab(nextTab)
-              else navigate("/")
             }),
           )
           if (recent.key && removed.includes(recent.key)) setRecentKey(undefined)

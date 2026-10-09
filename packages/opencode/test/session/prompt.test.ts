@@ -57,6 +57,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { LocationServiceMap, locationServiceMapLayer } from "@opencode-ai/core/location-services"
+import { ChatOrganizationTable, ChatProjectTable } from "@opencode-ai/core/chat-project/sql"
 
 const summary = Layer.succeed(
   SessionSummary.Service,
@@ -474,7 +475,35 @@ it.instance(
         time: Date.now(),
       })
       const parent = yield* sessions.get(chat.id)
+      const database = yield* Database.Service
+      yield* database.db
+        .insert(ChatProjectTable)
+        .values({
+          id: "cpr_branch_test",
+          name: "Branch project",
+          pinned: true,
+          position: 0,
+          time_created: 1,
+          time_updated: 1,
+        })
+        .run()
+      yield* database.db
+        .insert(ChatOrganizationTable)
+        .values({
+          session_id: chat.id,
+          project_id: "cpr_branch_test",
+          pinned: true,
+          unread: true,
+        })
+        .run()
       const branch = yield* sessions.fork({ sessionID: chat.id, messageID: response.info.id, inclusive: true })
+      expect(
+        yield* database.db
+          .select()
+          .from(ChatOrganizationTable)
+          .where(eq(ChatOrganizationTable.session_id, branch.id))
+          .get(),
+      ).toMatchObject({ project_id: "cpr_branch_test", pinned: false, unread: false })
       const copies = yield* sessions.messages({ sessionID: branch.id })
       expect(copies).toHaveLength(2)
       expect(copies.at(-1)?.parts.some((part) => part.type === "text" && part.text === "Selected answer")).toBe(true)

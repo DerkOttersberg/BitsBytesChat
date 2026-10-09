@@ -28,6 +28,7 @@ export const Chat = Schema.Struct({
   projectID: ID.pipe(optional),
   projectName: Schema.String.pipe(optional),
   pinned: Schema.Boolean,
+  unread: Schema.Boolean.pipe(optional),
   order: NonNegativeInt,
   created: NonNegativeInt,
   updated: NonNegativeInt,
@@ -64,6 +65,7 @@ export const ChatUpdate = Schema.Struct({
   title: Schema.String.pipe(optional),
   projectID: Schema.Union([ID, Schema.Null]).pipe(optional),
   pinned: Schema.Boolean.pipe(optional),
+  unread: Schema.Boolean.pipe(optional),
   order: NonNegativeInt.pipe(optional),
   archived: Schema.Boolean.pipe(optional),
 }).annotate({ identifier: "ChatProject.ChatUpdate" })

@@ -43,6 +43,8 @@ export class BBRuns {
   private admissions = new Map<string, AbortController>()
   private timer?: ReturnType<typeof setInterval>
   private stopping = new Map<string, Promise<void>>()
+  private disposing = new Set<string>()
+  private removed = new Set<string>()
   constructor(private root: string, private inspect: (prompt: RunPrompt, options?: InspectionOptions) => Promise<Inspection>, private dispatch: (prompt: RunPrompt, signal?: AbortSignal) => Promise<DispatchResult>, private changed: (sessionID: string) => void, private interrupt?: (prompt: RunPrompt) => Promise<void>, private now = () => Date.now(), private monotonic = () => performance.now()) {}
   async start() {
     await mkdir(this.root, { recursive: true })
@@ -72,7 +74,7 @@ export class BBRuns {
   }
   close() { if (this.timer) clearInterval(this.timer) }
   get(id: string) {
-    if (!id || id.length > 512) throw new Error("bb.error.invalidRequest")
+    if (!id || id.length > 512 || this.removed.has(id)) throw new Error("bb.error.invalidRequest")
     return this.chats[id] ??= { sessionID: id, mode: "normal", goalDraft: false, paused: false, queue: [], error: "" }
   }
   private persist() {
@@ -82,36 +84,100 @@ export class BBRuns {
     await this.persist().catch(error => { this.storageFailure(chat, error); throw error })
     this.changed(chat.sessionID)
   }
+  /** Freeze owned journals before deletion so renderer/timer races cannot admit another input. */
+  async disposeChats<T>(ids: readonly string[], remove: () => Promise<T>) {
+    if (
+      !ids.length ||
+      new Set(ids).size !== ids.length ||
+      ids.some((id) => !id || id.length > 512 || this.disposing.has(id))
+    )
+      throw new Error("bb.error.deliveryConflict")
+    const chats = ids.flatMap((id) => (this.chats[id] ? [this.chats[id]] : []))
+    ids.forEach((id) => {
+      this.disposing.add(id)
+      this.admissions.get(id)?.abort()
+    })
+    chats.forEach((chat) => {
+      chat.revision = (chat.revision ?? 0) + 1
+      chat.paused = true
+      chat.pauseReason = "user-stop"
+      chat.resumeRequested = false
+      if (chat.goal?.status === "active") {
+        this.clockGoal(chat.goal, false)
+        chat.goal.status = "paused"
+        chat.goal.reason = "stopped"
+      }
+    })
+    try {
+      await this.persist()
+      await Promise.all(ids.flatMap((id) => (this.pumping.get(id) ? [this.pumping.get(id)!.done.promise] : [])))
+      const result = await remove()
+      ids.forEach((id) => {
+        const chat = this.chats[id]
+        if (chat?.goal) this.goalTicks.delete(chat.goal.id)
+        delete this.chats[id]
+        this.removed.add(id)
+        this.checkpoints.delete(id)
+      })
+      await this.persist()
+      ids.forEach(this.changed)
+      return result
+    } finally {
+      ids.forEach((id) => this.disposing.delete(id))
+    }
+  }
   async call(action: string, args: Record<string, unknown>) {
     const chat = this.get(String(args.sessionID ?? (args.prompt as RunPrompt | undefined)?.sessionID ?? ""))
     if (action === "get") return chat
     if (action === "panel") return { goal: chat.goal, plan: chat.plan } satisfies ChatRunPanel
+    if (this.disposing.has(chat.sessionID)) throw new Error("bb.error.deliveryConflict")
     chat.revision = (chat.revision ?? 0) + 1
     const revision = chat.revision
     if (action === "goal-progress" && !chat.goal) throw new Error("bb.error.deliveryConflict")
     if (action === "promote") {
       const source = this.get(String(args.from))
-      chat.mode = source.mode; chat.goalDraft = source.goalDraft; source.goalDraft = false; source.mode = "normal"
+      chat.mode = source.mode
+      chat.goalDraft = source.goalDraft
+      source.goalDraft = false
+      source.mode = "normal"
     }
     if (action === "inherit") chat.mode = this.get(String(args.from)).mode
     if (action === "mode") {
       if (args.mode !== "normal" && args.mode !== "plan") throw new Error("bb.error.invalidRequest")
       chat.mode = args.mode
     }
-    if (action === "goal-draft") { chat.goalDraft = Boolean(args.enabled); if (args.replace !== undefined) chat.replaceGoal = Boolean(args.replace); if (args.minActiveDurationMs !== undefined) { if (!Number.isSafeInteger(args.minActiveDurationMs) || Number(args.minActiveDurationMs) < 0) throw new Error("bb.error.invalidRequest"); chat.goalDraftDurationMs = Number(args.minActiveDurationMs) } }
+    if (action === "goal-draft") {
+      chat.goalDraft = Boolean(args.enabled)
+      if (args.replace !== undefined) chat.replaceGoal = Boolean(args.replace)
+      if (args.minActiveDurationMs !== undefined) {
+        if (!Number.isSafeInteger(args.minActiveDurationMs) || Number(args.minActiveDurationMs) < 0)
+          throw new Error("bb.error.invalidRequest")
+        chat.goalDraftDurationMs = Number(args.minActiveDurationMs)
+      }
+    }
     if (action === "prepare" || action === "admit") {
       const prompt = structuredClone(args.prompt) as RunPrompt
-      if (!prompt?.id || prompt.sessionID !== chat.sessionID || !prompt.directory || typeof prompt.text !== "string") throw new Error("bb.error.invalidRequest")
-      if (prompt.model?.contextWindow !== undefined && (!Number.isSafeInteger(prompt.model.contextWindow) || prompt.model.contextWindow <= 0)) throw new Error("bb.error.invalidRequest")
+      if (!prompt?.id || prompt.sessionID !== chat.sessionID || !prompt.directory || typeof prompt.text !== "string")
+        throw new Error("bb.error.invalidRequest")
+      if (
+        prompt.model?.contextWindow !== undefined &&
+        (!Number.isSafeInteger(prompt.model.contextWindow) || prompt.model.contextWindow <= 0)
+      )
+        throw new Error("bb.error.invalidRequest")
       prompt.mode ??= chat.mode
       if (prompt.mode === "plan" && !prompt.prepared) {
         prompt.agent = "plan"
-        const context = "Plan mode: inspect and clarify before proposing a decision-complete plan. Do not execute changes. Ask short structured questions when needed. Finish with <proposed_plan>Markdown plan</proposed_plan>."
-        prompt.legacyParts = [...(prompt.legacyParts ?? [{ type: "text", text: prompt.text }]), { type: "text", text: context, synthetic: true }]
+        const context =
+          "Plan mode: inspect and clarify before proposing a decision-complete plan. Do not execute changes. Ask short structured questions when needed. Finish with <proposed_plan>Markdown plan</proposed_plan>."
+        prompt.legacyParts = [
+          ...(prompt.legacyParts ?? [{ type: "text", text: prompt.text }]),
+          { type: "text", text: context, synthetic: true },
+        ]
         prompt.text = context + "\n\n" + prompt.text
       }
       if (chat.goalDraft || prompt.goal) {
-        if (chat.goal && chat.goal.status !== "complete" && !args.replace && !chat.replaceGoal) throw new Error("bb.error.goalExists")
+        if (chat.goal && chat.goal.status !== "complete" && !args.replace && !chat.replaceGoal)
+          throw new Error("bb.error.goalExists")
         const baseline = (await this.inspect(prompt)).messages.reduce((sum, row) => sum + row.tokens, 0)
         if (chat.revision !== revision) throw new Error("bb.error.deliveryConflict")
         const objective = String(args.objective || args.userText || (args.prompt as RunPrompt).text).trim()
@@ -119,59 +185,151 @@ export class BBRuns {
         const duration = Number(args.minActiveDurationMs ?? parameters.minActiveDurationMs ?? 0)
         if (!Number.isSafeInteger(duration) || duration < 0) throw new Error("bb.error.invalidRequest")
         if (chat.goal) this.clockGoal(chat.goal, false)
-        chat.goal = { id: randomBytes(12).toString("hex"), objective, status: "active", reason: "", evidence: "", started: this.now(), elapsed: 0, activeTimeMs: 0, minActiveDurationMs: duration, tokens: 0, budget: typeof args.budget === "number" && args.budget > 0 ? args.budget : parameters.budget, continuations: 0, baseline, firstID: prompt.id, updatedAt: this.now() }
-        chat.goalDraft = false; chat.replaceGoal = false
+        chat.goal = {
+          id: randomBytes(12).toString("hex"),
+          objective,
+          status: "active",
+          reason: "",
+          evidence: "",
+          started: this.now(),
+          elapsed: 0,
+          activeTimeMs: 0,
+          minActiveDurationMs: duration,
+          tokens: 0,
+          budget: typeof args.budget === "number" && args.budget > 0 ? args.budget : parameters.budget,
+          continuations: 0,
+          baseline,
+          firstID: prompt.id,
+          updatedAt: this.now(),
+        }
+        chat.goalDraft = false
+        chat.replaceGoal = false
         const context = `This is a saved goal (ID ${chat.goal.id}): ${chat.goal.objective}. Work until complete, respecting user constraints and permissions. Minimum active work: ${duration} ms; waiting for the user and paused time do not count. Use bitsbytes-local_goal_progress with this goal ID to report completion with actual validation evidence, or blocked with a precise reason. Do not generate filler work to satisfy the duration. If meaningful work is complete early, explain the remaining duration and ask the user to revise it. Do not claim completion merely because you stop working.`
-        prompt.legacyParts = [...(prompt.legacyParts ?? [{ type: "text", text: prompt.text }]), { type: "text", text: context, synthetic: true }]
+        prompt.legacyParts = [
+          ...(prompt.legacyParts ?? [{ type: "text", text: prompt.text }]),
+          { type: "text", text: context, synthetic: true },
+        ]
         prompt.text += "\n\n" + context
       }
-      prompt.goal = false; prompt.prepared = true
-      const editing = chat.queue.find(item => item.editing)
-      if (editing) { prompt.id = editing.id; prompt.revision = (editing.prompt.revision ?? 1) + 1 }
-      if (action === "prepare") { chat.last = prompt; await this.save(chat); return prompt }
-      const existing = chat.queue.find(item => item.id === prompt.id)
+      prompt.goal = false
+      prompt.prepared = true
+      const editing = chat.queue.find((item) => item.editing)
+      if (editing) {
+        prompt.id = editing.id
+        prompt.revision = (editing.prompt.revision ?? 1) + 1
+      }
+      if (action === "prepare") {
+        chat.last = prompt
+        await this.save(chat)
+        return prompt
+      }
+      const existing = chat.queue.find((item) => item.id === prompt.id)
       if (existing && !existing.editing) {
         if (JSON.stringify(existing.prompt) !== JSON.stringify(prompt)) throw new Error("bb.error.deliveryConflict")
-        await this.save(chat); void this.pump(chat.sessionID)
+        await this.save(chat)
+        void this.pump(chat.sessionID)
         return existing
       }
-      const item: QueuedInput = { id: prompt.id, prompt, status: "pending", delivery: args.delivery === "steer" ? "steer" : "queue", dismissGoalID: chat.goal?.status === "complete" ? chat.goal.id : undefined }
-      const recovering = chat.pauseReason === "recovery" || chat.queue.some(row => ["failed", "uncertain"].includes(row.status))
+      const item: QueuedInput = {
+        id: prompt.id,
+        prompt,
+        status: "pending",
+        delivery: args.delivery === "steer" ? "steer" : "queue",
+        dismissGoalID: chat.goal?.status === "complete" ? chat.goal.id : undefined,
+      }
+      const recovering =
+        chat.pauseReason === "recovery" || chat.queue.some((row) => ["failed", "uncertain"].includes(row.status))
       // A fresh explicit Send releases restart/failure recovery as well as Stop.
       // Old uncertain inputs remain available for reconciliation, never replayed.
-      if (chat.paused && (chat.pauseReason === "user-stop" || chat.pauseReason === "recovery")) { chat.paused = false; chat.pauseReason = undefined; chat.resumeRequested = false }
+      if (chat.paused && (chat.pauseReason === "user-stop" || chat.pauseReason === "recovery")) {
+        chat.paused = false
+        chat.pauseReason = undefined
+        chat.resumeRequested = false
+      }
       // Renderer busy events can lag the completed/Stop boundary. Reconcile
       // attempted admission before deciding whether a first new input is queued.
-      const boundary = !chat.paused && (!chat.awaiting || recovering) && (recovering || args.immediate === false || chat.queue.some(row => row.sentAt !== undefined))
-        ? await this.inspect(prompt, { readBusyMessages: chat.queue.some(row => row.sentAt !== undefined), readWaitingState: false }).catch(() => undefined)
-        : undefined
+      const boundary =
+        !chat.paused &&
+        (!chat.awaiting || recovering) &&
+        (recovering || args.immediate === false || chat.queue.some((row) => row.sentAt !== undefined))
+          ? await this.inspect(prompt, {
+              readBusyMessages: chat.queue.some((row) => row.sentAt !== undefined),
+              readWaitingState: false,
+            }).catch(() => undefined)
+          : undefined
       if (chat.revision !== revision) throw new Error("bb.error.deliveryConflict")
       if (boundary) {
-        const admitted = new Set(boundary.messages.filter(row => row.receipt?.stage !== "preparing").map(row => row.id))
-        chat.queue = chat.queue.filter(row => row === existing || row.sentAt === undefined || !admitted.has(row.id))
+        const admitted = new Set(
+          boundary.messages.filter((row) => row.receipt?.stage !== "preparing").map((row) => row.id),
+        )
+        chat.queue = chat.queue.filter((row) => row === existing || row.sentAt === undefined || !admitted.has(row.id))
         if (recovering && !boundary.busy) {
           // Retain unresolved recovery rows, but they no longer own live work.
           // Confirmed nonterminal receipts keep their engine ownership.
-          chat.awaitingInputIDs = chat.awaitingInputIDs?.filter(id => boundary.messages.some(row => row.id === id && row.receipt && !["completed", "interrupted", "failed"].includes(row.receipt.stage)))
+          chat.awaitingInputIDs = chat.awaitingInputIDs?.filter((id) =>
+            boundary.messages.some(
+              (row) =>
+                row.id === id && row.receipt && !["completed", "interrupted", "failed"].includes(row.receipt.stage),
+            ),
+          )
           chat.awaiting = Boolean(chat.awaitingInputIDs?.length)
         }
       }
-      item.presentation = (args.immediate === true || boundary?.busy === false) && !chat.paused && !chat.queue.some(row => row !== existing && !row.editing && ["pending", "sending"].includes(row.status)) ? "transcript" : "queue"
+      item.presentation =
+        (args.immediate === true || boundary?.busy === false) &&
+        !chat.paused &&
+        !chat.queue.some((row) => row !== existing && !row.editing && ["pending", "sending"].includes(row.status))
+          ? "transcript"
+          : "queue"
       if (existing) chat.queue.splice(chat.queue.indexOf(existing), 1, item)
       else chat.queue.push(item)
-      await this.save(chat); void this.pump(chat.sessionID); return item
+      await this.save(chat)
+      void this.pump(chat.sessionID)
+      return item
     }
-    const item = chat.queue.find(item => item.id === args.id)
+    const item = chat.queue.find((item) => item.id === args.id)
     if (["delete", "edit", "cancel-edit", "steer", "retry"].includes(action)) {
-      if (!item || item.status === "sending" || ((item.sentAt !== undefined || item.status === "uncertain") && ["delete", "edit"].includes(action))) throw new Error("bb.error.deliveryConflict")
-      if (action === "delete") { this.forgetUnsent(chat, item.id); chat.queue = chat.queue.filter(row => row !== item); if (!chat.queue.some(row => row.error)) chat.error = "" }
-      if (action === "edit") { for (const entry of chat.queue) if (entry.editing) { entry.editing = false; entry.editingSince = undefined }; item.editing = true; item.editingSince = this.now() }
-      if (action === "cancel-edit") { item.editing = false; item.editingSince = undefined }
-      if (action === "steer" || action === "retry") { item.delivery = action === "steer" ? "steer" : item.delivery; item.status = "pending"; item.error = ""; chat.error = ""; chat.paused = false; chat.pauseReason = undefined }
+      if (
+        !item ||
+        item.status === "sending" ||
+        ((item.sentAt !== undefined || item.status === "uncertain") && ["delete", "edit"].includes(action))
+      )
+        throw new Error("bb.error.deliveryConflict")
+      if (action === "delete") {
+        this.forgetUnsent(chat, item.id)
+        chat.queue = chat.queue.filter((row) => row !== item)
+        if (!chat.queue.some((row) => row.error)) chat.error = ""
+      }
+      if (action === "edit") {
+        for (const entry of chat.queue)
+          if (entry.editing) {
+            entry.editing = false
+            entry.editingSince = undefined
+          }
+        item.editing = true
+        item.editingSince = this.now()
+      }
+      if (action === "cancel-edit") {
+        item.editing = false
+        item.editingSince = undefined
+      }
+      if (action === "steer" || action === "retry") {
+        item.delivery = action === "steer" ? "steer" : item.delivery
+        item.status = "pending"
+        item.error = ""
+        chat.error = ""
+        chat.paused = false
+        chat.pauseReason = undefined
+      }
     }
     if (action === "reorder") {
       const ids = args.ids as string[]
-      if (!Array.isArray(ids) || new Set(ids).size !== chat.queue.length || chat.queue.some(item => !ids.includes(item.id) || item.status === "sending")) throw new Error("bb.error.deliveryConflict")
+      if (
+        !Array.isArray(ids) ||
+        new Set(ids).size !== chat.queue.length ||
+        chat.queue.some((item) => !ids.includes(item.id) || item.status === "sending")
+      )
+        throw new Error("bb.error.deliveryConflict")
       chat.queue.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id))
     }
     if (action === "stop") {
@@ -180,27 +338,75 @@ export class BBRuns {
         const before = Date.now()
         // Steer may replace chat.last while the original provider turn is still
         // running. Retain ownership of every admitted input until its boundary.
-        const ids = new Set([...(goal.pendingInputIDs ?? []), ...(chat.awaiting && chat.last?.protocol !== "v2" && chat.last ? [chat.last.id] : [])])
-        if (ids.size) goal.stoppedInputs = [...(goal.stoppedInputs ?? []).filter(row => !ids.has(row.id)), ...[...ids].map(id => ({ id, before }))]
-        if (goal.status === "active") { this.clockGoal(goal, false); goal.status = "paused"; goal.reason = "stopped" }
+        const ids = new Set([
+          ...(goal.pendingInputIDs ?? []),
+          ...(chat.awaiting && chat.last?.protocol !== "v2" && chat.last ? [chat.last.id] : []),
+        ])
+        if (ids.size)
+          goal.stoppedInputs = [
+            ...(goal.stoppedInputs ?? []).filter((row) => !ids.has(row.id)),
+            ...[...ids].map((id) => ({ id, before })),
+          ]
+        if (goal.status === "active") {
+          this.clockGoal(goal, false)
+          goal.status = "paused"
+          goal.reason = "stopped"
+        }
       }
-      chat.paused = true; chat.pauseReason = "user-stop"; chat.awaiting = false; chat.resumeRequested = false; this.admissions.get(chat.sessionID)?.abort()
+      chat.paused = true
+      chat.pauseReason = "user-stop"
+      chat.awaiting = false
+      chat.resumeRequested = false
+      this.admissions.get(chat.sessionID)?.abort()
       if (chat.last && this.interrupt) {
         const prompt = chat.last
         const stopped = this.save(chat).then(() => this.interrupt!(prompt))
         this.stopping.set(chat.sessionID, stopped)
-        try { await stopped } finally { if (this.stopping.get(chat.sessionID) === stopped) this.stopping.delete(chat.sessionID); void this.pump(chat.sessionID) }
-      }
-      else await this.save(chat)
+        try {
+          await stopped
+        } finally {
+          if (this.stopping.get(chat.sessionID) === stopped) this.stopping.delete(chat.sessionID)
+          void this.pump(chat.sessionID)
+        }
+      } else await this.save(chat)
       return { ...chat, interruptionOwned: Boolean(chat.last && this.interrupt) }
     }
-    if (action === "resume") { chat.paused = false; chat.pauseReason = undefined; chat.resumeRequested = true; for (const entry of chat.queue) if (entry.status === "failed") entry.status = "pending" }
-    if (action === "goal-pause" && chat.goal) { this.clockGoal(chat.goal, false); chat.goal.status = "paused" }
-    if (action === "goal-resume" && chat.goal) { if (chat.goal.budget && chat.goal.tokens >= chat.goal.budget) throw new Error("bb.error.goalBudget"); this.clockGoal(chat.goal, false); chat.goal.status = "active"; chat.goal.reason = ""; chat.goal.continuations = 0; chat.goal.stagnantCount = 0; chat.paused = false; chat.pauseReason = undefined; chat.resumeRequested = true }
-    if (action === "goal-clear") { if (chat.goal) this.clockGoal(chat.goal, false); chat.goal = undefined; chat.goalDraft = false }
+    if (action === "resume") {
+      chat.paused = false
+      chat.pauseReason = undefined
+      chat.resumeRequested = true
+      for (const entry of chat.queue) if (entry.status === "failed") entry.status = "pending"
+    }
+    if (action === "goal-pause" && chat.goal) {
+      this.clockGoal(chat.goal, false)
+      chat.goal.status = "paused"
+    }
+    if (action === "goal-resume" && chat.goal) {
+      if (chat.goal.budget && chat.goal.tokens >= chat.goal.budget) throw new Error("bb.error.goalBudget")
+      this.clockGoal(chat.goal, false)
+      chat.goal.status = "active"
+      chat.goal.reason = ""
+      chat.goal.continuations = 0
+      chat.goal.stagnantCount = 0
+      chat.paused = false
+      chat.pauseReason = undefined
+      chat.resumeRequested = true
+    }
+    if (action === "goal-clear") {
+      if (chat.goal) this.clockGoal(chat.goal, false)
+      chat.goal = undefined
+      chat.goalDraft = false
+    }
     if (action === "goal-edit") {
-      if (!chat.goal || args.goalID !== undefined && args.goalID !== chat.goal.id) throw new Error("bb.error.deliveryConflict")
-      if (!String(args.objective ?? "").trim() || args.budget !== undefined && (!Number.isSafeInteger(args.budget) || Number(args.budget) < 0) || args.minActiveDurationMs !== undefined && (!Number.isSafeInteger(args.minActiveDurationMs) || Number(args.minActiveDurationMs) < 0)) throw new Error("bb.error.invalidRequest")
+      if (!chat.goal || (args.goalID !== undefined && args.goalID !== chat.goal.id))
+        throw new Error("bb.error.deliveryConflict")
+      if (
+        !String(args.objective ?? "").trim() ||
+        (args.budget !== undefined && (!Number.isSafeInteger(args.budget) || Number(args.budget) < 0)) ||
+        (args.minActiveDurationMs !== undefined &&
+          (!Number.isSafeInteger(args.minActiveDurationMs) || Number(args.minActiveDurationMs) < 0))
+      )
+        throw new Error("bb.error.invalidRequest")
       chat.goal.objective = String(args.objective).trim()
       if (typeof args.budget === "number") chat.goal.budget = args.budget > 0 ? args.budget : undefined
       if (args.minActiveDurationMs !== undefined) chat.goal.minActiveDurationMs = Number(args.minActiveDurationMs)
@@ -211,9 +417,13 @@ export class BBRuns {
       if (args.status === "complete" && !String(args.evidence ?? "").trim()) throw new Error("bb.error.goalEvidence")
       this.clockGoal(chat.goal, chat.goal.status === "active" && chat.goal.activeSince !== undefined)
       const remainingMs = Math.max(0, (chat.goal.minActiveDurationMs ?? 0) - (chat.goal.activeTimeMs ?? 0))
-      if (args.status === "complete" && remainingMs > 0) { await this.save(chat); return { completionDenied: true, remainingMs, goal: chat.goal } }
+      if (args.status === "complete" && remainingMs > 0) {
+        await this.save(chat)
+        return { completionDenied: true, remainingMs, goal: chat.goal }
+      }
       if (args.status === "complete" || args.status === "blocked") chat.goal.status = args.status
-      chat.goal.reason = String(args.reason ?? ""); chat.goal.evidence = String(args.evidence ?? "")
+      chat.goal.reason = String(args.reason ?? "")
+      chat.goal.evidence = String(args.evidence ?? "")
       this.clockGoal(chat.goal, false)
     }
     if (action === "plan") {
@@ -221,15 +431,40 @@ export class BBRuns {
       if (!text) throw new Error("bb.error.invalidRequest")
       if (chat.plan?.text !== text) {
         const revision = (chat.plan?.revision ?? 0) + 1
-        chat.plan = { id: chat.plan?.id ?? randomBytes(12).toString("hex"), revision, text, versions: [...(chat.plan?.versions ?? []), { revision, text }] }
+        chat.plan = {
+          id: chat.plan?.id ?? randomBytes(12).toString("hex"),
+          revision,
+          text,
+          versions: [...(chat.plan?.versions ?? []), { revision, text }],
+        }
       }
     }
     if (action === "implement") {
-      const version = chat.plan?.versions.find(row => row.revision === Number(args.revision ?? chat.plan?.revision))
+      const version = chat.plan?.versions.find((row) => row.revision === Number(args.revision ?? chat.plan?.revision))
       if (!version || !chat.last) throw new Error("bb.error.invalidRequest")
       chat.mode = "normal"
-      const prompt = { ...chat.last, mode: "normal" as const, agent: "build", id: this.messageID(), text: "PLEASE IMPLEMENT THIS PLAN:\n" + version.text, legacyParts: [{ type: "text", text: `Implement approved plan · revision ${version.revision}` }, { type: "text", text: "PLEASE IMPLEMENT THIS PLAN:\n" + version.text, synthetic: true }], files: undefined, agents: undefined, draft: undefined }
-      chat.queue.push({ id: prompt.id, prompt, delivery: "queue", status: "pending", dismissGoalID: chat.goal?.status === "complete" ? chat.goal.id : undefined }); chat.paused = false
+      const prompt = {
+        ...chat.last,
+        mode: "normal" as const,
+        agent: "build",
+        id: this.messageID(),
+        text: "PLEASE IMPLEMENT THIS PLAN:\n" + version.text,
+        legacyParts: [
+          { type: "text", text: `Implement approved plan · revision ${version.revision}` },
+          { type: "text", text: "PLEASE IMPLEMENT THIS PLAN:\n" + version.text, synthetic: true },
+        ],
+        files: undefined,
+        agents: undefined,
+        draft: undefined,
+      }
+      chat.queue.push({
+        id: prompt.id,
+        prompt,
+        delivery: "queue",
+        status: "pending",
+        dismissGoalID: chat.goal?.status === "complete" ? chat.goal.id : undefined,
+      })
+      chat.paused = false
     }
     await this.save(chat)
     void this.pump(chat.sessionID)
@@ -237,6 +472,7 @@ export class BBRuns {
   }
   private messageID() { return ascending("message") }
   async pump(id: string) {
+    if (this.disposing.has(id) || this.removed.has(id)) return
     const pending = this.pumping.get(id)
     if (pending) { await pending.done.promise; if (this.get(id).revision !== pending.revision) await this.pump(id); return }
     const chat = this.get(id)

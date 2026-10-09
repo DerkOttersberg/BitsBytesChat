@@ -19,6 +19,7 @@ export const ChatOrganizationTable = sqliteTable(
       .references(() => SessionTable.id, { onDelete: "cascade" }),
     project_id: text().references(() => ChatProjectTable.id, { onDelete: "set null" }),
     pinned: integer({ mode: "boolean" }).notNull().default(false),
+    unread: integer({ mode: "boolean" }).notNull().default(false),
     position: integer().notNull().default(0),
   },
   (table) => [

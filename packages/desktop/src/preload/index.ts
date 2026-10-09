@@ -4,7 +4,9 @@ import type { UpdaterState } from "@opencode-ai/app/updater"
 import type { BBEvent } from "../bitsbytes/types"
 
 const bitsbytesCallbacks = new Set<(event: BBEvent) => void>()
-ipcRenderer.on("bitsbytes:event", (_: unknown, event: BBEvent) => { for (const callback of [...bitsbytesCallbacks]) callback(event) })
+ipcRenderer.on("bitsbytes:event", (_: unknown, event: BBEvent) => {
+  for (const callback of [...bitsbytesCallbacks]) callback(event)
+})
 
 const updaterCallbacks = new Set<(state: UpdaterState) => void>()
 let updaterState: UpdaterState | undefined
@@ -19,7 +21,9 @@ const api: ElectronAPI = {
     call: (method, args) => ipcRenderer.invoke("bitsbytes:call", method, args),
     subscribe: (listener) => {
       bitsbytesCallbacks.add(listener)
-      return () => { bitsbytesCallbacks.delete(listener) }
+      return () => {
+        bitsbytesCallbacks.delete(listener)
+      }
     },
   },
   killSidecar: () => ipcRenderer.invoke("kill-sidecar"),
@@ -68,6 +72,9 @@ const api: ElectronAPI = {
     install: () => ipcRenderer.invoke("updater-install"),
   },
   consumeInitialDeepLinks: () => ipcRenderer.invoke("consume-initial-deep-links"),
+  openConversationWindow: (target) => ipcRenderer.invoke("open-conversation-window", target),
+  consumeInitialConversation: () => ipcRenderer.invoke("consume-initial-conversation"),
+  writeClipboardText: (text) => ipcRenderer.invoke("write-clipboard-text", text),
   getDefaultServerUrl: () => ipcRenderer.invoke("get-default-server-url"),
   setDefaultServerUrl: (url) => ipcRenderer.invoke("set-default-server-url", url),
   isFirstLaunchOnboardingPending: () => ipcRenderer.invoke("is-first-launch-onboarding-pending"),

@@ -39,6 +39,7 @@ import { SessionRevert } from "./session/revert"
 import { Revert } from "@opencode-ai/schema/revert"
 import { FSUtil } from "./fs-util"
 import { SessionDurable } from "@opencode-ai/schema/durable-event-manifest"
+import { SessionBranch } from "./session/branch"
 
 export const RevertState = Revert.State
 export type RevertState = Revert.State
@@ -110,11 +111,25 @@ export class PromptConflictError extends Schema.TaggedErrorClass<PromptConflictE
 export const MessageNotFoundError = SessionRevert.MessageNotFoundError
 export type MessageNotFoundError = SessionRevert.MessageNotFoundError
 
-export type Error = NotFoundError | MessageDecodeError | OperationUnavailableError | PromptConflictError | SessionRunnerModel.ContextWindowUnavailableError
+export type Error =
+  | NotFoundError
+  | MessageDecodeError
+  | OperationUnavailableError
+  | PromptConflictError
+  | SessionRunnerModel.ContextWindowUnavailableError
 
 export interface Interface {
+  readonly children: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info[], NotFoundError>
+  readonly fork: (input: {
+    sessionID: SessionSchema.ID
+    messageID?: SessionMessage.ID
+    inclusive?: boolean
+  }) => Effect.Effect<SessionSchema.Info, NotFoundError | SessionBranch.BoundaryError>
+  readonly remove: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError>
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>
-  readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info, SessionRunnerModel.ContextWindowUnavailableError>
+  readonly create: (
+    input: CreateInput,
+  ) => Effect.Effect<SessionSchema.Info, SessionRunnerModel.ContextWindowUnavailableError>
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info, NotFoundError>
   readonly messages: (input: {
     sessionID: SessionSchema.ID
@@ -152,7 +167,10 @@ export interface Interface {
     prompt: PromptInput.Prompt
     delivery?: SessionInput.Delivery
     resume?: boolean
-  }) => Effect.Effect<SessionInput.Admitted, NotFoundError | PromptConflictError | SessionRunnerModel.ContextWindowUnavailableError>
+  }) => Effect.Effect<
+    SessionInput.Admitted,
+    NotFoundError | PromptConflictError | SessionRunnerModel.ContextWindowUnavailableError
+  >
   readonly shell: (input: {
     id?: EventV2.ID
     sessionID: SessionSchema.ID
@@ -208,11 +226,37 @@ const layer = Layer.effect(
       )
 
     const result = Service.of({
+      children: Effect.fn("V2Session.children")(function* (sessionID) {
+        yield* result.get(sessionID)
+        return (yield* db
+          .select()
+          .from(SessionTable)
+          .where(eq(SessionTable.parent_id, sessionID))
+          .orderBy(desc(SessionTable.time_updated), desc(SessionTable.id))
+          .all()
+          .pipe(Effect.orDie)).map(fromRow)
+      }),
+      fork: Effect.fn("V2Session.fork")(function* (input) {
+        yield* result.get(input.sessionID)
+        return yield* SessionBranch.fork(input).pipe(
+          Effect.provideService(Database.Service, database),
+          Effect.provideService(EventV2.Service, events),
+        )
+      }),
+      remove: Effect.fn("V2Session.remove")(function* (sessionID) {
+        yield* result.get(sessionID)
+        yield* SessionBranch.remove(sessionID).pipe(
+          Effect.provideService(Database.Service, database),
+          Effect.provideService(EventV2.Service, events),
+          Effect.provideService(SessionExecution.Service, execution),
+        )
+      }),
       create: Effect.fn("V2Session.create")(function* (input) {
         const sessionID = input.id ?? SessionSchema.ID.create()
         const recorded = yield* store.get(sessionID)
         if (recorded) return recorded
-        if (input.model) yield* SessionRunnerModel.validateContext(input.model).pipe(Effect.provide(locations.get(input.location)))
+        if (input.model)
+          yield* SessionRunnerModel.validateContext(input.model).pipe(Effect.provide(locations.get(input.location)))
         const project = yield* projects.resolve(input.location.directory)
         yield* db
           .insert(ProjectTable)
@@ -366,7 +410,10 @@ const layer = Layer.effect(
         Effect.uninterruptible(
           Effect.gen(function* () {
             const session = yield* result.get(input.sessionID)
-            if (session.model) yield* SessionRunnerModel.validateContext(session.model).pipe(Effect.provide(locations.get(session.location)))
+            if (session.model)
+              yield* SessionRunnerModel.validateContext(session.model).pipe(
+                Effect.provide(locations.get(session.location)),
+              )
             const prompt = yield* Effect.promise(() => resolvePrompt(input.prompt, input.sessionID))
             const messageID = input.id ?? SessionMessage.ID.create()
             const delivery = input.delivery ?? "steer"
@@ -470,18 +517,25 @@ const resolvePrompt = async (input: PromptInput.Prompt, sessionID: string) =>
   Prompt.make({
     text: input.text,
     agents: input.agents,
-    files: input.files ? await Promise.all(input.files.map(async (file) => {
-      if (file.uri.startsWith("bitsbytes://") && DesktopBridge.enabled()) {
-        const resolved = await DesktopBridge.call<{ text: string }>("attachment.resolve", { uri: file.uri, sessionID })
-        return { ...file, mime: "text/plain", description: resolved.text }
-      }
-      const dataMime = file.uri.match(/^data:([^;,]+)[;,]/i)?.[1]
-      const target = URL.canParse(file.uri) ? new URL(file.uri).pathname : (file.name ?? file.uri)
-      return {
-        ...file,
-        mime: dataMime ?? (target.endsWith("/") ? "application/x-directory" : FSUtil.mimeType(target)),
-      }
-    })) : undefined,
+    files: input.files
+      ? await Promise.all(
+          input.files.map(async (file) => {
+            if (file.uri.startsWith("bitsbytes://") && DesktopBridge.enabled()) {
+              const resolved = await DesktopBridge.call<{ text: string }>("attachment.resolve", {
+                uri: file.uri,
+                sessionID,
+              })
+              return { ...file, mime: "text/plain", description: resolved.text }
+            }
+            const dataMime = file.uri.match(/^data:([^;,]+)[;,]/i)?.[1]
+            const target = URL.canParse(file.uri) ? new URL(file.uri).pathname : (file.name ?? file.uri)
+            return {
+              ...file,
+              mime: dataMime ?? (target.endsWith("/") ? "application/x-directory" : FSUtil.mimeType(target)),
+            }
+          }),
+        )
+      : undefined,
   })
 
 export const node = makeGlobalNode({

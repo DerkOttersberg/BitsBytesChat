@@ -24,6 +24,60 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
 
     return handlers
       .handle(
+        "session.children",
+        Effect.fn(function* (ctx) {
+          return {
+            data: yield* session.children(ctx.params.sessionID).pipe(
+              Effect.catchTag(
+                "Session.NotFoundError",
+                (error) =>
+                  new SessionNotFoundError({
+                    sessionID: error.sessionID,
+                    message: `Session not found: ${error.sessionID}`,
+                  }),
+              ),
+            ),
+          }
+        }),
+      )
+      .handle(
+        "session.fork",
+        Effect.fn(function* (ctx) {
+          return {
+            data: yield* session.fork({ ...ctx.params, ...ctx.payload }).pipe(
+              Effect.catchTag(
+                "Session.NotFoundError",
+                (error) =>
+                  new SessionNotFoundError({
+                    sessionID: error.sessionID,
+                    message: `Session not found: ${error.sessionID}`,
+                  }),
+              ),
+              Effect.catchTag(
+                "Session.ForkBoundaryError",
+                (error) => new InvalidRequestError({ message: error.message }),
+              ),
+            ),
+          }
+        }),
+      )
+      .handle(
+        "session.remove",
+        Effect.fn(function* (ctx) {
+          yield* session.remove(ctx.params.sessionID).pipe(
+            Effect.catchTag(
+              "Session.NotFoundError",
+              (error) =>
+                new SessionNotFoundError({
+                  sessionID: error.sessionID,
+                  message: `Session not found: ${error.sessionID}`,
+                }),
+            ),
+          )
+          return HttpApiSchema.NoContent.make()
+        }),
+      )
+      .handle(
         "session.list",
         Effect.fn(function* (ctx) {
           const query =
@@ -70,12 +124,18 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         "session.create",
         Effect.fn(function* (ctx) {
           return {
-            data: yield* session.create({
-              id: ctx.payload.id,
-              agent: ctx.payload.agent,
-              model: ctx.payload.model,
-              location: ctx.payload.location ?? { directory: AbsolutePath.make(process.cwd()) },
-            }).pipe(Effect.catchTag("SessionRunnerModel.ContextWindowUnavailableError", error => Effect.fail(new InvalidRequestError({ message: error.message })))),
+            data: yield* session
+              .create({
+                id: ctx.payload.id,
+                agent: ctx.payload.agent,
+                model: ctx.payload.model,
+                location: ctx.payload.location ?? { directory: AbsolutePath.make(process.cwd()) },
+              })
+              .pipe(
+                Effect.catchTag("SessionRunnerModel.ContextWindowUnavailableError", (error) =>
+                  Effect.fail(new InvalidRequestError({ message: error.message })),
+                ),
+              ),
           }
         }),
       )
@@ -85,7 +145,10 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
           const owners = yield* session.ownership ?? Effect.succeed(new Map())
           return {
             data: Object.fromEntries(
-              Array.from(yield* session.active, (sessionID) => [sessionID, { type: "running" as const, ...(owners.get(sessionID) ? { owner: owners.get(sessionID) } : {}) }]),
+              Array.from(yield* session.active, (sessionID) => [
+                sessionID,
+                { type: "running" as const, ...(owners.get(sessionID) ? { owner: owners.get(sessionID) } : {}) },
+              ]),
             ),
           }
         }),
@@ -127,7 +190,9 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         "session.switchModel",
         Effect.fn(function* (ctx) {
           yield* session.switchModel({ sessionID: ctx.params.sessionID, model: ctx.payload.model }).pipe(
-            Effect.catchTag("SessionRunnerModel.ContextWindowUnavailableError", error => Effect.fail(new InvalidRequestError({ message: error.message }))),
+            Effect.catchTag("SessionRunnerModel.ContextWindowUnavailableError", (error) =>
+              Effect.fail(new InvalidRequestError({ message: error.message })),
+            ),
             Effect.catchTag("Session.NotFoundError", (error) =>
               Effect.fail(
                 new SessionNotFoundError({
@@ -153,7 +218,9 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                 resume: ctx.payload.resume,
               })
               .pipe(
-                Effect.catchTag("SessionRunnerModel.ContextWindowUnavailableError", error => Effect.fail(new InvalidRequestError({ message: error.message }))),
+                Effect.catchTag("SessionRunnerModel.ContextWindowUnavailableError", (error) =>
+                  Effect.fail(new InvalidRequestError({ message: error.message })),
+                ),
                 Effect.catchTag("Session.NotFoundError", (error) =>
                   Effect.fail(
                     new SessionNotFoundError({

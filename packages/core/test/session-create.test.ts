@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { afterAll, describe, expect } from "bun:test"
 import path from "path"
 import { Effect, Layer, Stream } from "effect"
 import { AgentV2 } from "@opencode-ai/core/agent"
@@ -44,7 +44,9 @@ const it = testEffect(
     ],
   ),
 )
-const location = Location.Ref.make({ directory: AbsolutePath.make("/project") })
+const directory = await tmpdir()
+afterAll(() => directory[Symbol.asyncDispose]())
+const location = Location.Ref.make({ directory: AbsolutePath.make(directory.path) })
 const id = SessionV2.ID.create()
 
 describe("SessionV2.create", () => {

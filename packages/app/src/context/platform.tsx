@@ -6,6 +6,8 @@ import { ServerConnection } from "./server"
 import type { WslServersPlatform } from "../wsl/types"
 import type { UpdaterPlatform } from "../updater"
 import type { DraftStore } from "@/utils/draft-store"
+import type { ConversationWindowTarget } from "../conversation-window"
+export type { ConversationWindowTarget } from "../conversation-window"
 
 type PickerPaths = string | string[] | null
 type OpenDirectoryPickerOptions = { title?: string; multiple?: boolean }
@@ -40,7 +42,10 @@ type PlatformBase = {
     subscribe: (listener: (event: { type: string; [key: string]: unknown }) => void) => () => void
   }
   /** Optional native recording controls inside the chat composer. */
-  composerAudio?: Component<{ identity?: Accessor<unknown>; capture: () => (transcript: { text: string; path: string; jobID: string; revision?: number }) => void }>
+  composerAudio?: Component<{
+    identity?: Accessor<unknown>
+    capture: () => (transcript: { text: string; path: string; jobID: string; revision?: number }) => void
+  }>
   recordingActive?: (identity?: unknown) => boolean
   /** App version */
   version?: string
@@ -83,6 +88,12 @@ type PlatformBase = {
 
   /** Stable platform window identity for window-scoped persistence */
   windowID?: string
+
+  /** Open a distinct native window already routed to this conversation. */
+  openConversationWindow?(target: ConversationWindowTarget): Promise<void>
+
+  /** Copy text through the native clipboard boundary when available. */
+  writeClipboardText?(text: string): Promise<void>
 
   /** Application-global desktop updater */
   updater?: UpdaterPlatform

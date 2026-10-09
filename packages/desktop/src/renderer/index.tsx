@@ -13,6 +13,7 @@ import {
   normalizeLocale,
   type Locale,
   type Platform,
+  type ConversationWindowTarget,
   PlatformProvider,
   createDraftStore,
   ServerConnection,
@@ -39,6 +40,7 @@ import { BitsBytesSettings } from "./bitsbytes/settings"
 import { bbt } from "../bitsbytes/copy"
 import { BitsBytesShell } from "./bitsbytes/shell"
 import { createComposerAudio } from "./bitsbytes/composer-audio"
+import { conversationWindowURL } from "./conversation-window"
 
 const root = document.getElementById("root")
 if (import.meta.env.DEV && !(root instanceof HTMLElement)) {
@@ -75,6 +77,7 @@ const deepLinkEvent = "opencode:deep-link"
 
 type DesktopWindowState = {
   id?: string
+  conversation?: ConversationWindowTarget | null
 }
 
 const emitDeepLinks = (urls: string[]) => {
@@ -110,10 +113,13 @@ function setLastActiveUrl(windowID: string, value: string) {
   } catch {}
 }
 
-function DesktopMemoryRouter(props: BaseRouterProps & { windowID: string }) {
+function DesktopMemoryRouter(
+  props: BaseRouterProps & { windowID: string; conversation?: ConversationWindowTarget | null },
+) {
   const history = createMemoryHistory()
-  const initialUrl = getLastActiveUrl(props.windowID)
+  const initialUrl = conversationWindowURL(props.conversation, getLastActiveUrl(props.windowID))
   if (initialUrl !== "/") history.set({ value: initialUrl, replace: true, scroll: false })
+  if (props.conversation) setLastActiveUrl(props.windowID, initialUrl)
   onCleanup(history.listen((value) => setLastActiveUrl(props.windowID, value)))
   return <MemoryRouter {...props} history={history} />
 }
@@ -178,6 +184,8 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     os,
     version: pkg.version,
     windowID: windowState.id,
+    openConversationWindow: (target) => window.api.openConversationWindow(target),
+    writeClipboardText: (text) => window.api.writeClipboardText(text),
 
     async openDirectoryPickerDialog(opts) {
       return window.api.openDirectoryPicker({
@@ -372,8 +380,12 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
 
   const [defaultServer] = createResource(() => platform.getDefaultServer?.())
   const [locale] = createResource(loadLocale)
-  const router = (props: BaseRouterProps) => (
-    <DesktopMemoryRouter {...props} windowID={platform.windowID ?? "browser"} />
+  const router = (routerProps: BaseRouterProps) => (
+    <DesktopMemoryRouter
+      {...routerProps}
+      windowID={platform.windowID ?? "browser"}
+      conversation={props.windowState.conversation}
+    />
   )
   const onboarding = Promise.withResolvers<void>()
 
@@ -381,8 +393,14 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
     const navigate = useNavigate()
     const location = useLocation()
     let mounted = true
-    onCleanup(() => { mounted = false })
-    const encodedDirectory = (value: string) => btoa(unescape(encodeURIComponent(value))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+    onCleanup(() => {
+      mounted = false
+    })
+    const encodedDirectory = (value: string) =>
+      btoa(unescape(encodeURIComponent(value)))
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "")
     const openBitsSession = (event: Event) => {
       const detail = (event as CustomEvent<{ directory: string; sessionID: string }>).detail
       if (!detail?.directory || !detail.sessionID) return
@@ -419,7 +437,9 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
   }
 
   function App() {
-    onMount(() => { void window.api.finishFirstLaunchOnboarding(false).then(() => onboarding.resolve()) })
+    onMount(() => {
+      void window.api.finishFirstLaunchOnboarding(false).then(() => onboarding.resolve())
+    })
     const wslServers = useWslServers()
     const language = useLanguage()
     const ready = createMemo(
@@ -444,18 +464,15 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
       return list
     })
     const effectiveDefaultServer = createMemo(() =>
-      ServerConnection.Key.make(availableStartupServer(defaultServer.latest, wslServers.data)),
+      ServerConnection.Key.make(
+        props.windowState.conversation?.server ?? availableStartupServer(defaultServer.latest, wslServers.data),
+      ),
     )
     return (
       <Show when={ready()} fallback={<LoadingSplash />}>
         <Show when={effectiveDefaultServer()} keyed>
           {(key) => (
-            <AppInterface
-              defaultServer={key}
-              servers={servers()}
-              router={router}
-              startup={onboarding.promise}
-            >
+            <AppInterface defaultServer={key} servers={servers()} router={router} startup={onboarding.promise}>
               <Inner />
             </AppInterface>
           )}
@@ -470,7 +487,9 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
         locale={locale.latest}
         onNativeTranslations={(bundle) => void window.api.setNativeTranslations(bundle).catch(() => undefined)}
       >
-        <BitsBytesShell audio={audio}><Show when={true}>{(_) => <App />}</Show></BitsBytesShell>
+        <BitsBytesShell audio={audio}>
+          <Show when={true}>{(_) => <App />}</Show>
+        </BitsBytesShell>
       </AppBaseProviders>
     </PlatformProvider>
   )
@@ -480,8 +499,10 @@ render(() => {
   const [windowState] = createResource(async () => {
     const api = window.api as typeof window.api & {
       getWindowID?: () => Promise<string>
+      consumeInitialConversation?: () => Promise<ConversationWindowTarget | null>
     }
-    return { id: await api.getWindowID?.() }
+    const [id, conversation] = await Promise.all([api.getWindowID?.(), api.consumeInitialConversation?.()])
+    return { id, conversation }
   })
 
   return (

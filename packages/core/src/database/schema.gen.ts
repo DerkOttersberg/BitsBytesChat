@@ -67,6 +67,7 @@ export default {
           \`session_id\` text PRIMARY KEY,
           \`project_id\` text,
           \`pinned\` integer DEFAULT false NOT NULL,
+          \`unread\` integer DEFAULT false NOT NULL,
           \`position\` integer DEFAULT 0 NOT NULL,
           CONSTRAINT \`fk_chat_organization_session_id_session_id_fk\` FOREIGN KEY (\`session_id\`) REFERENCES \`session\`(\`id\`) ON DELETE CASCADE,
           CONSTRAINT \`fk_chat_organization_project_id_chat_project_id_fk\` FOREIGN KEY (\`project_id\`) REFERENCES \`chat_project\`(\`id\`) ON DELETE SET NULL

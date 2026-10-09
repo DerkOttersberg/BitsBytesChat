@@ -44,6 +44,8 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { SessionMessage } from "@opencode-ai/schema/session-message"
+import { ChatProject } from "@opencode-ai/schema/chat-project"
+import { ChatOrganizationTable } from "@opencode-ai/core/chat-project/sql"
 
 const parentTitlePrefix = "New session - "
 const childTitlePrefix = "Child session - "
@@ -727,16 +729,40 @@ const layer: Layer.Layer<
       const metadata = structuredClone(original.metadata)
       if (input.inclusive && metadata) delete metadata.bitsbytesDiagnostic
       const title = getForkedTitle(original.title)
-      const session = yield* createNext({
-        directory: ctx.directory,
-        path: sessionPath(ctx.worktree, ctx.directory),
-        workspaceID: original.workspaceID,
-        title,
-        metadata,
-        agent: original.agent,
-        model: original.model,
-        permission: original.permission,
-      })
+      const membership = yield* db
+        .select()
+        .from(ChatOrganizationTable)
+        .where(eq(ChatOrganizationTable.session_id, original.id))
+        .get()
+        .pipe(Effect.orDie)
+      const session = yield* db
+        .transaction(() =>
+          Effect.gen(function* () {
+            const created = yield* createNext({
+              directory: ctx.directory,
+              path: sessionPath(ctx.worktree, ctx.directory),
+              workspaceID: original.workspaceID,
+              title,
+              metadata,
+              agent: original.agent,
+              model: original.model,
+              permission: original.permission,
+            })
+            if (membership?.project_id) {
+              yield* db
+                .insert(ChatOrganizationTable)
+                .values({ session_id: created.id, project_id: membership.project_id })
+                .run()
+              yield* events.publish(ChatProject.ChatChanged, {
+                sessionID: created.id,
+                projectID: membership.project_id,
+                timestamp: Date.now(),
+              })
+            }
+            return created
+          }),
+        )
+        .pipe(Effect.orDie)
       const idMap = new Map<string, MessageID>()
 
       for (const msg of msgs.slice(0, input.messageID && input.inclusive ? target + 1 : target)) {
