@@ -22,7 +22,6 @@ export class BBSide {
   private relations: Relation[] = []
   private ready?: Promise<void>
   private writes: Promise<unknown> = Promise.resolve()
-  private openings = new Map<string, Promise<Child>>()
   private closings = new Map<string, Promise<unknown>>()
   constructor(
     private root: string,
@@ -92,55 +91,34 @@ export class BBSide {
   async open(parentID: string, ownerID: string, directory: string, title: string) {
     await this.load()
     if (!parentID || !ownerID || !directory) throw new Error("bb.error.invalidRequest")
-    const identity = JSON.stringify([ownerID, parentID, directory])
-    const pending = this.openings.get(identity)
-    if (pending) return pending
-    const operation = this.create(parentID, ownerID, directory, title).finally(() => this.openings.delete(identity))
-    this.openings.set(identity, operation)
-    return operation
+    return this.create(parentID, ownerID, directory, title)
   }
   private async create(parentID: string, ownerID: string, directory: string, title: string) {
-    const relation = this.relations.find(
-      (row) =>
-        row.parentID === parentID &&
-        row.ownerID === ownerID &&
-        row.directory === directory &&
-        ["opening", "open"].includes(row.state),
-    ) ?? { key: randomBytes(16).toString("hex"), parentID, ownerID, directory, state: "opening" as const }
-    if (!this.relations.includes(relation)) {
-      this.relations.push(relation)
-      await this.save()
-    }
-    const children = await this.request<Child[]>(`/session/${encodeURIComponent(parentID)}/children`, {}, directory)
-    const found = children.find(
-      (child) =>
-        !child.time?.archived &&
-        child.parentID === parentID &&
-        child.metadata?.bitsbytesDiagnostic?.key === relation.key &&
-        child.metadata.bitsbytesDiagnostic.ownerID === ownerID,
+    // Each explicit open owns a new child. Journal its immutable identity before
+    // submission so recovery can still find it if the create reply is lost.
+    const relation: Relation = { key: randomBytes(16).toString("hex"), parentID, ownerID, directory, state: "opening" }
+    this.relations.push(relation)
+    await this.save()
+    const child = await this.request<Child>(
+      "/session",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          parentID,
+          title,
+          metadata: { bitsbytesDiagnostic: { key: relation.key, parentID, ownerID } },
+          permission: [
+            { permission: "*", pattern: "*", action: "deny" },
+            ...["read", "glob", "grep", "parent_progress"].map((permission) => ({
+              permission,
+              pattern: "*",
+              action: "allow",
+            })),
+          ],
+        }),
+      },
+      directory,
     )
-    const child =
-      found ??
-      (await this.request<Child>(
-        "/session",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            parentID,
-            title,
-            metadata: { bitsbytesDiagnostic: { key: relation.key, parentID, ownerID } },
-            permission: [
-              { permission: "*", pattern: "*", action: "deny" },
-              ...["read", "glob", "grep", "parent_progress"].map((permission) => ({
-                permission,
-                pattern: "*",
-                action: "allow",
-              })),
-            ],
-          }),
-        },
-        directory,
-      ))
     relation.childID = child.id
     relation.state = "open"
     await this.save()

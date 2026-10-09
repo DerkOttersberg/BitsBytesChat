@@ -76,14 +76,15 @@ afterEach(async () => {
   }
 })
 
-test("concurrent side opens reconcile one owned child and grant only read tools", async () => {
+test("explicit side opens create independent owned siblings and grant only read tools", async () => {
   const f = await fixture()
   const [first, second] = await Promise.all([
     f.side.open("ses_parent", "ses_owner", f.folder, "Side"),
     f.side.open("ses_parent", "ses_owner", f.folder, "Side"),
   ])
-  expect(first.id).toBe(second.id)
-  expect(f.state.posts).toBe(1)
+  expect(first.id).not.toBe(second.id)
+  expect(f.state.posts).toBe(2)
+  expect(first.metadata?.bitsbytesDiagnostic?.key).not.toBe(second.metadata?.bitsbytesDiagnostic?.key)
   expect(first).toMatchObject({
     parentID: "ses_parent",
     permission: [
@@ -94,10 +95,10 @@ test("concurrent side opens reconcile one owned child and grant only read tools"
       { permission: "parent_progress", action: "allow" },
     ],
   })
-  expect(JSON.parse(await readFile(join(f.folder, "side-chats.json"), "utf8"))[0]).toMatchObject({
-    childID: first.id,
-    state: "open",
-  })
+  const journal = JSON.parse(await readFile(join(f.folder, "side-chats.json"), "utf8"))
+  expect(journal).toHaveLength(2)
+  expect(journal.map((row: { childID: string }) => row.childID).sort()).toEqual([first.id, second.id].sort())
+  expect(journal.every((row: { state: string }) => row.state === "open")).toBe(true)
 })
 
 test("each side input gets a fresh bounded parent snapshot while an exact retry stays frozen", async () => {
@@ -118,6 +119,8 @@ test("each side input gets a fresh bounded parent snapshot while an exact retry 
 test("closing validates ownership, stops only its child, archives it and preserves historical forks", async () => {
   const f = await fixture(),
     child = await f.side.open("ses_parent", "ses_owner", f.folder, "Side")
+  const sibling = await f.side.open("ses_parent", "ses_owner", f.folder, "Side")
+  expect(sibling.id).not.toBe(child.id)
   await expect(f.side.close(child.id, "ses_other_owner")).rejects.toThrow("sideOwnership")
   expect(f.children.find((row) => row.id === child.id)?.time).toBeUndefined()
   await Promise.all([
@@ -130,6 +133,11 @@ test("closing validates ownership, stops only its child, archives it and preserv
   expect(f.calls.filter((row) => row === "PATCH /session/" + child.id)).toHaveLength(1)
   expect(f.runs.get("ses_parent").paused).toBe(false)
   expect(f.runs.get(child.id).pauseReason).toBe("user-stop")
+  expect(f.children.find((row) => row.id === sibling.id)?.time).toBeUndefined()
+  expect((await f.side.relation(sibling.id))?.state).toBe("open")
+  expect(
+    (await f.side.prepare({ id: "msg_sibling", text: "Hello", directory: f.folder, sessionID: sibling.id })).text,
+  ).toBe("Hello")
   await f.side.close("ses_historical", "ses_owner")
   expect(f.children[0].time).toBeUndefined()
   await expect(
@@ -139,14 +147,19 @@ test("closing validates ownership, stops only its child, archives it and preserv
 
 test("crash recovery reconciles a lost create acknowledgement and cleans only the immutable owned child", async () => {
   const f = await fixture()
+  const sibling = await f.side.open("ses_parent", "ses_owner", f.folder, "Side")
   f.state.loseReply = true
   await expect(f.side.open("ses_parent", "ses_owner", f.folder, "Side")).rejects.toThrow("HTTP 503")
   const restored = new BBSide(f.folder, f.request, f.runs)
   await restored.recover()
-  expect(f.state.posts).toBe(1)
+  expect(f.state.posts).toBe(2)
   expect(f.children[1].time?.archived).toBeNumber()
+  expect(f.children[2].time?.archived).toBeNumber()
   expect(f.children[0].time).toBeUndefined()
   expect(JSON.parse(await readFile(join(f.folder, "side-chats.json"), "utf8"))[0].state).toBe("closed")
   const fresh = await restored.open("ses_parent", "ses_owner", f.folder, "Side")
+  expect(fresh.id).not.toBe(sibling.id)
   expect(fresh.id).not.toBe(f.children[1].id)
+  expect(fresh.id).not.toBe(f.children[2].id)
+  expect(f.state.posts).toBe(3)
 })

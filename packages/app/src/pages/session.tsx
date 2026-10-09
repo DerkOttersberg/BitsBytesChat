@@ -671,7 +671,7 @@ export default function Page(props: { embedded?: boolean } = {}) {
     list.push("turn")
     return list
   })
-  const mobileChanges = createMemo(() => !isDesktop() && store.mobileTab === "changes")
+  const mobileChanges = createMemo(() => !platform.bitsbytes && !isDesktop() && store.mobileTab === "changes")
   const wantsReview = createMemo(() =>
     isDesktop()
       ? desktopFileTreeOpen() ||
@@ -2082,7 +2082,7 @@ export default function Page(props: { embedded?: boolean } = {}) {
   const sessionPanelContent = (headerActions?: JSX.Element) => (
     <>
       {sessionSync() ?? ""}
-      <Show when={!isDesktop() && !!params.id && settings.general.newLayoutDesigns() && !mobileTabsBottom()}>
+      <Show when={!platform.bitsbytes && !isDesktop() && !!params.id && settings.general.newLayoutDesigns() && !mobileTabsBottom()}>
         {mobileTabs(true)}
       </Show>
       <Show when={headerActions && (!params.id || !messagesReady())}>
@@ -2269,7 +2269,7 @@ export default function Page(props: { embedded?: boolean } = {}) {
           )
         }}
       </Show>
-      <Show when={!!params.id && mobileTabsBottom()}>{mobileTabs(true, true)}</Show>
+      <Show when={!platform.bitsbytes && !!params.id && mobileTabsBottom()}>{mobileTabs(true, true)}</Show>
     </>
   )
 

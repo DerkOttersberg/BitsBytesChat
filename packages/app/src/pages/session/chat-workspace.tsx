@@ -547,7 +547,7 @@ export function ChatWorkspace(props: {
     }
   }
   const panelMenu = () => (
-    <MenuV2 placement="bottom-end" gutter={6} open={store.menu} onOpenChange={(menu) => setStore("menu", menu)}>
+    <MenuV2 placement="bottom-start" gutter={6} open={store.menu} onOpenChange={(menu) => setStore("menu", menu)}>
       <MenuV2.Trigger
         as={IconButtonV2}
         variant="ghost-muted"
@@ -658,6 +658,7 @@ export function ChatWorkspace(props: {
             />
           </Show>
           <div class="bb-panel-header">
+            <div class="bb-panel-add">{panelMenu()}</div>
             <div class="bb-panel-tabs" role="tablist">
               <For each={store.tabs}>
                 {(tab) => (
@@ -677,6 +678,7 @@ export function ChatWorkspace(props: {
                       </Show>
                     </button>
                     <button
+                      class="bb-panel-tab-close"
                       aria-label={language.t("bitsbytes.close")}
                       title={language.t("bitsbytes.close")}
                       onClick={() => close(tab)}
@@ -687,9 +689,6 @@ export function ChatWorkspace(props: {
                 )}
               </For>
             </div>
-            <Show when={!store.collapsed}>
-              <div class="bb-panel-add">{panelMenu()}</div>
-            </Show>
             <span class="bb-panel-divider" aria-hidden="true" />
             <div class="bb-panel-collapse">{panelToggle()}</div>
           </div>

@@ -58,7 +58,7 @@ let app
 try {
   app = await _electron.launch({
     executablePath:
-      process.env.BB_QA_EXECUTABLE || join(root, ".tools/qa/panel-browser-package/win-unpacked/BitsBytesChat.exe"),
+      process.env.BB_QA_EXECUTABLE || join(root, ".tools/qa/panel-tabs-package/win-unpacked/BitsBytesChat.exe"),
     ...(process.env.BB_QA_MAIN ? { args: [process.env.BB_QA_MAIN] } : {}),
     env: {
       ...process.env,
@@ -149,7 +149,7 @@ try {
       const toggle = owner.querySelector('button[aria-label="' + (open ? "Collapse panel" : "Expand panel") + '"]')
       const box = (node) => {
         const rect = node.getBoundingClientRect()
-        return { x: rect.x, right: rect.right, width: rect.width }
+        return { x: rect.x, y: rect.y, right: rect.right, width: rect.width, height: rect.height }
       }
       const buttons = [...owner.querySelectorAll("button")].filter((node) => node.offsetWidth)
       return {
@@ -167,14 +167,19 @@ try {
     assert.ok(state.context && state.context.x < state.more.x && state.more.right <= state.toggle.x)
     assert.equal(state.mainToggle, false)
     report.geometry.push({ headerOpen: open, ...state })
+    return state.toggle
   }
-  await headerOrder(false)
+  const sameToggle = (before, after) => {
+    for (const key of ["x", "y", "width", "height"])
+      assert.ok(Math.abs(before[key] - after[key]) <= 0.5, `Toggle ${key}: ${before[key]} -> ${after[key]}`)
+  }
+  const closedToggle = await headerOrder(false)
   await expand().click()
-  await headerOrder(true)
+  sameToggle(closedToggle, await headerOrder(true))
   await noMenu()
   await collapse().click()
   check(
-    "Context usage and More options remain in the main chat; the divided panel toggle is rightmost and moves into the open panel",
+    "Context usage and More options remain in the main chat; the rightmost divided toggle retains identical x/y/size when moved into the panel",
   )
 
   const recents = page.locator(".bb-org-recents")
@@ -248,6 +253,36 @@ try {
   )
   const browser = (await call("browser.list"))[0]
   await panel().getByRole("tab", { name: "Browser", exact: true }).waitFor()
+  const tabControls = async () => {
+    const geometry = await panel()
+      .locator(".bb-panel-header")
+      .evaluate((header) => {
+        const add = header.querySelector(".bb-panel-add")
+        const tabs = header.querySelector(".bb-panel-tabs")
+        return {
+          addFirst: header.firstElementChild === add,
+          addBeforeTabs: add.getBoundingClientRect().right <= tabs.getBoundingClientRect().left,
+          closeCenters: [...tabs.querySelectorAll(".bb-panel-tab-close")].map((button) => {
+            const box = button.getBoundingClientRect()
+            const icon = button.querySelector("svg").getBoundingClientRect()
+            return {
+              x: (icon.left + icon.right - box.left - box.right) / 2,
+              y: (icon.top + icon.bottom - box.top - box.bottom) / 2,
+              width: box.width,
+              height: box.height,
+            }
+          }),
+        }
+      })
+    assert.ok(geometry.addFirst && geometry.addBeforeTabs)
+    assert.ok(geometry.closeCenters.length)
+    for (const close of geometry.closeCenters) {
+      assert.ok(Math.abs(close.x) <= 0.5 && Math.abs(close.y) <= 0.5)
+      assert.equal(close.width, close.height)
+    }
+    report.geometry.push({ tabControls: geometry })
+  }
+  await tabControls()
   const address = page.locator(".bb-browser-toolbar input")
   assert.equal(await address.inputValue(), "")
   await panel().locator(".bb-panel-tools").waitFor()
@@ -375,7 +410,10 @@ try {
       await collapse().click()
       await panel().waitFor({ state: "hidden" })
       await poll(native, (views) => views[0]?.visible === false, "collapsed browser hidden")
+      const before = await expand().boundingBox()
       await expand().click()
+      sameToggle(before, await collapse().boundingBox())
+      await tabControls()
       await noMenu()
       assert.equal(
         await panel()
@@ -426,6 +464,52 @@ try {
   await panel().waitFor({ state: "hidden" })
   check(
     "Final-tab closure releases its browser and collapses the panel; reopening retains width; Terminal landing creates one shell",
+  )
+  await expand().click()
+  await panel().getByRole("button", { name: "Side chat", exact: true }).click()
+  const sideEditor = () => panel().locator(".bb-panel-content:visible [contenteditable=true]").first()
+  const sideID = () => panel().locator(".bb-panel-content:visible [data-bb-chat]").first().getAttribute("data-bb-chat")
+  await sideEditor().waitFor()
+  const firstSide = await sideID()
+  await sideEditor().fill("Independent first side-chat draft")
+  await panel().locator(".bb-panel-add button").click()
+  await page.getByRole("menuitem", { name: "Side chat", exact: true }).click()
+  await poll(
+    () => sideID(),
+    (id) => id && id !== firstSide,
+    "independent second side chat",
+  )
+  const secondSide = await sideID()
+  await sideEditor().waitFor()
+  await sideEditor().fill("Independent second side-chat draft")
+  const tabs = () => panel().locator(".bb-panel-tabs>div")
+  assert.equal(await tabs().count(), 2)
+  await tabControls()
+  await tabs().nth(0).getByRole("tab").click()
+  assert.equal(await sideID(), firstSide)
+  assert.equal(await sideEditor().textContent(), "Independent first side-chat draft")
+  await tabs().nth(1).getByRole("tab").click()
+  assert.equal(await sideID(), secondSide)
+  assert.equal(await sideEditor().textContent(), "Independent second side-chat draft")
+  await tabs().nth(0).getByRole("button", { name: "Close tab", exact: true }).click()
+  await poll(
+    () => api("/session/" + firstSide),
+    (child) => !!child.time?.archived,
+    "only first side archived",
+  )
+  assert.equal((await api("/session/" + secondSide)).time?.archived, undefined)
+  assert.equal(await sideID(), secondSide)
+  assert.equal(await sideEditor().textContent(), "Independent second side-chat draft")
+  await tabs().getByRole("button", { name: "Close tab", exact: true }).click()
+  await panel().waitFor({ state: "hidden" })
+  await poll(
+    () => api("/session/" + secondSide),
+    (child) => !!child.time?.archived,
+    "second side archived",
+  )
+  assert.equal(await main.locator("[contenteditable=true]").first().textContent(), "An unsent fictional follow-up")
+  check(
+    "The add button stays left; close icons center in both axes; two side chats retain independent drafts, switching and owned closure",
   )
   assert.deepEqual(report.errors, [])
   assert.ok(
