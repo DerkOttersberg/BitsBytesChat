@@ -3,7 +3,11 @@ import { Schema } from "effect"
 import { Session } from "../src/session"
 
 test("diagnostic ownership validates its immutable key and session identities", () => {
-  const value = { key: "a".repeat(32), parentID: "ses_parent", ownerID: "ses_owner" }
+  const value = {
+    key: "a".repeat(32),
+    parentID: Session.ID.make("ses_parent"),
+    ownerID: Session.ID.make("ses_owner"),
+  }
   expect(Schema.decodeUnknownSync(Session.Diagnostic)(value)).toEqual(value)
   expect(Schema.encodeSync(Session.Diagnostic)(value)).toEqual(value)
   expect(() => Schema.decodeUnknownSync(Session.Diagnostic)({ ...value, key: "invalid" })).toThrow()
