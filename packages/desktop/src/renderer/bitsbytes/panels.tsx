@@ -5,6 +5,9 @@ import { bbt, bbError } from "../../bitsbytes/copy"
 import { WordPreview } from "./preview"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { Icon } from "@opencode-ai/ui/icon"
+import { FileTypeIcon } from "@opencode-ai/ui/file-type-icon"
+import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
+import { TooltipV2 } from "@opencode-ai/ui/v2/tooltip-v2"
 import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
 import { MarkdownPreviewSource, isMarkdownName } from "@opencode-ai/app"
 
@@ -60,12 +63,15 @@ export function DocumentPanel(props: { id: string; revision?: number }) {
     void api.call<DocumentArtifact[]>("artifacts.list").then(items => { if (disposed || token !== generation || props.id !== id) return; const artifact = items.find(item => item.id === id); if (artifact) void update(artifact) }).catch(error => { if (!disposed && token === generation && props.id === id) setStore("error", bbError(error)) })
   })
   const run = (method: string) => api.call(method, { id: props.id, revision: store.revision || undefined, path: store.artifact?.path }).catch(error => setStore("error", bbError(error)))
+  const openLabel = () => bbt(store.revision && store.revision !== store.artifact?.revision ? store.artifact?.kind === "document" ? "openCurrentWord" : "openCurrentApp" : store.artifact?.kind === "document" ? "openWord" : "openApp")
   const isolatedHTML = (text: string) => '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data: blob: https:; font-src data:; connect-src \'none\'; form-action \'none\'; base-uri \'none\';">' + text
   return <div class="bb-document-panel">
     <div class="bb-document-toolbar">
-      <ButtonV2 variant="ghost-muted" size="normal" onClick={() => void run("file.open")}>{bbt(store.revision && store.revision !== store.artifact?.revision ? store.artifact?.kind === "document" ? "openCurrentWord" : "openCurrentApp" : store.artifact?.kind === "document" ? "openWord" : "openApp")}</ButtonV2>
-      <ButtonV2 variant="ghost-muted" size="normal" onClick={() => void run("file.reveal")}>{bbt("showFolder")}</ButtonV2>
-      <ButtonV2 variant="ghost-muted" size="normal" onClick={() => void run("artifact.save-copy")}>{bbt("saveCopy")}</ButtonV2>
+      <div class="bb-document-file-actions">
+        <TooltipV2 value={openLabel()}><IconButtonV2 type="button" variant="ghost-muted" size="normal" aria-label={openLabel()} disabled={!store.artifact} icon={<FileTypeIcon filename={store.artifact?.filename ?? ""} kind={store.artifact?.kind} />} onClick={() => void run("file.open")} /></TooltipV2>
+        <TooltipV2 value={bbt("showFolder")}><IconButtonV2 type="button" variant="ghost-muted" size="normal" aria-label={bbt("showFolder")} disabled={!store.artifact} icon={<Icon name="folder" />} onClick={() => void run("file.reveal")} /></TooltipV2>
+        <TooltipV2 value={bbt("saveCopy")}><IconButtonV2 type="button" variant="ghost-muted" size="normal" aria-label={bbt("saveCopy")} disabled={!store.artifact} icon={<Icon name="download" />} onClick={() => void run("artifact.save-copy")} /></TooltipV2>
+      </div>
       <Show when={(store.artifact?.history?.length ?? 0) > 1}><select aria-label={bbt("versions")} value={store.revision} onChange={event => { setStore({ revision: Number(event.currentTarget.value), offset: 0, pages: [], grid: undefined, bytes: undefined, error: "" }); refresh() }}><option value="0" selected={!store.revision}>{bbt("latest")}</option><For each={store.artifact?.history}>{version => <option value={version.revision} selected={store.revision === version.revision}>{bbt("revision").replace("{{revision}}", String(version.revision))}</option>}</For></select></Show>
       <Show when={store.artifact?.kind === "html"}><ButtonV2 variant="ghost-muted" size="normal" onClick={() => setStore("mode", store.mode === "preview" ? "source" : "preview")}>{bbt(store.mode === "preview" ? "source" : "preview")}</ButtonV2></Show>
       <Show when={store.loading || store.artifact?.status === "queued" || store.artifact?.status === "exporting"}><span class="bb-preview-updating" role="status"><i class="bb-preview-spinner" aria-hidden="true" />{bbt("previewUpdating")}</span></Show>

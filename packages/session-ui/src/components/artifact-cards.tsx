@@ -1,6 +1,7 @@
 import { createEffect, For, onCleanup, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Icon } from "@opencode-ai/ui/icon"
+import { FileTypeIcon, fileType } from "@opencode-ai/ui/file-type-icon"
 import { useI18n } from "@opencode-ai/ui/context/i18n"
 import type { ToolPart } from "@opencode-ai/sdk/v2"
 import { ImageGenerationGallery } from "./image-generation-card"
@@ -16,6 +17,8 @@ export function ArtifactCards(props: { sessionID: string; messageIDs: string[]; 
   window.addEventListener("bitsbytes:artifact-change", update)
   onCleanup(() => window.removeEventListener("bitsbytes:artifact-change", update))
   return <><ImageGenerationGallery sessionID={props.sessionID} inputIDs={props.inputIDs} tools={props.tools} artifacts={store.items.filter(item => item.kind === "image")} /><Show when={store.items.some(item => item.kind !== "image")}><div class="bb-artifact-cards" data-component="artifact-cards"><For each={store.items.filter(item => item.kind !== "image")}>{item => <button class="bb-artifact-card" onClick={() => window.dispatchEvent(new CustomEvent("bitsbytes:open-artifact", { detail: { id: item.id, sessionID: item.sessionID, revision: item.revision } }))} title={item.path}>
-    <Icon name={item.kind === "code" || item.kind === "html" ? "code" : "open-file"} /><span><strong>{item.filename}</strong><small>{i18n.t("ui.artifact.revision", { revision: item.revision })}<Show when={item.status !== "ready"}> · {i18n.t(item.status === "error" ? "ui.artifact.error" : "ui.artifact.preparing")}</Show></small></span><Icon name="open-file" />
+    <span class="bb-artifact-file-icon"><FileTypeIcon filename={item.filename} kind={item.kind} /></span>
+    <span class="bb-artifact-file-info"><strong>{item.filename}</strong><small>{i18n.t(`ui.fileType.${fileType(item.filename, item.kind)}`)}<Show when={item.status !== "ready"}> · {i18n.t(item.status === "error" ? "ui.artifact.error" : "ui.artifact.preparing")}</Show></small></span>
+    <span class="bb-artifact-open"><span class="bb-artifact-open-label">{i18n.t("ui.artifact.open")}</span><Icon name="chevron-right" size="small" /></span>
   </button>}</For></div></Show></>
 }

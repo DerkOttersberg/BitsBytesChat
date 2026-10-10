@@ -1078,6 +1078,13 @@ export function MessageTimeline(props: {
         id={anchor() ? props.anchor(input.row().userMessageID) : undefined}
         data-message-id={input.row().userMessageID}
         data-timeline-row={input.row()._tag}
+        data-previous-assistant={previousAssistantPart() || undefined}
+        data-assistant-part-type={(() => {
+          const row = input.row()
+          if (row._tag !== "AssistantPart") return
+          if (row.group.type === "context") return "tool"
+          return getMsgPart(row.group.ref.messageID, row.group.ref.partID)?.type
+        })()}
         classList={{
           "min-w-0 w-full max-w-full": true,
           "md:max-w-200 2xl:max-w-[1000px]": props.centered,

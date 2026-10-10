@@ -1,11 +1,11 @@
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises"
 import { createServer } from "node:http"
 import { createRequire } from "node:module"
 import { constants, setPriority } from "node:os"
-import { basename, join, resolve } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 import { captureHidden } from "./qa-capture.mjs"
 
 // Only owned windows, data and local provider requests. Never touches live credentials or desktop focus.
@@ -20,6 +20,13 @@ const results = join(root, ".tools/qa/results")
 const reportName = process.env.BB_QA_REPORT || "transcript-presentation"
 const capture = process.env.BB_QA_CAPTURE === "1"
 const report = { checks: [], errors: [], geometry: [], screenshots: [], profile, syntheticProvider: true }
+const executablePath = process.env.BB_QA_EXECUTABLE || join(root, ".tools/qa/workspace-refinements-package/win-unpacked/BitsBytesChat.exe")
+report.executablePath = executablePath
+if (!process.env.BB_QA_MAIN) {
+  report.asarSHA256 = createHash("sha256")
+    .update(await readFile(join(dirname(executablePath), "resources/app.asar")))
+    .digest("hex")
+}
 const fixtureFile = join(directory, "fixture-changes.txt")
 const pngPath = join(directory, "recorded-preview.png")
 const png = "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGNUSFjAgA0wYRUdtBIA5UgBMGHyow0AAAAASUVORK5CYII="
@@ -191,9 +198,7 @@ const poll = async (read, accept, label) => {
 let app, page
 try {
   app = await _electron.launch({
-    executablePath:
-      process.env.BB_QA_EXECUTABLE ||
-      join(root, ".tools/qa/workspace-refinements-package/win-unpacked/BitsBytesChat.exe"),
+    executablePath,
     ...(process.env.BB_QA_MAIN ? { args: [process.env.BB_QA_MAIN] } : {}),
     env: {
       ...process.env,

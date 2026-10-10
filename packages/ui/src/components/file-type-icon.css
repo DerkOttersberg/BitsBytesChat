@@ -1,0 +1,9 @@
+[data-component="file-type-icon"] { display:block; flex-shrink:0; }
+[data-component="file-type-icon"][data-file-type="word"] { color:#3977cf; }
+[data-component="file-type-icon"][data-file-type="spreadsheet"] { color:#27815e; }
+[data-component="file-type-icon"][data-file-type="presentation"] { color:#c86738; }
+[data-component="file-type-icon"][data-file-type="pdf"] { color:#c45757; }
+[data-color-scheme="dark"] [data-component="file-type-icon"][data-file-type="word"] { color:#82b5ff; }
+[data-color-scheme="dark"] [data-component="file-type-icon"][data-file-type="spreadsheet"] { color:#7bc7a4; }
+[data-color-scheme="dark"] [data-component="file-type-icon"][data-file-type="presentation"] { color:#efa980; }
+[data-color-scheme="dark"] [data-component="file-type-icon"][data-file-type="pdf"] { color:#ed9999; }

@@ -14,6 +14,7 @@ import {
 import { createStore, reconcile } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
 import { Icon } from "@opencode-ai/ui/icon"
+import { FileTypeIcon } from "@opencode-ai/ui/file-type-icon"
 import { useFileComponent } from "@opencode-ai/ui/context/file"
 import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
 import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
@@ -712,7 +713,10 @@ export function ChatWorkspace(props: {
                       title={tab.title}
                       onClick={() => select(tab.id)}
                     >
-                      {tab.title}
+                      <Show when={["document", "file", "code", "source", "image", "plan", "goal"].includes(tab.kind)} fallback={<Icon name={tab.kind === "chat" ? "bubble-5" : tab.kind === "terminal" ? "console" : tab.kind === "browser" ? "window-cursor" : "pencil-line"} size="small" />}>
+                        <FileTypeIcon filename={tab.path ?? tab.title} kind={tab.kind} />
+                      </Show>
+                      <span class="bb-panel-tab-title">{tab.title}</span>
                       <Show when={tab.unread}>
                         <span class="bb-unread" aria-hidden="true">
                           •

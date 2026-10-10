@@ -309,6 +309,8 @@ try {
   const artifacts = async () => (await call("artifacts.list")).filter((item) => item.sessionID === chat.id)
   const artifactState = async (id) => (await artifacts()).find((item) => item.id === id)
   await page.locator(".bb-org-sidebar").waitFor({ timeout: 120000 })
+  assert.equal(await page.getByText("DEV", { exact: true }).count(), 0, "packaged candidate uses the production channel")
+  report.productionChannel = true
   await api("/api/organization/migrate", "POST", { projects: [{ directory }], defaultDirectory: directory })
   await call("images.configure", { provider: "openai", key: "fixture-image-key", model: "gpt-image-2.5-flare" })
   await poll(
@@ -357,7 +359,25 @@ try {
     )
   const snapshot = async (label) => {
     const path = join(results, `${reportName}-${label}.png`)
-    report.screenshots.push({ label, path, ...(await captureHidden(app, page, path)) })
+    const regions = await page.evaluate(() => Object.fromEntries([
+      ["chat", ".bb-workspace-chat"], ["panelHeader", ".bb-panel-header"], ["panel", ".bb-workspace-panel"], ["documentToolbar", ".bb-document-toolbar"], ["fileCard", ".bb-workspace-chat .bb-artifact-card"],
+    ].flatMap(([name, selector]) => {
+      const element = [...document.querySelectorAll(selector)].find(element => element.getBoundingClientRect().width && element.getBoundingClientRect().height)
+      if (!element) return []
+      const rect = element.getBoundingClientRect()
+      return [[name, { x: rect.x, y: rect.y, width: rect.width, height: rect.height }]]
+    })))
+    const documentTurn = await page.evaluate(() => {
+      const card = [...document.querySelectorAll(".bb-workspace-chat .bb-artifact-card")].findLast(element => element.getBoundingClientRect().height)
+      const id = card?.closest("[data-message-id]")?.getAttribute("data-message-id")
+      if (!id) return
+      const rects = [...document.querySelectorAll(".bb-workspace-chat [data-message-id]")].filter(element => element.getAttribute("data-message-id") === id).map(element => element.getBoundingClientRect()).filter(rect => rect.height)
+      const left = Math.max(0, Math.min(...rects.map(rect => rect.left)))
+      const top = Math.max(0, Math.min(...rects.map(rect => rect.top)))
+      return { x: left, y: top, width: Math.max(...rects.map(rect => rect.right)) - left, height: Math.min(innerHeight, Math.max(...rects.map(rect => rect.bottom))) - top }
+    })
+    if (documentTurn) regions.documentTurn = documentTurn
+    report.screenshots.push({ label, path, regions, ...(await captureHidden(app, page, path)) })
   }
   const allow = () => main().getByRole("button", { name: "Allow once", exact: true })
   await send(prompts.image)
@@ -547,10 +567,46 @@ try {
     const first = await poll(artifacts, (rows) => rows.find((row) => row.kind === kind), kind + " published")
     const artifact = first.find((row) => row.kind === kind)
     const previewUI = async (item, revised) => {
-      await main().locator(".bb-artifact-card").filter({ hasText: item.filename }).last().click()
+      const card = main().locator(".bb-artifact-card").filter({ hasText: item.filename }).last()
+      await card.click()
       const panel = page.locator(".bb-document-panel:visible").last()
       await panel.waitFor()
       await panel.getByRole("button", { name: "Save copy", exact: true }).waitFor()
+      assert.equal(await card.locator("small").textContent(), kind === "document" ? "Word" : "Excel")
+      assert.equal(await card.locator("[data-component=file-type-icon]").getAttribute("data-file-type"), kind === "document" ? "word" : "spreadsheet")
+      assert.equal(await card.locator(".bb-artifact-open").textContent(), "Open")
+      assert.equal(await card.getByText(/Revision \d+/).count(), 0)
+      await card.hover()
+      await poll(() => card.evaluate(element => {
+        const actions = element.closest('[data-slot="session-turn-assistant-content"]')?.querySelector('[data-slot="text-part-copy-wrapper"]')
+        if (!actions) return false
+        const style = getComputedStyle(actions)
+        return style.opacity === "1" && style.pointerEvents === "auto"
+      }), Boolean, "response actions remain reachable across the file card")
+      const geometry = await card.evaluate(element => {
+        const content = element.closest('[data-slot="session-turn-assistant-content"]')
+        const body = content?.querySelector('[data-slot="text-part-body"]')?.getBoundingClientRect()
+        const actions = content?.querySelector('[data-slot="text-part-copy-wrapper"]')?.getBoundingClientRect()
+        const card = element.getBoundingClientRect()
+        return { gap: body && card.top - body.bottom, actionsBelow: actions && actions.top >= card.bottom, width: card.width, height: card.height, contentWidth: content?.getBoundingClientRect().width }
+      })
+      assert.ok(geometry.gap !== undefined && geometry.gap >= 0 && geometry.gap <= 20, JSON.stringify(geometry))
+      assert.equal(geometry.actionsBelow, true, JSON.stringify(geometry))
+      assert.ok(geometry.width <= geometry.contentWidth && geometry.height <= 70, JSON.stringify(geometry))
+      report.cardGeometry ??= []
+      report.cardGeometry.push({ kind, revised, ...geometry })
+      for (const name of [kind === "document" ? "Open in Word" : "Open in app", "Show in folder", "Save copy"]) {
+        const action = panel.getByRole("button", { name, exact: true })
+        assert.equal(await action.textContent(), "")
+        assert.ok(await action.locator("svg").count())
+      }
+      assert.equal(await panel.getByRole("combobox", { name: "Version history", exact: true }).count(), revised ? 1 : 0)
+      if (kind === "document" && !revised) {
+        await panel.getByRole("button", { name: "Save copy", exact: true }).hover()
+        await page.getByRole("tooltip").filter({ hasText: "Save copy" }).waitFor()
+        await snapshot("document-actions-tooltip")
+        await card.hover()
+      }
       if (kind === "spreadsheet") {
         const expected = ["Item", "Cost", "Paper", "12", "Pens", revised ? "10" : "8", "Total", revised ? "22" : "20"]
         await poll(
@@ -620,7 +676,32 @@ try {
     const preview = await artifactState(artifact.id)
     assert.equal(preview.status, "ready", preview.error)
     await previewUI(preview, false)
+    await page.mouse.move(20, 20)
     await snapshot(kind + "-completed")
+    if (kind === "document") {
+      const bounds = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds())
+      await page.emulateMedia({ colorScheme: "dark" })
+      await page.waitForFunction(() => document.documentElement.dataset.colorScheme === "dark")
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1.25))
+      await snapshot("document-dark-125")
+      await app.evaluate(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows()[0]
+        window.webContents.setZoomFactor(1)
+        window.setBounds({ width: 1000, height: 800 })
+      })
+      await page.emulateMedia({ colorScheme: "light" })
+      await page.waitForFunction(() => document.documentElement.dataset.colorScheme === "light")
+      const card = main().locator(".bb-artifact-card").filter({ hasText: preview.filename }).last()
+      const fits = await card.evaluate(element => {
+        const rect = element.getBoundingClientRect()
+        const content = element.closest('[data-slot="session-turn-assistant-content"]').getBoundingClientRect()
+        const info = element.querySelector(".bb-artifact-file-info").getBoundingClientRect()
+        return rect.width <= content.width && info.width >= 60 && element.scrollWidth <= element.clientWidth
+      })
+      assert.equal(fits, true)
+      await snapshot("document-narrow")
+      await app.evaluate(({ BrowserWindow }, bounds) => BrowserWindow.getAllWindows()[0].setBounds(bounds), bounds)
+    }
     await send(revisionPrompt)
     await allow().waitFor()
     await allow().click()
@@ -640,6 +721,7 @@ try {
       `The ${kind} source and visible preview contain the correct contents; revision 2 preserves its artifact identity`,
     )
   }
+  check("File cards show distinct type icons and labels without revision noise; response actions follow the card, and compact Office actions retain labels, tooltips and revision history")
   await page.getByRole("button", { name: "Open panel", exact: true }).last().click()
   await page.getByRole("menuitem", { name: "Side chat", exact: true }).click()
   const side = page.locator(".bb-embedded-chat:visible")

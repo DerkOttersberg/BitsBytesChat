@@ -5,7 +5,7 @@
 .bb-workspace-panel-overlay { position:absolute; inset:8px; z-index:1; }
 /* Include the panel's 1px outer border in the chat header's 48px height and 12px inset. */
 .bb-panel-header { display:flex; align-items:center; height:47px; min-width:0; flex-shrink:0; padding:0 11px; gap:2px; border-bottom:1px solid var(--border-weak-base); }
-.bb-panel-tabs { display:flex; flex:0 1 auto; overflow:auto; min-width:0; gap:4px; }
+.bb-panel-tabs { display:flex; flex:0 1 auto; overflow:auto; min-width:0; gap:0; scrollbar-width:none; }
 .bb-panel-add { flex-shrink:0; display:flex; }
 .bb-panel-focus { margin-left:auto; flex-shrink:0; display:flex; }
 .bb-panel-collapse { flex-shrink:0; display:flex; }
@@ -18,12 +18,18 @@
 .bb-panel-tools-grid>button:disabled { opacity:.45; }
 .bb-panel-tools-grid>button [data-component=icon] { flex-shrink:0; color:var(--text-weak); }
 .bb-panel-tools-grid>button [data-component=icon]:last-child:not(:first-child) { margin-left:auto; }
-.bb-panel-tabs>div { display:flex; flex:0 0 auto; max-width:220px; min-width:0; align-items:center; border-radius:6px; color:var(--text-weak); }
-.bb-panel-tabs>div.active { background:var(--surface-raised-base); color:var(--text-strong); }
-.bb-panel-tabs button { height:29px; border-radius:5px; padding:0 6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.bb-panel-tabs .bb-panel-tab-close { display:grid; place-items:center; flex-shrink:0; width:26px; height:26px; padding:0; }
+.bb-panel-tabs>div { position:relative; display:flex; flex:0 0 auto; max-width:220px; min-width:0; align-items:center; padding:0 4px; color:var(--text-weak); }
+.bb-panel-tabs>div+div:before { content:""; position:absolute; inset-inline-start:0; top:8px; bottom:8px; width:1px; background:var(--border-weak-base); }
+.bb-panel-tabs>div.active { color:var(--text-strong); }
+.bb-panel-tabs>div.active [role=tab] { background:var(--surface-raised-base); }
+.bb-panel-tabs button { height:30px; border-radius:6px; padding:0 6px; white-space:nowrap; }
+.bb-panel-tabs .bb-panel-tab-close { display:grid; place-items:center; flex-shrink:0; width:22px; height:26px; padding:0; opacity:0; }
+.bb-panel-tabs>div:hover .bb-panel-tab-close,.bb-panel-tabs>div:focus-within .bb-panel-tab-close { opacity:1; }
 .bb-panel-tabs button:hover { background:var(--surface-raised-base-hover); }
-.bb-panel-tabs [role=tab] { min-width:0; text-align:left; }
+.bb-panel-tabs [role=tab] { display:flex; align-items:center; gap:6px; min-width:0; text-align:left; }
+.bb-panel-tab-title { overflow:hidden; text-overflow:ellipsis; }
+.bb-panel-tabs [role=tab]>[data-component=file-type-icon] { width:16px; height:16px; }
+.bb-panel-header :is(.bb-panel-focus,.bb-panel-collapse,.bb-panel-add) [data-component=icon-button-v2] { width:32px; height:32px; }
 .bb-unread { margin-left:6px; color:var(--text-info-base); }
 .bb-panel-body { flex:1; min-height:0; position:relative; overflow:hidden; border-radius:0 0 10px 10px; }
 .bb-panel-content { height:100%; width:100%; min-height:0; flex-direction:column; overflow:hidden; }
