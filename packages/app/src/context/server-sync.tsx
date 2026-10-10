@@ -12,6 +12,7 @@ import { executionOwner } from "@opencode-ai/core/execution-owner"
 import { type Accessor, batch, createMemo, getOwner, onCleanup, onMount, untrack } from "solid-js"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { useLanguage } from "@/context/language"
+import { usePlatform } from "@/context/platform"
 import type { InitError } from "../pages/error"
 import { ServerSDK } from "./server-sdk"
 import {
@@ -210,6 +211,7 @@ export type QueryOptionsApi = ReturnType<typeof makeQueryOptionsApi>
 
 export function createServerSyncContextInner(serverSDK: ServerSDK) {
   const language = useLanguage()
+  const platform = usePlatform()
   const owner = getOwner()
   if (!owner) throw new Error("ServerSync must be created within owner")
 
@@ -232,6 +234,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
 
   const session = createServerSession(serverSDK.client, serverSDK.api.session, serverSDK.api.message, {
     protocol: serverSDK.protocol,
+    legacyTodos: !!platform.bitsbytes,
   })
   const queryOptionsApi = makeQueryOptionsApi(
     serverSDK.scope,

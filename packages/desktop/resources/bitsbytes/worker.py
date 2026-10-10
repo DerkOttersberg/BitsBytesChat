@@ -19,6 +19,7 @@ import array
 import subprocess
 import base64
 import re
+from fractions import Fraction
 from io import BytesIO
 
 RATE = 16000
@@ -129,9 +130,52 @@ def add_chunk(job_id, payload):
         save_job(job)
 
 
+def capture_format(sounddevice, device):
+    try:
+        info = sounddevice.query_devices(device, "input")
+    except sounddevice.PortAudioError as error:
+        raise ValueError("bb.error.audioMicrophone") from error
+    rates = list(dict.fromkeys([RATE, int(info["default_samplerate"])]))
+    channels = [1] + ([2] if info["max_input_channels"] >= 2 else [])
+    for rate in rates:
+        for channel in channels:
+            try:
+                sounddevice.check_input_settings(device=device, channels=channel, dtype="int16", samplerate=rate)
+                return rate, channel
+            except sounddevice.PortAudioError:
+                continue
+    raise ValueError("bb.error.audioMicrophone")
+
+
+class CapturePCM:
+    def __init__(self, rate, channels):
+        import av
+        self.av = av
+        self.rate = rate
+        self.channels = channels
+        self.samples = 0
+        self.resampler = av.AudioResampler(format="s16", layout="mono", rate=RATE)
+
+    def convert(self, data):
+        if data is None:
+            frames = self.resampler.resample(None)
+        else:
+            count = len(data) // (2 * self.channels)
+            frame = self.av.AudioFrame(format="s16", layout="mono" if self.channels == 1 else "stereo", samples=count)
+            frame.planes[0].update(data)
+            frame.sample_rate = self.rate
+            frame.time_base = Fraction(1, self.rate)
+            frame.pts = self.samples
+            self.samples += count
+            frames = self.resampler.resample(frame)
+        return b"".join(bytes(frame.planes[0])[:frame.samples * 2] for frame in frames)
+
+
 class Recorder:
     def __init__(self, job_id, device):
         import sounddevice
+        rate, channels = capture_format(sounddevice, device)
+        self.pcm = CapturePCM(rate, channels)
         self.job_id = job_id
         self.paused = threading.Event()
         self.ending = threading.Event()
@@ -141,14 +185,16 @@ class Recorder:
         self.thread = threading.Thread(target=self.write, daemon=True)
         self.thread.start()
         try:
-            self.stream = sounddevice.RawInputStream(samplerate=RATE, channels=1, dtype="int16", device=device,
-                                                     blocksize=1600, callback=self.callback)
+            self.stream = sounddevice.RawInputStream(samplerate=rate, channels=channels, dtype="int16", device=device,
+                                                     blocksize=max(1, rate // 10), callback=self.callback)
             self.stream.start()
-        except Exception:
+        except Exception as error:
             if hasattr(self, "stream"):
                 self.stream.close()
             self.ending.set()
             self.thread.join(timeout=15)
+            if isinstance(error, sounddevice.PortAudioError):
+                raise ValueError("bb.error.audioMicrophone") from error
             raise
 
     def callback(self, data, frames, info, status):
@@ -173,6 +219,7 @@ class Recorder:
                     data = self.data.get(timeout=0.2)
                 except queue.Empty:
                     continue
+                data = self.pcm.convert(data)
                 journal.write(data)
                 journal.flush()
                 if time.monotonic() - last_meter > 0.2:
@@ -193,6 +240,11 @@ class Recorder:
                     index += 1
                     partial = job_dir(self.job_id) / f"active-{index:06d}.pcm"
                     journal = partial.open("wb")
+            tail = self.pcm.convert(None)
+            if tail:
+                journal.write(tail)
+                journal.flush()
+                payload.extend(tail)
             if payload:
                 add_chunk(self.job_id, bytes(payload))
             journal.close()
@@ -343,13 +395,12 @@ def speaker_segments(result, recording):
         if (any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) for value in (start, end))
                 or not 0 <= start <= end <= recording["duration"] + 2):
             raise ValueError("bb.error.audioDiarizationResponse")
-        speaker = row.get("speaker")
+        speaker = row.get("speaker", row.get("speaker_label", row.get("speaker_id")))
         if type(speaker) is int and 0 <= speaker < 32:
             speaker = f"speaker_{speaker}"
         else:
-            if speaker is not None:
-                raise ValueError("bb.error.audioDiarizationResponse")
-            speaker = row.get("speaker_label", row.get("speaker_id"))
+            if isinstance(speaker, str) and re.fullmatch(r"(?:[0-9]|[12][0-9]|3[01])", speaker):
+                speaker = "speaker_" + speaker
             if speaker is not None and (not isinstance(speaker, str) or not re.fullmatch(r"speaker_(?:[0-9]|[12][0-9]|3[01])", speaker)):
                 raise ValueError("bb.error.audioDiarizationResponse")
         labelled = labelled or speaker is not None
@@ -533,6 +584,8 @@ def transcribe(args):
         update_job(job_id, status="transcribing", error="")
         try:
             job = read_job(job_id)
+            if not job.get("recording") and not job["chunks"]:
+                raise ValueError("bb.error.audioEmpty")
             if job.get("audioDiarization") and not job.get("diarizationComplete"):
                 if not job["chunks"]:
                     raise ValueError("bb.error.audioEmpty")
@@ -799,7 +852,18 @@ def create_generic(args):
 def dispatch(method, args):
     global RECORD
     if method == "health":
-        return {"python": sys.version.split()[0], "root": str(ROOT), "engines": ["parakeet", "whisper", "openrouter"]}
+        # The interpreter can predate a first-use install. Activate the newly
+        # created component directory before checking its imports.
+        import site
+        site.addsitedir(str(ROOT / "runtime" / "worker" / "Lib" / "site-packages"))
+        importlib.invalidate_caches()
+        try:
+            for name in ("sounddevice", "av", "httpx"):
+                importlib.import_module(name)
+            ready = True
+        except (ImportError, OSError):
+            ready = False
+        return {"python": sys.version.split()[0], "root": str(ROOT), "engines": ["parakeet", "whisper", "openrouter"], "audioReady": ready}
     if method == "devices":
         import sounddevice
         return [{"id": i, "name": row["name"]} for i, row in enumerate(sounddevice.query_devices()) if row["max_input_channels"] > 0]

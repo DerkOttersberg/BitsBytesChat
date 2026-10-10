@@ -7,6 +7,49 @@ import { dispatchEngine, engineRequest, inspectEngine } from "./bitsbytes-engine
 import { BBRuns } from "./bitsbytes-runs"
 
 const servers: ReturnType<typeof createServer>[] = []
+test.each(["v1", "v2"] as const)("%s prepares binary uploads before resolving source context and admission", async protocol => {
+  const bodies: unknown[] = []
+  const server = await fixture(async (request, response) => {
+    let body = ""
+    for await (const part of request) body += part
+    bodies.push(JSON.parse(body || "{}"))
+    response.writeHead(204).end()
+  })
+  const source = "data:application/octet-stream;base64,AP8BAA=="
+  const managed = "bitsbytes://attachment/" + "a".repeat(64)
+  const prepared: string[] = []
+  const resolved: string[] = []
+  await dispatchEngine(server, {
+    id: "msg_binary", sessionID: "ses_binary", directory: "D:/QA", text: "Inspect attached save",
+    files: [{ uri: source, name: "save.nbt", mediaType: "application/octet-stream" }],
+    legacyParts: [{ type: "text", text: "Inspect attached save" }, { type: "file", url: source, filename: "save.nbt", mime: "application/octet-stream" }],
+  }, {
+    protocol, contextRoot: "D:/QA",
+    prepareAttachment: async file => { expect(file.name).toBe("save.nbt"); prepared.push(file.uri); return managed },
+    resolveAttachment: async uri => { resolved.push(uri); return { text: "Exact source saved at D:/QA/source.nbt" } },
+  })
+  expect(prepared).toEqual([source, source])
+  expect(resolved.every(uri => uri === managed)).toBe(true)
+  expect(resolved.length).toBeGreaterThan(0)
+  expect(JSON.stringify(bodies)).toContain(managed)
+  expect(JSON.stringify(bodies)).not.toContain(source)
+})
+
+test("Stop during upload preparation prevents engine admission", async () => {
+  const controller = new AbortController()
+  let admitted = false
+  const server = await fixture((request, response) => { admitted = true; response.writeHead(204).end() })
+  const result = await dispatchEngine(server, {
+    id: "msg_cancel", sessionID: "ses_cancel", directory: "D:/QA", text: "Inspect",
+    files: [{ uri: "data:application/octet-stream;base64,AA==", name: "source.bin", mediaType: "application/octet-stream" }],
+  }, {
+    protocol: "v2", contextRoot: "D:/QA", signal: controller.signal,
+    prepareAttachment: async () => { controller.abort(); return "bitsbytes://attachment/" + "b".repeat(64) },
+    resolveAttachment: async () => ({ text: "Source" }),
+  })
+  expect(result).toBe("not-sent")
+  expect(admitted).toBe(false)
+})
 async function fixture(handler: Parameters<typeof createServer>[0]) {
   const server = createServer(handler)
   servers.push(server)

@@ -2,6 +2,24 @@
 
 All source follow-up work is consolidated on `main`. Former branch names below identify historical verification runs; they are no longer active development branches. The published `v0.3.4` release remains unchanged.
 
+## Five chat and audio follow-ups — 10 October 2026
+
+The **0.3.9** candidate implements animated sidebar activity without idle dots, bounded approval requests, arbitrary desktop attachments, a responsive per-chat header checklist and automatic first-use audio preparation/recovery. See [plan and implementation](docs/FIVE_FLOW_RELIABILITY.md). The current 0.3.8 package reproduced the large-approval defect: at 1080 × 600, all four decisions/Stop controls were below the viewport. The new layout scrolls request contents and keeps those controls available. This reproduction does not establish the cause of the historical stuck chat.
+
+**233 scoped unit tests pass:** 49 app attachment/composer tests, 76 server-session tests, 33 desktop input/audio/engine tests, 8 newer-composer attachment tests, 22 real-worker audio tests and 45 legacy message-conversion tests. App, desktop, session-ui, UI and opencode engine typechecks pass. The official production build and Windows packaging pass.
+
+**64 native groups pass with zero renderer errors** on the exact packaged ASAR: 16 flows, 7 audio-readiness, 9 openrouter, 13 image, 19 transcript. The checks cover concurrent working chats and reload, reduced motion, 100 multiline approval scopes, Allow/Deny/Stop, retained todo state, narrow windows at 125% zoom, split/overlay transitions, arbitrary-file draft/reload/send and exact saved source bytes. Regression suites retain inline image generation, completed-turn folding, quiet tool failures and artifact presentation.
+
+Native review found and corrected two additional layout defects: transcript attachments could push controls below a short new-chat viewport, and a todo popup could remain over a side overlay because its visibility observer was registered before the owning chat mounted. The permission observer now uses the same mounted-container lifecycle. Screenshots of the corrected layouts are included in the exported evidence.
+
+Fresh audio setup downloads actual component libraries into an owned profile and becomes ready in **34.6 seconds**. The checks exercise 48 kHz stereo capture conversion, durable 16 kHz mono WAV output, saved provider failure, Retry insertion, rejected replacement keys and cancellation during connection preparation. A worker started before installation now activates the newly created library directory before checking dependencies. The local fixture records 4 key checks and 3 speech requests; no paid requests or physical microphone capture occur. These tests verify transport, persistence and recovery, not live-provider availability or recognition accuracy.
+
+The package audit matches **1804 compiled and 39 runtime files**, checks 712 authored JavaScript/TypeScript files against current source using source maps, and verifies all five native reports use the final ASAR. The settled 55,000-character input/layout workload measures a five-sample median of **9.7 ms before / 11.1 ms after**. A paired repeat measures **10.5 ms before / 10.4 ms after**. Both runs are retained; these measurements do not establish a consistent speed change or a general performance guarantee.
+
+Unsigned, unpublished **0.3.9** installer: `packages/desktop/dist/0.3.9/BitsBytesChat-win-x64.exe`, **175951047 bytes**, SHA-256 **`52ceb6d6a4ab2a5ae99930f5692269f705bf2dac74dd6cdd65b8d1b938c3ee25`**. ASAR SHA-256 **`787a0e66c720aa45cc7e936ceb39451428c1a82139bdd27a3165e27fa41edacb`**. Reports use the five suite names above plus `five-package-audit.json` and `composer-five-fixes-{before,after}.json` under `.tools/qa/results`. Private profiles, credentials, runtime downloads and screenshot references are excluded from Git. The user's running app and server were not closed, restarted or replaced.
+
+Desktop attachment acceptance retains the 20 MiB per-message budget. Unsupported binary formats are available as original files with bounded context; no claim is made that every model can consume their bytes directly.
+
 ## Completed chats and compact work — 10 October 2026
 
 The **0.3.8** candidate follows all five user-supplied Codex desktop / Bits & Bytes Minecraft-mod screenshots. See [comparison and presentation changes](docs/CHAT_COMPLETED_WORK.md). Completed turns fold intermediate commentary, reasoning and tools behind a keyboard-accessible work disclosure with elapsed time. The original final answer, files, images, questions, interrupted boundaries and task errors remain visible. Expansion restores virtualized rows without modifying stored messages, and renderer reload defaults to compact work. Disclosure activation pauses automatic following; final replay checks that the expanded work header remains in view.

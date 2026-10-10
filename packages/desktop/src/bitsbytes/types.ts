@@ -39,7 +39,7 @@ export type ImageProviderState = { provider: "openai" | "openrouter"; enabled: b
 export type ImageJobState = { job_id: string; sessionID: string; inputID?: string; callID?: string; created: number; updated: number; status: "preparing" | "ready" | "error" | "canceled" | "uncertain"; artifact?: DocumentArtifact; error?: string }
 export type State = {
   modelsUpdated: number; modelError: string; settings: Settings; jobs: Job[]; skills: Skill[]; models: Model[]; root: string
-  workerReady: boolean; workerError?: string; account: string; planVerified: boolean; openrouterSet: boolean
+  workerReady: boolean; workerError?: string; audioPreparing?: boolean; account: string; planVerified: boolean; openrouterSet: boolean
 }
 export type BBEvent = { type: "image"; job: ImageJobState } | { type: "run"; sessionID: string } | { type: "access"; sessionID: string; mode: "ask" | "auto" | "full" } | { type: "artifact"; artifact: DocumentArtifact; published?: boolean } | { type: "browser"; id: string; sessionID: string; url: string; title: string; loading: boolean; canBack: boolean; canForward: boolean; closed?: boolean } | { type: "refresh" } | { type: "job"; job: Job } | { type: "meter"; level: number } | { type: "duration"; id: string; duration: number } | { type: "notice"; message: string }
 export type BBAPI = {

@@ -6,9 +6,43 @@ import {
   audioPreferences,
   migrateAudioPreferences,
   openrouterAudioKey,
+  verifyAudioConnection,
 } from "./bitsbytes-audio"
 
 const servers: ReturnType<typeof createServer>[] = []
+
+test("audio connection checks fail early, never expose provider bodies and make no audio POST", async () => {
+  await expect(verifyAudioConnection(undefined)).rejects.toThrow("bb.error.audioKeyMissing")
+  const statuses = [401, 403, 402, 429, 503, 200, 200]
+  const server = createServer((request, response) => {
+    expect(request.method).toBe("GET")
+    expect(request.headers.authorization).toBe("Bearer fixture-only")
+    const status = statuses.shift()!
+    response
+      .writeHead(status, { "content-type": "application/json" })
+      .end(
+        JSON.stringify(status === 200 && statuses.length ? { secret: "not returned" } : { data: { label: "fixture" } }),
+      )
+  })
+  servers.push(server)
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+  const address = server.address()
+  if (!address || typeof address === "string") throw new Error("No fixture address")
+  const request: typeof fetch = (url, options) => {
+    expect(String(url)).toBe("https://openrouter.ai/api/v1/key")
+    return fetch(`http://127.0.0.1:${address.port}`, options)
+  }
+  for (const error of [
+    "audioConnectionRejected",
+    "audioConnectionRejected",
+    "audioConnectionCredits",
+    "audioConnectionRateLimit",
+    "audioConnectionUnavailable",
+    "audioConnectionUnavailable",
+  ])
+    await expect(verifyAudioConnection("fixture-only", request)).rejects.toThrow(`bb.error.${error}`)
+  await verifyAudioConnection("fixture-only", request)
+})
 afterEach(() => {
   servers.splice(0).forEach((server) => server.close())
 })
@@ -70,7 +104,12 @@ test("audio selection is separate, validated and retains recommended defaults", 
 test("retired/local preferences migrate to cloud without submitting or replacing historical recordings", () => {
   const saved = { engine: "groq", model: "chat-model", provider: "chatgpt", microphone: 3 }
   const result = migrateAudioPreferences(saved)
-  expect(result).toEqual({ engine: "openrouter", audioModel: AUDIO_DEFAULT_MODEL, audioLanguage: "", audioDiarization: true })
+  expect(result).toEqual({
+    engine: "openrouter",
+    audioModel: AUDIO_DEFAULT_MODEL,
+    audioLanguage: "",
+    audioDiarization: true,
+  })
   expect(saved).toEqual({ engine: "groq", model: "chat-model", provider: "chatgpt", microphone: 3 })
   expect(migrateAudioPreferences(result)).toEqual(result)
   expect(migrateAudioPreferences({ engine: "openrouter", audioModel: "damaged", audioLanguage: 5 })).toEqual({
@@ -86,11 +125,18 @@ test("retired/local preferences migrate to cloud without submitting or replacing
 test("speaker separation is enabled only on verified Scribe models and the explicit toggle persists", () => {
   for (const model of ["elevenlabs/scribe-v2", "elevenlabs/scribe-v2-medical"]) {
     expect(audioPreferences({ engine: "openrouter", audioModel: model }).audioDiarization).toBe(true)
-    expect(audioPreferences({ engine: "openrouter", audioModel: model, audioDiarization: false }).audioDiarization).toBe(false)
+    expect(
+      audioPreferences({ engine: "openrouter", audioModel: model, audioDiarization: false }).audioDiarization,
+    ).toBe(false)
   }
-  expect(audioPreferences({ engine: "openrouter", audioModel: "openai/gpt-4o-mini-transcribe", audioDiarization: true }).audioDiarization).toBe(false)
+  expect(
+    audioPreferences({ engine: "openrouter", audioModel: "openai/gpt-4o-mini-transcribe", audioDiarization: true })
+      .audioDiarization,
+  ).toBe(false)
   expect(audioPreferences({ engine: "whisper", audioModel: AUDIO_DEFAULT_MODEL }).audioDiarization).toBe(false)
-  expect(() => audioPreferences({ engine: "openrouter", audioDiarization: "damaged" as unknown as boolean })).toThrow("bb.error.invalidSettings")
+  expect(() => audioPreferences({ engine: "openrouter", audioDiarization: "damaged" as unknown as boolean })).toThrow(
+    "bb.error.invalidSettings",
+  )
 })
 
 test("existing encrypted OpenRouter API connections are reused across both credential formats", () => {

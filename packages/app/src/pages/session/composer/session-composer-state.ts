@@ -16,9 +16,11 @@ export const todoState = (input: {
   done: boolean
   live: boolean
   retainIncomplete?: boolean
+  retainCompleted?: boolean
 }): "hide" | "clear" | "open" | "close" => {
   if (input.count === 0) return "hide"
-  if (!input.live && (!input.retainIncomplete || input.done)) return "clear"
+  if (!input.live && ((!input.retainIncomplete && !input.done) || (input.done && !input.retainCompleted)))
+    return "clear"
   if (!input.done) return "open"
   return "close"
 }
@@ -68,7 +70,13 @@ export function createSessionComposerController(options?: { closeMs?: number | (
     sessionID: params.id,
     responding: undefined as string | undefined,
     dock: todoDockAtBoundary(
-      todoState({ count: todos().length, done: done(), live: live(), retainIncomplete: !!platform.bitsbytes }),
+      todoState({
+        count: todos().length,
+        done: done(),
+        live: live(),
+        retainIncomplete: !!platform.bitsbytes,
+        retainCompleted: !!platform.bitsbytes,
+      }),
     ),
     closing: false,
     opening: false,
@@ -115,8 +123,7 @@ export function createSessionComposerController(options?: { closeMs?: number | (
     }, closeMs())
   }
 
-  // Upstream clears stale turn todos. Desktop retains unfinished work through
-  // Stop/idle so the user can review it or resume the same task.
+  // Desktop keeps task progress available through Stop, completion and reload.
   const clear = () => {
     const id = params.id
     if (!id) return
@@ -135,6 +142,7 @@ export function createSessionComposerController(options?: { closeMs?: number | (
           done: complete,
           live: active,
           retainIncomplete: !!platform.bitsbytes,
+          retainCompleted: !!platform.bitsbytes,
         })
 
         if (!previous || previous[0] !== id) {
@@ -203,7 +211,13 @@ export function createSessionComposerController(options?: { closeMs?: number | (
       store.sessionID === params.id
         ? store.dock
         : todoDockAtBoundary(
-            todoState({ count: todos().length, done: done(), live: live(), retainIncomplete: !!platform.bitsbytes }),
+            todoState({
+              count: todos().length,
+              done: done(),
+              live: live(),
+              retainIncomplete: !!platform.bitsbytes,
+              retainCompleted: !!platform.bitsbytes,
+            }),
           ),
     closing: () => store.sessionID === params.id && store.closing,
     opening: () => store.sessionID === params.id && store.opening,

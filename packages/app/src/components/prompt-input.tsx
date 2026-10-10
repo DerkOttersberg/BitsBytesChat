@@ -424,6 +424,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   const pick = () => {
     pickAttachmentFiles({
+      allFiles: !!platform.bitsbytes,
       picker: platform.openAttachmentPickerDialog,
       directory: () => sdk().directory,
       fallback: () => fileInputRef?.click(),
@@ -1190,7 +1191,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       ref={(el) => (fileInputRef = el)}
       type="file"
       multiple
-      accept={ACCEPTED_FILE_TYPES.join(",")}
+      accept={platform.bitsbytes ? undefined : ACCEPTED_FILE_TYPES.join(",")}
       class="hidden"
       onChange={(e) => {
         const list = e.currentTarget.files
@@ -1601,7 +1602,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               ref={fileInputRef}
               type="file"
               multiple
-              accept={ACCEPTED_FILE_TYPES.join(",")}
+              accept={platform.bitsbytes ? undefined : ACCEPTED_FILE_TYPES.join(",")}
               class="hidden"
               onChange={(e) => {
                 const list = e.currentTarget.files

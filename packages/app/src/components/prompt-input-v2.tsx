@@ -503,12 +503,19 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
     },
     attachments: {
       picker: platform.openAttachmentPickerDialog,
+      allowBinary: !!platform.bitsbytes,
       directory: () => sdk().directory,
       isDialogActive: () => !!dialog.active,
-      warn: () =>
+      warn: (reason) =>
         showToast({
-          title: language.t("prompt.toast.pasteUnsupported.title"),
-          description: language.t("prompt.toast.pasteUnsupported.description"),
+          title: language.t(
+            reason === "size" ? "prompt.toast.attachmentTooLarge.title" : "prompt.toast.pasteUnsupported.title",
+          ),
+          description: language.t(
+            reason === "size"
+              ? "prompt.toast.attachmentTooLarge.description"
+              : "prompt.toast.pasteUnsupported.description",
+          ),
         }),
       duplicate: () => showToast({ title: language.t("prompt.toast.attachmentDuplicate.title") }),
       onError: (error) =>

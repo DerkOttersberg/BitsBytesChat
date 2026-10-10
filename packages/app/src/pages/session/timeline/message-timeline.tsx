@@ -247,7 +247,7 @@ function TimelineDiffView(props: { diff: SummaryDiff }) {
 }
 
 export function MessageTimeline(props: {
-  headerActions?: JSX.Element
+  headerActions?: () => JSX.Element
   actions?: UserActions
   scroll: { overflow: boolean; bottom: boolean; jump: boolean }
   onResumeScroll: () => void
@@ -1905,10 +1905,11 @@ export function MessageTimeline(props: {
                         </KobaltePopover.Portal>
                       </KobaltePopover>
                     </Show>
-                    {props.headerActions}
+                    {props.headerActions?.()}
                   </div>
                 )}
               </Show>
+              <Show when={parentID()}><div class="flex items-center gap-1 shrink-0">{props.headerActions?.()}</div></Show>
             </div>
           </div>
         </Show>

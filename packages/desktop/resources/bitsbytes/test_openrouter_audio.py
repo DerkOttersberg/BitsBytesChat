@@ -9,6 +9,7 @@ import io
 import json
 from pathlib import Path
 import tempfile
+import sys
 import threading
 import time
 import unittest
@@ -21,6 +22,75 @@ spec.loader.exec_module(worker)
 
 
 class OpenRouterAudio(unittest.TestCase):
+    def test_health_activates_libraries_created_after_worker_start(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(worker, "ROOT", Path(root)):
+            folder = Path(root) / "runtime" / "worker" / "Lib" / "site-packages"
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "bb_late_component.py").write_text("ready = True\n", encoding="utf-8")
+            self.assertNotIn(str(folder), sys.path)
+            try:
+                self.assertTrue(worker.dispatch("health", {})["audioReady"])
+                self.assertTrue(worker.importlib.import_module("bb_late_component").ready)
+            finally:
+                if str(folder) in sys.path:
+                    sys.path.remove(str(folder))
+                sys.modules.pop("bb_late_component", None)
+
+    def test_capture_resamples_stereo_hardware_rate_to_durable_mono(self):
+        import array
+        import math
+        pcm = worker.CapturePCM(48000, 2)
+        samples = array.array("h", [sample for i in range(48000)
+                                   for sample in [int(9000 * math.sin(2 * math.pi * 440 * i / 48000))] * 2]).tobytes()
+        converted = b"".join(pcm.convert(samples[i:i+19200]) for i in range(0, len(samples), 19200)) + pcm.convert(None)
+        self.assertEqual(len(converted), worker.RATE * 2)
+        self.assertGreater(max(array.array("h", converted)), 8000)
+        native = worker.CapturePCM(16000, 1)
+        source = bytes(3200)
+        self.assertEqual(native.convert(source) + native.convert(None), source)
+
+    def test_capture_format_falls_back_when_device_rejects_16khz(self):
+        class Device:
+            PortAudioError = RuntimeError
+            @staticmethod
+            def query_devices(_device, _kind):
+                return {"default_samplerate": 48000, "max_input_channels": 2}
+            @staticmethod
+            def check_input_settings(**options):
+                if options["samplerate"] != 48000 or options["channels"] != 2:
+                    raise RuntimeError("Unsupported fixture rate")
+        self.assertEqual(worker.capture_format(Device, None), (48000, 2))
+
+    def test_unavailable_microphone_has_an_actionable_error(self):
+        class Device:
+            PortAudioError = RuntimeError
+            @staticmethod
+            def query_devices(_device, _kind):
+                raise RuntimeError("Device unavailable")
+        with self.assertRaisesRegex(ValueError, "audioMicrophone"):
+            worker.capture_format(Device, None)
+
+    def test_capture_start_failure_closes_the_stream_with_an_actionable_error(self):
+        from unittest.mock import patch
+        import sounddevice
+        job = worker.create_job({"engine": "openrouter", "audioDiarization": False})
+        with patch.object(worker, "capture_format", return_value=(16000, 1)), \
+                patch.object(sounddevice, "RawInputStream", side_effect=sounddevice.PortAudioError("Unavailable")):
+            with self.assertRaisesRegex(ValueError, "audioMicrophone"):
+                worker.Recorder(job["id"], None)
+
+    def test_string_and_numeric_speaker_ids_are_supported(self):
+        for value in [0, "0", "speaker_0"]:
+            result = worker.speaker_segments({"text": "Hello.", "words": [{"word": "Hello.", "start": 0, "end": 1, "speaker": value}]}, {"start": 0, "duration": 2})
+            self.assertEqual(result[0]["speaker"], "speaker_0")
+
+    def test_empty_finished_audio_is_actionable_without_provider_request(self):
+        job = worker.create_job({"engine": "openrouter", "audioDiarization": False})
+        with self.assertRaisesRegex(ValueError, "bb.error.audioEmpty"):
+            worker.transcribe({"id": job["id"], "key": "fixture-key"})
+        self.assertEqual(self.requests, [])
+        self.assertEqual(worker.read_job(job["id"])["status"], "error")
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="bb-openrouter-audio-")
         worker.ROOT = Path(self.temp.name)

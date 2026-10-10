@@ -45,6 +45,7 @@ import { showToast } from "@/utils/toast"
 import { base64Encode, checksum } from "@opencode-ai/core/util/encode"
 import { useLocation, useNavigate, useParams, useSearchParams } from "@solidjs/router"
 import { NewSessionView, SessionHeader } from "@/components/session"
+import { SessionTodoWidget } from "@/pages/session/composer/session-todo-widget"
 import { ErrorPage } from "@/pages/error"
 import { CommentsProvider, useComments } from "@/context/comments"
 import { useCommand } from "@/context/command"
@@ -920,7 +921,7 @@ export default function Page(props: { embedded?: boolean } = {}) {
         todoFrame = undefined
         todoTimer = undefined
         if (!id) return
-        if (status === "idle" && !blocked) return
+        if (status === "idle" && !blocked && !platform.bitsbytes) return
         const cached = untrack(() => sync().data.todo[id] !== undefined)
 
         todoFrame = requestAnimationFrame(() => {
@@ -934,7 +935,7 @@ export default function Page(props: { embedded?: boolean } = {}) {
           }, 0)
         })
       },
-      { defer: true },
+      { defer: !platform.bitsbytes },
     ),
   )
 
@@ -2131,7 +2132,10 @@ export default function Page(props: { embedded?: boolean } = {}) {
             <Show when={messagesReady() ? params.id : undefined} keyed>
               {(_id) => (
                 <MessageTimeline
-                  headerActions={headerActions}
+                  headerActions={() => <>
+                    <Show when={platform.bitsbytes && params.id}><SessionTodoWidget sessionID={params.id!} todos={composer.todos()} /></Show>
+                    {headerActions}
+                  </>}
                   actions={actions}
                   scroll={ui.scroll}
                   onResumeScroll={resumeScroll}

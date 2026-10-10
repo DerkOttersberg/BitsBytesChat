@@ -83,7 +83,7 @@ export function PromptInputV2(props: PromptInputV2Props) {
         ref={props.controller.setFileInput}
         type="file"
         multiple
-        accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/*,application/json,application/ld+json,application/toml,application/x-toml,application/x-yaml,application/xml,application/yaml,.c,.cc,.cjs,.conf,.cpp,.css,.csv,.cts,.env,.go,.gql,.graphql,.h,.hh,.hpp,.htm,.html,.ini,.java,.js,.json,.jsx,.log,.md,.mdx,.mjs,.mts,.py,.rb,.rs,.sass,.scss,.sh,.sql,.toml,.ts,.tsx,.txt,.xml,.yaml,.yml,.zsh"
+        accept={props.controller.attachmentAccept}
         class="hidden"
         onChange={(event) => {
           const list = event.currentTarget.files
@@ -232,47 +232,59 @@ export function PromptInputV2(props: PromptInputV2Props) {
             {props.accessControl}
           </div>
           <div class="flex min-w-0 max-w-full ml-auto items-center justify-end gap-1" data-slot="prompt-right-controls">
-          <div class="flex min-w-0 items-center justify-end gap-1" data-slot="prompt-model-controls"
-            aria-hidden={state.mode === "shell"} inert={state.mode === "shell" ? true : undefined} style={buttons()}>
-            <Show
-              when={props.modelControl}
-              fallback={
-                <Show when={view.model} keyed>
-                  {(control) => (
+            <div
+              class="flex min-w-0 items-center justify-end gap-1"
+              data-slot="prompt-model-controls"
+              aria-hidden={state.mode === "shell"}
+              inert={state.mode === "shell" ? true : undefined}
+              style={buttons()}
+            >
+              <Show
+                when={props.modelControl}
+                fallback={
+                  <Show when={view.model} keyed>
+                    {(control) => (
+                      <PromptInputV2ConfiguredSelect
+                        title={i18n.t("ui.promptInput.chooseModel")}
+                        keybind={["Mod", "M"]}
+                        control={control}
+                        model
+                      />
+                    )}
+                  </Show>
+                }
+              >
+                {props.modelControl}
+              </Show>
+              <Show when={(props.variantControlVisible ?? true) && view.variant} keyed>
+                {(control) => (
+                  <Show when={control.options().length > 1}>
                     <PromptInputV2ConfiguredSelect
-                      title={i18n.t("ui.promptInput.chooseModel")}
-                      keybind={["Mod", "M"]}
+                      title={i18n.t("ui.promptInput.chooseVariant")}
+                      keybind={["Shift", "Mod", "D"]}
                       control={control}
-                      model
                     />
-                  )}
-                </Show>
+                  </Show>
+                )}
+              </Show>
+            </div>
+            {props.audioControl}
+            <Show
+              when={props.submitControl}
+              fallback={
+                <PromptInputV2SubmitButton
+                  mode={state.mode}
+                  stopping={view.submit.stopping()}
+                  disabled={!props.controller.canSubmit()}
+                  sendLabel={i18n.t("ui.promptInput.send")}
+                  stopLabel={i18n.t("ui.promptInput.stop")}
+                  onSubmit={props.controller.submit}
+                  onStop={props.controller.stop}
+                />
               }
             >
-              {props.modelControl}
+              {props.submitControl}
             </Show>
-            <Show when={(props.variantControlVisible ?? true) && view.variant} keyed>
-              {(control) => (
-                <Show when={control.options().length > 1}>
-                  <PromptInputV2ConfiguredSelect
-                    title={i18n.t("ui.promptInput.chooseVariant")}
-                    keybind={["Shift", "Mod", "D"]}
-                    control={control}
-                  />
-                </Show>
-              )}
-            </Show>
-          </div>
-          {props.audioControl}
-          <Show when={props.submitControl} fallback={<PromptInputV2SubmitButton
-            mode={state.mode}
-            stopping={view.submit.stopping()}
-            disabled={!props.controller.canSubmit()}
-            sendLabel={i18n.t("ui.promptInput.send")}
-            stopLabel={i18n.t("ui.promptInput.stop")}
-            onSubmit={props.controller.submit}
-            onStop={props.controller.stop}
-          />}>{props.submitControl}</Show>
           </div>
         </div>
       </form>
@@ -413,14 +425,29 @@ export function PromptInputV2Attachments(props: {
                   openDelay={800}
                   contentClass="max-w-[300px] break-words"
                 >
-                  <Show when={comment.attachment} fallback={<CommentCardV2
-                    comment={comment.comment ?? ""}
-                    path={comment.path}
-                    selection={comment.selection}
-                    active={comment.key === props.activeCommentID}
-                    onClick={() => props.onCommentClick?.(comment)}
-                  />}>
-                    {attachment => <button type="button" class="flex items-center gap-2 rounded-lg border border-v2-border-border-base px-3 py-2 text-12-medium h-12 max-w-64" title={attachment().name} onClick={() => props.onCommentClick?.(comment)}><IconV2 name={attachment().kind === "skill" ? "outline-sparkles" : "outline-document"} /><span class="truncate">{attachment().name}</span></button>}
+                  <Show
+                    when={comment.attachment}
+                    fallback={
+                      <CommentCardV2
+                        comment={comment.comment ?? ""}
+                        path={comment.path}
+                        selection={comment.selection}
+                        active={comment.key === props.activeCommentID}
+                        onClick={() => props.onCommentClick?.(comment)}
+                      />
+                    }
+                  >
+                    {(attachment) => (
+                      <button
+                        type="button"
+                        class="flex items-center gap-2 rounded-lg border border-v2-border-border-base px-3 py-2 text-12-medium h-12 max-w-64"
+                        title={attachment().name}
+                        onClick={() => props.onCommentClick?.(comment)}
+                      >
+                        <IconV2 name={attachment().kind === "skill" ? "outline-sparkles" : "outline-document"} />
+                        <span class="truncate">{attachment().name}</span>
+                      </button>
+                    )}
                   </Show>
                 </TooltipV2>
                 <button

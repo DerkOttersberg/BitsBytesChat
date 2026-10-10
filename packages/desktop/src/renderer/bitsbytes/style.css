@@ -187,6 +187,11 @@ form:has(.bb-audio-active) [data-action="prompt-submit"] { display: none; }
 .bb-preview-page { font-size:12px; color:var(--text-weak); font-variant-numeric:tabular-nums; white-space:nowrap; }
 .bb-preview-updating { margin-left:auto; display:flex; align-items:center; gap:7px; font-size:12px; color:var(--text-weak); }
 .bb-preview-spinner { display:inline-block; width:12px; height:12px; border:1.5px solid var(--border-weak-base); border-top-color:var(--text-weak); border-radius:50%; animation:bb-preview-spin 1s linear infinite; flex-shrink:0; }
+.bb-audio-recovery { position:fixed; display:flex; flex-direction:column; max-width:calc(100vw - 24px); padding:12px; border:1px solid var(--border-weak-base); border-radius:10px; box-shadow:var(--shadow-lg); background:var(--background-base); color:var(--text-base); font-size:12px; line-height:1.5; z-index:90; white-space:normal; overflow-wrap:anywhere; }
+.bb-audio-recovery>span { min-height:0; overflow:auto; overscroll-behavior:contain; }
+.bb-audio-recovery>div { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; flex-shrink:0; }
+.bb-audio-recovery button { padding:4px 7px; border:1px solid var(--border-weak-base); border-radius:6px; }
+.bb-audio-recovery button:hover { background:var(--surface-raised-base); }
 .bb-preview-error { display:flex; align-items:center; gap:8px; padding:8px 12px; font-size:12px; color:var(--text-weak); }
 .bb-preview-error p { flex:1; }
 @keyframes bb-preview-spin { to { transform:rotate(360deg); } }

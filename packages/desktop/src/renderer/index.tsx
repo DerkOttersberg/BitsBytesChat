@@ -6,7 +6,6 @@ import { mobileCopy } from "../bitsbytes/mobile-copy"
 // @refresh reload
 
 import {
-  ACCEPTED_FILE_EXTENSIONS,
   AppBaseProviders,
   AppInterface,
   loadLocaleDict,
@@ -202,7 +201,7 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
         multiple: opts?.multiple ?? false,
         title: opts?.title,
         defaultPath: opts?.defaultPath,
-        extensions: opts?.extensions ?? ACCEPTED_FILE_EXTENSIONS,
+        extensions: opts?.extensions,
       })
       if (!result) return
       try {

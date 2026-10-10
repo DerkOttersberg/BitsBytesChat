@@ -1,12 +1,12 @@
-# Bits & Bytes Chat 0.3.7 candidate
+# Bits & Bytes Chat 0.3.9 candidate
 
 Windows 11 desktop app built from OpenCode **v1.18.34**, upstream commit `aec0b9a6d8898f68f923aaf08b7306d931fd9d76`. The full source and runnable build are in this folder. The original upstream README and MIT license are retained.
 
 ## Start
 
-The latest 10 October candidate is **0.3.7**. It refines assistant spacing, adds distinct file-type icons and wider file cards, removes initial revision metadata from chat cards, and cleans up panel tabs and document actions. It also includes the actual photo-edit, inline-image and approval fixes from 0.3.6. Its installer is `packages\desktop\dist\0.3.7\BitsBytesChat-win-x64.exe`. Install this candidate and use the installed app shortcut to apply the update. The published `v0.3.4` release remains unchanged.
+The latest 10 October candidate is **0.3.9**. It adds animated busy-chat indicators, bounded approval requests, arbitrary file attachments, a responsive task-progress widget and automatic audio preparation with recoverable transcription. It includes the completed-turn folding and compact tool/error presentation from 0.3.8, plus the preceding inline images, file icons, document cards and panel controls. Its installer is `packages\desktop\dist\0.3.9\BitsBytesChat-win-x64.exe`. Install this candidate and use the installed app shortcut to apply the update. The published `v0.3.4` release remains unchanged.
 
-The supplied actual Codex screenshots and native candidate captures are documented in [Visual polish](docs/VISUAL_POLISH.md). The exact packaged executable passes **12 image/document/visual groups and 15 transcript/access groups**, with zero renderer errors. Image inference uses local fixtures; no paid image requests were made. [Chat reliability QA](docs/CHAT_RELIABILITY_QA.md) records the preceding 0.3.6 desktop comparison and reliability checks.
+The five follow-ups are documented in [Chat flow reliability](docs/FIVE_FLOW_RELIABILITY.md), with package verification in [Verification](VERIFICATION.md). The earlier Codex screenshots and 0.3.7 captures are documented in [Visual polish](docs/VISUAL_POLISH.md); that historical package passed 12 image/document/visual groups and 15 transcript/access groups. [Chat reliability QA](docs/CHAT_RELIABILITY_QA.md) records the preceding 0.3.6 desktop comparison and reliability checks.
 
 The preceding 9 October candidate, including Scribe v2 speaker separation, saved audio-model selection, OpenRouter model controls, compact Audio settings, native-provider cleanup, simplified Extensions/image settings and repaired PDF output, was prepared separately at `.tools\qa\settings-simplification-package\BitsBytesChat-win-x64.exe`. [Workflow screenshots](docs/WORKFLOW_REFINEMENTS_SCREENSHOTS.md) show settings search, the compact Plan and composer changes. [Sidebar screenshots](docs/SIDEBAR_REFINEMENT_SCREENSHOTS.md) record the preceding persistent navigation and full-folder drop targets; the [earlier sidebar gallery](docs/SIDEBAR_NAVIGATION_SCREENSHOTS.md) and [interface gallery](docs/INTERFACE_PATCH_SCREENSHOTS.md) record the other changes.
 

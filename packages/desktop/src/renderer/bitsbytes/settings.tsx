@@ -32,6 +32,7 @@ export function BitsBytesSettings(props: { page: "audio" | "tools" }) {
       await refresh(reset)
       if (method === "share.test") setStore("notice", bbt("shareOK"))
       if (method === "models.list") setStore("notice", bbt("modelsUpdated"))
+      if (method === "audio.check") setStore("notice", bbt("audioChecked"))
     } catch (error) { setStore("error", bbError(error)) }
     finally { setStore("busy", "") }
   }
@@ -56,6 +57,8 @@ export function BitsBytesSettings(props: { page: "audio" | "tools" }) {
       <Show when={store.notice}><p class="bb-subtle" role="status">{store.notice}</p></Show>
       <Show when={store.data}>
         <Show when={props.page === "audio"}>
+          <div class="bb-actions"><ButtonV2 variant="neutral" disabled={!!store.busy || store.data?.audioPreparing} onClick={() => void run("audio.check")}>{bbt("audioCheck")}</ButtonV2></div>
+          <Show when={store.data?.audioPreparing}><p role="status">{bbt("audioPreparing")}</p></Show>
           <Show when={store.data?.workerError}><p class="bb-error" role="alert">{bbError(store.data?.workerError)}</p></Show>
           <Show when={!store.data?.openrouterSet}><p class="bb-subtle">{bbt("audioConnectProvider")}</p></Show>
             <label data-setting-key="audio-model">{bbt("audioModel")}<select aria-label={bbt("audioModel")} disabled={store.modelsLoading || !!store.busy || store.data?.jobs.some(job => job.recording)} value={store.values.audioModel} onChange={event => void saveAudio({ audioModel: event.currentTarget.value })}>

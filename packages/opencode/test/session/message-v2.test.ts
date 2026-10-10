@@ -112,6 +112,37 @@ function basePart(messageID: string, id: string) {
 }
 
 describe("session.message-v2.toModelMessage", () => {
+  test.each([
+    "application/octet-stream",
+    "audio/wav",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/zip",
+  ])("managed %s attachments keep source context without provider media URLs", async (mime) => {
+    const messageID = "m-managed"
+    const uri = "bitsbytes://attachment/" + "a".repeat(64)
+    const input: SessionV1.WithParts[] = [
+      {
+        info: userInfo(messageID),
+        parts: [
+          { ...basePart(messageID, "source"), type: "file", mime, filename: "source.bin", url: uri },
+          {
+            ...basePart(messageID, "context"),
+            type: "text",
+            text: "Saved exact source: D:/QA/source.bin\nFictional source context",
+            synthetic: true,
+          },
+        ],
+      },
+    ]
+    expect(await MessageV2.toModelMessages(input, model)).toStrictEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "Saved exact source: D:/QA/source.bin\nFictional source context" }],
+      },
+    ])
+    expect(input[0].parts[0]).toMatchObject({ mime, url: uri, filename: "source.bin" })
+  })
+
   test("citation presentation stays recorded without poisoning subsequent SDK requests", async () => {
     const sources = [
       { id: "reference", sourceType: "url", title: "Recorded reference", url: "https://example.com/source" },

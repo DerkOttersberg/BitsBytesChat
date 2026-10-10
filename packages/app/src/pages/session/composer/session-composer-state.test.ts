@@ -149,6 +149,13 @@ describe("todoState", () => {
     expect(todoState({ count: 2, done: false, live: false, retainIncomplete: false })).toBe("clear")
     expect(todoState({ count: 2, done: false, live: false })).toBe("clear")
   })
+
+  test("desktop widget retains completed and cancelled progress after completion and reload", () => {
+    for (const live of [true, false]) {
+      expect(todoState({ count: 32, done: true, live, retainIncomplete: true, retainCompleted: true })).toBe("close")
+    }
+    expect(todoState({ count: 0, done: true, live: false, retainCompleted: true })).toBe("hide")
+  })
 })
 
 describe("todoDockAtBoundary", () => {

@@ -877,6 +877,12 @@ export function OrganizationShell(props: ParentProps) {
     )
   }
   const chatRow = (chat: ChatProject.Chat) => {
+    const activity = createMemo(() => {
+      const sessions = context()?.sync.session.data
+      if (sessions?.permission[chat.id]?.length) return "permission"
+      if (sessions?.question[chat.id]?.length) return "question"
+      return sessions?.session_working(chat.id) ? "working" : undefined
+    })
     const [menu, setMenu] = createStore({
       open: false,
       anchor: undefined as undefined | { x: number; y: number; width: number; height: number },
@@ -915,8 +921,22 @@ export function OrganizationShell(props: ParentProps) {
             title={chat.title}
             aria-current={activeID() === chat.id ? "page" : undefined}
           >
-            <i class="bb-org-status" aria-hidden="true" />
             <span>{chat.title}</span>
+            <Show when={activity()}>
+              {(status) => (
+                <span
+                  class="bb-org-activity"
+                  data-state={status()}
+                  role="status"
+                  aria-label={language.t(status() === "working" ? "organization.working" : status() === "permission" ? "notification.permission.title" : "notification.question.title")}
+                  title={language.t(status() === "working" ? "organization.working" : status() === "permission" ? "notification.permission.title" : "notification.question.title")}
+                >
+                  <Show when={status() === "working"} fallback={<Icon name="warning" size="small" />}>
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" /></svg>
+                  </Show>
+                </span>
+              )}
+            </Show>
           </button>
           <MenuV2.Trigger
             class="bb-org-more"

@@ -3,9 +3,10 @@ import { BBArtifacts } from "./bitsbytes-artifacts"
 import { BBImages, imageRequest } from "./bitsbytes-images"
 import { BBReadImages } from "./bitsbytes-read-images"
 import { workingMarkdownResources } from "./bitsbytes-markdown-resources"
+import { BBUploads } from "./bitsbytes-uploads"
 import { BBToolOperations, BBToolResultError, toolFailureResult } from "./bitsbytes-tool-operations"
 import { BBSide } from "./bitsbytes-side"
-import { imageQAEndpoints, suppressNativeUI } from "./qa-mode"
+import { imageQAEndpoints, audioQAKeyURL, suppressNativeUI } from "./qa-mode"
 import { BBRuns, UnsentError, type RunPrompt, type Inspection, type InspectionOptions } from "./bitsbytes-runs"
 import { BBMcpSettings } from "./bitsbytes-mcp"
 import { BBPluginSettings } from "./bitsbytes-plugins"
@@ -30,7 +31,7 @@ import { readState, stateRecord } from "./bitsbytes-state"
 import { bbt } from "../bitsbytes/copy"
 import type { ServerReadyData } from "../preload/types"
 import { freezeRecommendedContext, readPromptContext, validatePromptContext } from "./bitsbytes-context"
-import { AUDIO_DEFAULT_MODEL, audioModels, audioPreferences, migrateAudioPreferences } from "./bitsbytes-audio"
+import { AUDIO_DEFAULT_MODEL, audioModels, audioPreferences, migrateAudioPreferences, verifyAudioConnection } from "./bitsbytes-audio"
 import { importNativeCredentials, normalizeProviderCredentials } from "./bitsbytes-credentials"
 
 export const DEFAULTS: Settings = { shareRoot: "\\\\10.10.1.3\\AdminShare", intakeFolder: "documenten beheer administratief\\2. Intakegesprekken",
@@ -58,6 +59,10 @@ export class BitsBytes {
   provider = new BBProvider(this.root, () => this.emit({ type: "refresh" }))
   private worker?: ChildProcessWithoutNullStreams
   private workerError = ""
+  private audioReady = false
+  private audioPreparing = false
+  private audioStartRevision = 0
+  private audioConnection?: { hash: string; verified: number }
   private requests = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>()
   private engine: () => Promise<ServerReadyData>
   private side: BBSide
@@ -70,6 +75,7 @@ export class BitsBytes {
   private pending = new Map<string, Promise<unknown>>()
   artifacts = new BBArtifacts(this.root, this.python, this.assets, (artifact, published) => this.emit({ type: "artifact", artifact, published }))
   readImages = new BBReadImages(this.root)
+  uploads = new BBUploads(this.root)
   operations = new BBToolOperations(join(this.root, "tool-operations"))
   images = new BBImages(this.root, {
     ...imageQAEndpoints(),
@@ -193,7 +199,7 @@ export class BitsBytes {
     await this.configure(false)
     if (this.provider.credentials.access) void this.provider.listModels("chatgpt").then(() => this.configure()).catch(() => undefined)
     this.progress("audio worker")
-    if (existsSync(this.python)) await this.startWorker().catch(() => { this.workerError = "bb.error.workerUnavailable"; this.progress("audio unavailable; continuing") })
+    if (existsSync(this.python) && !this.audioPreparing) await this.startWorker().catch(() => { this.workerError = "bb.error.workerUnavailable"; this.progress("audio unavailable; continuing") })
     this.progress("mobile access")
     await this.mobile.start()
     app.on("before-quit", () => this.close())
@@ -233,13 +239,14 @@ export class BitsBytes {
     const died = () => {
       if (this.worker !== worker) return
       this.worker = undefined
+      this.audioReady = false
       this.requests.forEach((item) => item.reject(new Error("bb.error.interrupted"))); this.requests.clear()
       if (this.blocker !== undefined) { powerSaveBlocker.stop(this.blocker); this.blocker = undefined }
       this.emit({ type: "refresh" })
     }
     worker.once("exit", died)
     worker.once("error", died)
-    try { await this.rpc("health") }
+    try { this.audioReady = (await this.rpc<{ audioReady: boolean }>("health")).audioReady }
     catch (error) {
       this.workerError = "bb.error.workerUnavailable"
       worker.kill()
@@ -252,10 +259,10 @@ export class BitsBytes {
     const id = randomUUID()
     const deferred = Promise.withResolvers<unknown>()
     this.requests.set(id, deferred)
-    const timer = method === "health" ? setTimeout(() => {
+    const timer = ["health", "jobs", "job", "devices", "record.start", "record.stop", "record.pause", "record.resume", "transcribe.cancel"].includes(method) ? setTimeout(() => {
       this.requests.delete(id)
       deferred.reject(new Error("bb.error.workerUnavailable"))
-    }, 10000) : undefined
+    }, method === "health" && this.audioReady ? 10000 : 30000) : undefined
     this.worker!.stdin.write(JSON.stringify({ id, method, args }) + "\n", (error) => {
       if (!error) return
       this.requests.delete(id)
@@ -265,8 +272,37 @@ export class BitsBytes {
   }
   async state(): Promise<State> {
     return { modelsUpdated: this.provider.modelsUpdated, modelError: this.provider.modelError, settings: this.settings, jobs: this.worker ? await this.rpc<Job[]>("jobs") : [], skills: await this.skills(), models: this.provider.models,
-      root: this.root, workerReady: Boolean(this.worker), workerError: this.workerError, account: this.provider.credentials.email ?? "", planVerified: Boolean(this.provider.credentials.verified),
+      root: this.root, workerReady: Boolean(this.worker && this.audioReady), workerError: this.workerError, audioPreparing: this.audioPreparing, account: this.provider.credentials.email ?? "", planVerified: Boolean(this.provider.credentials.verified),
       openrouterSet: Boolean(this.provider.openrouterKey) }
+  }
+  private async prepareAudio() {
+    return this.once("audio:prepare", async () => {
+      if (!this.worker && existsSync(this.python)) await this.startWorker().catch(() => undefined)
+      if (this.worker && (await this.rpc<{ audioReady: boolean }>("health")).audioReady) {
+        this.audioReady = true
+        return
+      }
+      this.audioPreparing = true
+      this.emit({ type: "refresh" })
+      try {
+        await this.call("setup", { audioCloud: true })
+        this.audioReady = (await this.rpc<{ audioReady: boolean }>("health")).audioReady
+        if (!this.audioReady) throw new Error("bb.error.workerUnavailable")
+        this.workerError = ""
+      } finally {
+        this.audioPreparing = false
+        this.emit({ type: "refresh" })
+      }
+    })
+  }
+  private async audioKey() {
+    const key = this.provider.openrouterKey
+    const hash = createHash("sha256").update(key ?? "").digest("hex")
+    if (this.audioConnection?.hash !== hash || Date.now() - this.audioConnection.verified > 60000) {
+      await verifyAudioConnection(key, (_url, options) => fetch(audioQAKeyURL(), options))
+      this.audioConnection = { hash, verified: Date.now() }
+    }
+    return key
   }
   async skills(): Promise<Skill[]> {
     const dirs = await readdir(join(this.root, "skills"), { withFileTypes: true })
@@ -501,7 +537,7 @@ export class BitsBytes {
     try { await this.validateRunContext(prompt) }
     catch (error) { throw new UnsentError(error) }
     await this.customMcp?.apply(prompt.directory).catch(() => undefined)
-    return dispatchEngine(await this.engine(), prompt, { protocol: this.protocols.get(prompt.sessionID), contextRoot: join(this.root, "run-context"), resolveAttachment: uri => this.resolveAttachment(uri, prompt.sessionID), signal })
+    return dispatchEngine(await this.engine(), prompt, { protocol: this.protocols.get(prompt.sessionID), contextRoot: join(this.root, "run-context"), resolveAttachment: uri => this.resolveAttachment(uri, prompt.sessionID), prepareAttachment: file => this.uploads.prepare(file), signal })
   }
   private async validateRunContext(prompt?: RunPrompt) {
     if (!prompt || prompt.model?.contextWindow === undefined && prompt.recommendedContextWindow === undefined) return
@@ -692,6 +728,7 @@ export class BitsBytes {
     }
     if (method === "keys.save") return this.provider.keys(args)
     if (method === "audio.models") return audioModels()
+    if (method === "audio.check") { await this.audioKey(); await this.prepareAudio(); return { ready: true } }
     if (method === "auth.connect") { await this.provider.signIn(); this.settings.provider = "chatgpt"; await this.modelConfig(); return this.state() }
     if (method === "auth.disconnect") {
       await this.provider.disconnect(); this.provider.select(this.settings.provider)
@@ -707,8 +744,9 @@ export class BitsBytes {
         const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(this.assets, "setup.ps1"), ...(args.computer ? ["-ComputerTools"] : (typeof args.audioCloud === "boolean" ? args.audioCloud : this.settings.engine === "openrouter") ? ["-CloudAudio"] : [])], { windowsHide: true, stdio: "pipe" })
         child.stdout.resume()
         child.stderr.resume()
-        child.once("error", fail)
-        child.once("exit", (code) => code === 0 ? done() : fail(new Error(`Local setup failed (${code})`)))
+        const timeout = setTimeout(() => { child.kill(); fail(new Error("bb.error.setupFailed")) }, 8 * 60 * 1000)
+        child.once("error", error => { clearTimeout(timeout); fail(error) })
+        child.once("exit", code => { clearTimeout(timeout); code === 0 ? done() : fail(new Error("bb.error.setupFailed")) })
       })
       if (!args.computer) await this.startWorker()
       await this.configure(); this.emit({ type: "refresh" }); return { ready: true }
@@ -796,14 +834,24 @@ export class BitsBytes {
       return choice.filePaths[0] ?? null
     }
     if (method === "record.start") {
+      const revision = ++this.audioStartRevision
       const preferences = { ...audioPreferences(this.settings), speakerLabel: bbt("audioSpeakerLabel") }
-      const options = { acceleration: this.settings.acceleration, key: preferences.engine === "openrouter" ? this.provider.openrouterKey : undefined }
+      const key = preferences.engine === "openrouter" ? await this.audioKey() : undefined
+      await this.prepareAudio()
+      if (revision !== this.audioStartRevision) throw new Error("bb.error.interrupted")
+      const options = { acceleration: this.settings.acceleration, key }
       const job = await this.rpc<Job>(method, { ...preferences, device: this.settings.microphone ?? undefined })
       this.blocker = powerSaveBlocker.start("prevent-app-suspension")
-      void this.once("transcribe:" + job.id, () => this.rpc("transcribe", { id: job.id, ...options })).catch((error: Error) => this.emit({ type: "notice", message: error.message }))
+      void this.once("transcribe:" + job.id, () => this.rpc("transcribe", { id: job.id, ...options })).catch(async (error: Error) => {
+        // Saved job failures are shown beside the composer with a working Retry.
+        // Keep the global notice for failures that could not be saved to the job.
+        const saved = await this.rpc<Job>("job", { id: job.id }).catch(() => undefined)
+        if (!saved?.error) this.emit({ type: "notice", message: error.message })
+      })
       return job
     }
     if (method === "record.stop" || method === "record.cancel") {
+      if (method === "record.cancel" && args.start === true) { this.audioStartRevision++; return { cancelled: true } }
       const current = args.id ? await this.rpc<Job>("job", { id: args.id }) : (await this.rpc<Job[]>("jobs")).find(job => job.recording)
       if (!current) throw new Error("bb.error.noRecording")
       if (method === "record.cancel") await this.rpc("transcribe.cancel", { id: current.id })
@@ -819,14 +867,18 @@ export class BitsBytes {
       const choice = await dialog.showOpenDialog({ title: bbt("importAudio"), properties: ["openFile"], filters: [{ name: bbt("recordings"), extensions: ["mp3", "wav", "m4a", "mp4", "ogg", "flac", "webm"] }] })
       if (!choice.filePaths[0]) return null
       const preferences = { ...audioPreferences(this.settings), speakerLabel: bbt("audioSpeakerLabel") }
-      const options = { acceleration: this.settings.acceleration, key: preferences.engine === "openrouter" ? this.provider.openrouterKey : undefined }
+      const key = preferences.engine === "openrouter" ? await this.audioKey() : undefined
+      await this.prepareAudio()
+      const options = { acceleration: this.settings.acceleration, key }
       const job = await this.rpc<Job>("import", { path: choice.filePaths[0], title: basename(choice.filePaths[0]), ...preferences })
       await this.once("transcribe:" + job.id, () => this.rpc("transcribe", { id: job.id, ...options }))
       return this.rpc<Job>("job", { id: job.id })
     }
     if (method === "transcribe") {
       const preferences = { ...audioPreferences(this.settings), speakerLabel: bbt("audioSpeakerLabel") }
-      const options = { acceleration: this.settings.acceleration, key: preferences.engine === "openrouter" ? this.provider.openrouterKey : undefined }
+      const key = preferences.engine === "openrouter" ? await this.audioKey() : undefined
+      await this.prepareAudio()
+      const options = { acceleration: this.settings.acceleration, key }
       await this.once("transcribe:" + args.id, async () => {
         await this.rpc("import.resume", { id: args.id })
         await this.rpc("job.update", { id: args.id, values: preferences })
@@ -894,6 +946,7 @@ export class BitsBytes {
       return { text: await readFile(join(this.root, "run-context", id + ".txt"), "utf8") }
     }
     if (url.protocol !== "bitsbytes:") throw new Error("bb.error.invalidRequest")
+    if (url.hostname === "attachment") return this.uploads.resolve(uri)
     const id = validID(decodeURIComponent(url.pathname.slice(1)))
     if (url.hostname === "skill") {
       const revision = Number(url.searchParams.get("revision"))

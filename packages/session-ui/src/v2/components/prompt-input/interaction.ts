@@ -1,7 +1,7 @@
 import { createEffect, on, type Accessor } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
 import { useFilteredList } from "@opencode-ai/ui/hooks"
-import { createPromptInputV2Attachments, type PromptInputV2AttachmentConfig } from "./attachments"
+import { ATTACHMENT_ACCEPT, createPromptInputV2Attachments, type PromptInputV2AttachmentConfig } from "./attachments"
 import { isQueuedInputDrag } from "./drag-data"
 import { createPromptInputV2Store, type PromptInputV2StoreInput } from "./store"
 import type {
@@ -288,6 +288,7 @@ export function createPromptInputV2Controller(input: {
 
   return {
     state,
+    attachmentAccept: input.attachments?.allowBinary ? undefined : ATTACHMENT_ACCEPT,
     view: input.view,
     suggestions,
     dispatch,

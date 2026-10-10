@@ -25,6 +25,7 @@ import type { NewSessionDraftController } from "./new-session-draft-controller"
 import type { NewSessionWorkspaceController } from "./new-session-workspace-controller"
 import { ChatProjectPicker } from "./chat-project-picker"
 import { usePlatform } from "@/context/platform"
+import "./new-session-view.css"
 
 const providerTipDismissalDuration = 30 * 24 * 60 * 60 * 1000
 
@@ -40,8 +41,9 @@ export function NewSessionView(props: {
       <div
         data-component="session-new-design"
         class="relative flex-1 min-h-0 overflow-hidden rounded-[10px] bg-v2-background-bg-deep"
+        classList={{ "bb-new-session": !!platform.bitsbytes }}
       >
-        <div class="absolute inset-x-0 top-[25.375%] flex justify-center px-6">
+        <div class={platform.bitsbytes ? "bb-new-session-content flex justify-center px-6" : "absolute inset-x-0 top-[25.375%] flex justify-center px-6"}>
           <div class={NEW_SESSION_CONTENT_WIDTH}>
             <div data-component="bitsbytes-wordmark" class="w-full aspect-[5/1] overflow-hidden">
               <img

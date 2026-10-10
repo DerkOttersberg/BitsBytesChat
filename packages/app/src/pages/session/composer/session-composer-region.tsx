@@ -63,7 +63,7 @@ export function SessionComposerRegion(props: {
         </Show>
 
         <Show when={controller.showComposer()}>
-          <Show when={controller.dock()}>
+          <Show when={controller.dock() && !platform.bitsbytes}>
             <div
               classList={{
                 "overflow-hidden": true,

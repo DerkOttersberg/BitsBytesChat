@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { bbt } from "../bitsbytes/copy"
+import { stateRecord } from "./bitsbytes-state"
 import {
   UnsentError,
   type DispatchResult,
@@ -228,6 +229,7 @@ export async function dispatchEngine(
     protocol?: "v1" | "v2"
     contextRoot: string
     resolveAttachment: (uri: string) => Promise<unknown>
+    prepareAttachment?: (file: { uri: string; name?: string }) => Promise<string>
     signal?: AbortSignal
   },
 ): Promise<DispatchResult> {
@@ -243,6 +245,15 @@ export async function dispatchEngine(
         prompt.directory,
       )
       return
+    }
+    if (options.prepareAttachment) {
+      const prepare = options.prepareAttachment
+      const files = await Promise.all((prompt.files ?? []).map(async file => ({ ...file, uri: await prepare(file) })))
+      const legacyParts = await Promise.all((prompt.legacyParts ?? []).map(async part => {
+        if (!stateRecord(part) || part.type !== "file" || typeof part.url !== "string") return part
+        return { ...part, url: await prepare({ uri: part.url, name: typeof part.filename === "string" ? part.filename : undefined }) }
+      }))
+      prompt = { ...prompt, files, legacyParts }
     }
     // Source preparation can outlast Stop. Check the same cancellation signal
     // before admission, then preserve uncertainty if its POST has begun.

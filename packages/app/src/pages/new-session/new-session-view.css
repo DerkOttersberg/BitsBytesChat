@@ -1,0 +1,26 @@
+.bb-new-session {
+  container: bb-new-session / size;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.bb-new-session-content {
+  position: relative;
+  min-height: 100%;
+  align-items: center;
+  padding-block: 32px;
+}
+
+@container bb-new-session (max-height: 520px) {
+  .bb-new-session-content {
+    padding-block: 20px;
+  }
+
+  .bb-new-session-content [data-component="bitsbytes-wordmark"] {
+    display: none;
+  }
+
+  .bb-new-session-content [data-component="bitsbytes-wordmark"] + div {
+    margin-top: 0;
+  }
+}

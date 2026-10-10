@@ -60,6 +60,8 @@ const accepted = [
   ".yml",
   ".zsh",
 ]
+export const ATTACHMENT_ACCEPT = accepted.join(",")
+export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
 type PromptTarget = {
   current: () => PromptInputV2Prompt
@@ -74,7 +76,8 @@ export type PromptInputV2AttachmentConfig = {
   ) => Promise<void>
   directory: () => string
   isDialogActive: () => boolean
-  warn: () => void
+  warn: (reason?: "size") => void
+  allowBinary?: boolean
   duplicate: () => void
   onError: (error: unknown) => void
   readClipboardImage?: () => Promise<File | null>
@@ -95,11 +98,20 @@ export function createPromptInputV2Attachments(
     const prompt = input.capture()
     const editor = input.editor()
     if (!editor) return
-    return { prompt, cursor: prompt.cursor() ?? cursorPosition(editor) }
+    return { prompt, cursor: prompt.cursor() ?? cursorPosition(editor), sizeExceeded: false }
   }
   const add = async (file: File, toast = true, target = capture(), clipboard = false) => {
     if (!target) return false
-    const mime = await attachmentMime(file)
+    if (
+      input.allowBinary &&
+      target.prompt.current().reduce((size, part) => size + (part.type === "image" ? (part.size ?? 0) : 0), file.size) >
+        MAX_ATTACHMENT_BYTES
+    ) {
+      target.sizeExceeded = true
+      if (toast) input.warn("size")
+      return false
+    }
+    const mime = await attachmentMime(file, input.allowBinary)
     if (!mime) {
       if (toast) input.warn()
       return false
@@ -128,17 +140,38 @@ export function createPromptInputV2Attachments(
       filename: file.name,
       sourcePath,
       mime,
+      size: file.size,
       blob,
+    }
+    if (
+      input.allowBinary &&
+      target.prompt.current().reduce((size, part) => size + (part.type === "image" ? (part.size ?? 0) : 0), file.size) >
+        MAX_ATTACHMENT_BYTES
+    ) {
+      target.sizeExceeded = true
+      if (toast) input.warn("size")
+      return false
     }
     target.prompt.set([...target.prompt.current(), attachment], target.cursor)
     return true
   }
   const addAttachments = async (files: File[], toast = true, target = capture()) => {
+    if (
+      target &&
+      input.allowBinary &&
+      files.reduce(
+        (size, file) => size + file.size,
+        target.prompt.current().reduce((size, part) => size + (part.type === "image" ? (part.size ?? 0) : 0), 0),
+      ) > MAX_ATTACHMENT_BYTES
+    ) {
+      if (toast) input.warn("size")
+      return false
+    }
     const found = await files.reduce(async (result, file) => {
       const previous = await result
       return (await add(file, false, target)) || previous
     }, Promise.resolve(false))
-    if (!found && files.length > 0 && toast) input.warn()
+    if (!found && files.length > 0 && toast) input.warn(target?.sizeExceeded ? "size" : undefined)
     return found
   }
   const handlePaste = async (event: ClipboardEvent) => {
@@ -216,7 +249,10 @@ export function createPromptInputV2Attachments(
         return
       }
       void input
-        .picker({ defaultPath: input.directory(), multiple: true, accept: accepted }, (file) => add(file))
+        .picker(
+          { defaultPath: input.directory(), multiple: true, accept: input.allowBinary ? undefined : accepted },
+          (file) => add(file),
+        )
         .catch(input.onError)
     },
   }
@@ -247,7 +283,7 @@ const textMimes = new Set([
   "application/yaml",
 ])
 
-async function attachmentMime(file: File) {
+async function attachmentMime(file: File, allowBinary = false) {
   const type = file.type.split(";", 1)[0]?.trim().toLowerCase() ?? ""
   if (imageMimes.has(type) || type === "application/pdf") return type
   const index = file.name.lastIndexOf(".")
@@ -258,9 +294,10 @@ async function attachmentMime(file: File) {
     return "text/plain"
   }
   const bytes = new Uint8Array(await file.slice(0, 4096).arrayBuffer())
-  if (bytes.some((byte) => byte === 0)) return
+  if (bytes.some((byte) => byte === 0)) return allowBinary ? type || "application/octet-stream" : undefined
   const control = bytes.filter((byte) => byte < 9 || (byte > 13 && byte < 32)).length
-  if (bytes.length > 0 && control / bytes.length > 0.3) return
+  if (bytes.length > 0 && control / bytes.length > 0.3)
+    return allowBinary ? type || "application/octet-stream" : undefined
   return "text/plain"
 }
 

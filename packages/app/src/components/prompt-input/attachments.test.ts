@@ -22,9 +22,36 @@ describe("attachmentMime", () => {
     const file = new File([Uint8Array.of(0, 255, 1, 2)], "blob.bin", { type: "application/octet-stream" })
     expect(await attachmentMime(file)).toBeUndefined()
   })
+  test("desktop accepts opaque, Office, archive and audio types without pretending they are text", async () => {
+    for (const [name, type] of [
+      ["blob.bin", ""],
+      ["document.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+      ["source.zip", "application/zip"],
+      ["voice.wav", "audio/wav"],
+    ]) {
+      const file = new File([Uint8Array.of(0, 255, 1, 2)], name, { type })
+      expect(await attachmentMime(file, true)).toBe(type || "application/octet-stream")
+    }
+  })
 })
 
 describe("pickAttachmentFiles", () => {
+  test("desktop all-files mode sends no accept filter", async () => {
+    const completion = Promise.withResolvers<void>()
+    pickAttachmentFiles({
+      allFiles: true,
+      directory: () => "C:\\Fixture",
+      fallback: () => undefined,
+      onFile: async () => undefined,
+      onError: completion.reject,
+      picker: async (options) => {
+        expect(options.accept).toBeUndefined()
+        expect(options.multiple).toBe(true)
+        completion.resolve()
+      },
+    })
+    await completion.promise
+  })
   test("reads the current project directory for every native picker invocation", async () => {
     const paths: string[] = []
     const files: File[] = []

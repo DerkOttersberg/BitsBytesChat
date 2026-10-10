@@ -1,6 +1,7 @@
 import { ACCEPTED_FILE_TYPES, ACCEPTED_IMAGE_TYPES } from "@/constants/file-picker"
 
 export { ACCEPTED_FILE_TYPES }
+export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
 type AttachmentPicker = (
   options: {
@@ -17,6 +18,7 @@ export function pickAttachmentFiles(input: {
   fallback: () => void
   onFile: (file: File) => Promise<unknown>
   onError: (error: unknown) => void
+  allFiles?: boolean
 }) {
   if (!input.picker) {
     input.fallback()
@@ -27,7 +29,7 @@ export function pickAttachmentFiles(input: {
       {
         defaultPath: input.directory(),
         multiple: true,
-        accept: ACCEPTED_FILE_TYPES,
+        accept: input.allFiles ? undefined : ACCEPTED_FILE_TYPES,
       },
       input.onFile,
     )
@@ -82,7 +84,7 @@ function textBytes(bytes: Uint8Array) {
   return count / bytes.length <= 0.3
 }
 
-export async function attachmentMime(file: File) {
+export async function attachmentMime(file: File, allowBinary = false) {
   const type = kind(file.type)
   if (IMAGE_MIMES.has(type)) return type
   if (type === "application/pdf") return type
@@ -93,6 +95,6 @@ export async function attachmentMime(file: File) {
 
   if (textMime(type)) return "text/plain"
   const bytes = new Uint8Array(await file.slice(0, SAMPLE).arrayBuffer())
-  if (!textBytes(bytes)) return
+  if (!textBytes(bytes)) return allowBinary ? type || "application/octet-stream" : undefined
   return "text/plain"
 }

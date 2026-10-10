@@ -7,19 +7,20 @@ import { usePlatform } from "@/context/platform"
 import { uuid } from "@/utils/uuid"
 import { getCursorPosition } from "./editor-dom"
 import { createBlobReference, type DraftStore } from "@/utils/draft-store"
-import { attachmentMime } from "./files"
+import { attachmentMime, MAX_ATTACHMENT_BYTES } from "./files"
 import { normalizePaste, pasteMode } from "./paste"
 import { isQueuedInputDrag } from "@opencode-ai/session-ui/v2/prompt-input/drag-data"
 
 type PromptTarget = Pick<ReturnType<ReturnType<typeof usePrompt>["capture"]>, "current" | "cursor" | "set">
-type AttachmentTarget = { prompt: PromptTarget; cursor: number | undefined }
+type AttachmentTarget = { prompt: PromptTarget; cursor: number | undefined; sizeExceeded?: boolean }
 
 type PromptAttachmentsCoreInput = {
   capture: () => PromptTarget
   editor: () => HTMLDivElement | undefined
   focusEditor?: () => void
   addPart?: (part: ContentPart) => boolean
-  warn?: () => void
+  warn?: (reason?: "size") => void
+  allowBinary?: boolean
   readClipboardImage?: () => Promise<File | null>
   getPathForFile?: (file: File) => string
   draftStore?: DraftStore
@@ -46,7 +47,15 @@ export function createPromptAttachmentsCore(input: PromptAttachmentsCoreInput) {
 
   const add = async (file: File, toast = true, target = capture()) => {
     if (!target) return false
-    const mime = await attachmentMime(file)
+    const total = target.prompt
+      .current()
+      .reduce((size, part) => size + (part.type === "image" ? (part.size ?? 0) : 0), file.size)
+    if (input.allowBinary && total > MAX_ATTACHMENT_BYTES) {
+      target.sizeExceeded = true
+      if (toast) input.warn?.("size")
+      return false
+    }
+    const mime = await attachmentMime(file, input.allowBinary)
     if (!mime) {
       if (toast) input.warn?.()
       return false
@@ -58,7 +67,18 @@ export function createPromptAttachmentsCore(input: PromptAttachmentsCoreInput) {
       filename: file.name,
       sourcePath: input.getPathForFile?.(file) || undefined,
       mime,
+      size: file.size,
       blob: input.draftStore ? await input.draftStore.putBlob(file) : await createBlobReference(file),
+    }
+    // A second picker/paste can finish while the blob is being saved.
+    if (
+      input.allowBinary &&
+      target.prompt.current().reduce((size, part) => size + (part.type === "image" ? (part.size ?? 0) : 0), file.size) >
+        MAX_ATTACHMENT_BYTES
+    ) {
+      target.sizeExceeded = true
+      if (toast) input.warn?.("size")
+      return false
     }
     target.prompt.set([...target.prompt.current(), attachment], target.cursor)
     return true
@@ -67,6 +87,17 @@ export function createPromptAttachmentsCore(input: PromptAttachmentsCoreInput) {
   const addAttachment = (file: File) => add(file)
 
   const addAttachments = async (files: File[], toast = true, target = capture()) => {
+    if (
+      target &&
+      input.allowBinary &&
+      files.reduce(
+        (size, file) => size + file.size,
+        target.prompt.current().reduce((size, part) => size + (part.type === "image" ? (part.size ?? 0) : 0), 0),
+      ) > MAX_ATTACHMENT_BYTES
+    ) {
+      if (toast) input.warn?.("size")
+      return false
+    }
     let found = false
 
     for (const file of files) {
@@ -74,7 +105,7 @@ export function createPromptAttachmentsCore(input: PromptAttachmentsCoreInput) {
       if (ok) found = true
     }
 
-    if (!found && files.length > 0 && toast) input.warn?.()
+    if (!found && files.length > 0 && toast) input.warn?.(target?.sizeExceeded ? "size" : undefined)
     return found
   }
 
@@ -154,11 +185,18 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
   const attachments = createPromptAttachmentsCore({
     ...input,
     draftStore: platform.draftStore,
+    allowBinary: !!platform.bitsbytes,
     capture: input.prompt.capture,
-    warn: () => {
+    warn: (reason) => {
       showToast({
-        title: language.t("prompt.toast.pasteUnsupported.title"),
-        description: language.t("prompt.toast.pasteUnsupported.description"),
+        title: language.t(
+          reason === "size" ? "prompt.toast.attachmentTooLarge.title" : "prompt.toast.pasteUnsupported.title",
+        ),
+        description: language.t(
+          reason === "size"
+            ? "prompt.toast.attachmentTooLarge.description"
+            : "prompt.toast.pasteUnsupported.description",
+        ),
       })
     },
   })

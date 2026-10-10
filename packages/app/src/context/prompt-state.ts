@@ -40,6 +40,7 @@ export interface ImageAttachmentPart {
   sourcePath?: string
   mime: string
   blob: BlobReference
+  size?: number
 }
 
 export type ContentPart = TextPart | FileAttachmentPart | AgentPart | ImageAttachmentPart

@@ -1,4 +1,6 @@
-import { For, Show } from "solid-js"
+import { For, Show, onMount } from "solid-js"
+import { createStore } from "solid-js/store"
+import { createResizeObserver } from "@solid-primitives/resize-observer"
 import type { PermissionRequest } from "@opencode-ai/sdk/v2"
 import { Button } from "@opencode-ai/ui/button"
 import { DockPrompt } from "@opencode-ai/session-ui/dock-prompt"
@@ -12,6 +14,7 @@ export function SessionPermissionDock(props: {
   onStop?: () => void
 }) {
   const language = useLanguage()
+  const [store, setStore] = createStore({ available: 420 })
 
   const toolDescription = () => {
     const key = `settings.permissions.tool.${props.request.permission}.description`
@@ -23,6 +26,17 @@ export function SessionPermissionDock(props: {
   return (
     <DockPrompt
       kind="permission"
+      contentLabel={language.t("notification.permission.title")}
+      ref={(node) =>
+        onMount(() => {
+          const chat = node.closest(".bb-workspace-chat, .bb-embedded-chat")
+          if (!chat) return
+          const update = () => setStore("available", Math.max(120, chat.getBoundingClientRect().height - 20))
+          update()
+          createResizeObserver(chat, update)
+        })
+      }
+      style={{ "--session-permission-max-height": `${store.available}px` }}
       header={
         <div data-slot="permission-row" data-variant="header">
           <span data-slot="permission-icon">

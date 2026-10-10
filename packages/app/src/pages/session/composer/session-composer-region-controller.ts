@@ -113,7 +113,7 @@ export function createSessionComposerRegionController(input: {
     const id = input.sessionID()
     return id ? sync().session.get(id)?.parentID : undefined
   })
-  const open = createMemo(() => store.ready && input.state.dock() && !input.state.closing())
+  const open = createMemo(() => !platform.bitsbytes && store.ready && input.state.dock() && !input.state.closing())
   const progress = useSpring(
     () => (open() ? 1 : 0),
     { visualDuration: 0.3, bounce: 0 },

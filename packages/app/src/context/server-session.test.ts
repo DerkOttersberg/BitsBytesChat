@@ -162,6 +162,39 @@ function setup(sessions: Record<string, Session>) {
 }
 
 describe("server session", () => {
+  test("desktop loads saved todos under V2 while upstream keeps its existing protocol behavior", async () => {
+    const todos = [{ content: "Saved completed task", status: "completed" as const, priority: "medium" as const }]
+    let reads = 0
+    const client = { session: { todo: async () => { reads++; return { data: todos } } } } as unknown as OpencodeClient
+    const upstream = createServerSession(client, { protocol: Promise.resolve("v2") })
+    await upstream.todo("task")
+    expect(upstream.data.todo.task).toEqual([])
+    expect(reads).toBe(0)
+    const desktop = createServerSession(client, { protocol: Promise.resolve("v2"), legacyTodos: true })
+    await Promise.all([desktop.todo("task"), desktop.todo("task")])
+    expect(desktop.data.todo.task).toEqual(todos)
+    expect(reads).toBe(1)
+    await desktop.todo("task")
+    expect(reads).toBe(1)
+    await desktop.todo("task", { force: true })
+    expect(reads).toBe(2)
+  })
+
+  test("a live todo event wins over an older pending reload response", async () => {
+    const entered = Promise.withResolvers<void>()
+    const pending = Promise.withResolvers<{ data: { content: string; status: "pending"; priority: "medium" }[] }>()
+    const client = { session: { todo: () => { entered.resolve(); return pending.promise } } } as unknown as OpencodeClient
+    const store = createServerSession(client, { protocol: Promise.resolve("v2"), legacyTodos: true })
+    store.remember(session("task"))
+    const loading = store.todo("task")
+    await entered.promise
+    const latest = [{ content: "Done while loading", status: "completed" as const, priority: "medium" as const }]
+    store.apply({ type: "todo.updated", properties: { sessionID: "task", todos: latest } })
+    pending.resolve({ data: [{ content: "Old task", status: "pending", priority: "medium" }] })
+    await loading
+    expect(store.data.todo.task).toEqual(latest)
+  })
+
   test("projects V2 session events into current and legacy message state", () => {
     const ctx = setup({ child: session("child") })
     ctx.store.remember(session("child"))

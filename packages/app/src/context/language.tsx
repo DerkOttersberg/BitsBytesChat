@@ -36,6 +36,7 @@ type PluralKey =
   | "session.followupDock.summary"
   | "session.revertDock.summary"
   | "organization.chatCount"
+  | "session.todo.widget.progress"
   | "composerRefinements.changes"
 type Source = { dict: Record<string, string> }
 

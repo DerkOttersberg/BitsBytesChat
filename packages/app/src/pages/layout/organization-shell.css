@@ -81,10 +81,6 @@
   font-weight: 600;
   color: var(--text-strong);
 }
-.bb-org-row.unread .bb-org-status {
-  background: var(--text-strong);
-  border-color: var(--text-strong);
-}
 .bb-org-row.dragging {
   opacity: 0.45;
 }
@@ -254,14 +250,31 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.bb-org-status {
-  display: block;
+.bb-org-activity {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
-  width: 6px;
-  height: 6px;
-  margin: 0 5px;
-  border: 1px solid var(--text-weaker);
-  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  margin-inline-start: auto;
+  color: var(--text-weak);
+}
+.bb-org-chat-link > span:first-child { flex: 1; }
+.bb-org-activity[data-state="working"] svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-dasharray: 25 13;
+  animation: bb-chat-spin 850ms linear infinite;
+}
+.bb-org-activity:not([data-state="working"]) { color: var(--icon-warning-base); }
+@keyframes bb-chat-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .bb-org-activity[data-state="working"] svg { animation: none; }
 }
 .bb-org-more {
   display: grid;
