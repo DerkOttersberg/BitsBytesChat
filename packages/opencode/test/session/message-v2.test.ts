@@ -112,6 +112,71 @@ function basePart(messageID: string, id: string) {
 }
 
 describe("session.message-v2.toModelMessage", () => {
+  test("citation presentation stays recorded without poisoning subsequent SDK requests", async () => {
+    const sources = [
+      { id: "reference", sourceType: "url", title: "Recorded reference", url: "https://example.com/source" },
+    ]
+    const metadata = {
+      sources,
+      openai: { itemId: "provider-item" },
+      "bitsbytes.presentation": { title: "Saved file" },
+      scalar: "UI label",
+    }
+    const input: SessionV1.WithParts[] = [
+      {
+        info: assistantInfo("assistant", "user"),
+        parts: [{ ...basePart("assistant", "answer"), type: "text", text: "Answer with reference", metadata }],
+      },
+    ]
+    expect(await MessageV2.toModelMessages(input, model)).toStrictEqual([
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Answer with reference", providerOptions: { openai: { itemId: "provider-item" } } },
+        ],
+      },
+    ])
+    expect(input[0]?.parts[0]).toMatchObject({ metadata })
+    const citationsOnly: SessionV1.WithParts[] = [
+      {
+        info: assistantInfo("assistant", "user"),
+        parts: [{ ...basePart("assistant", "answer"), type: "text", text: "Answer", metadata: { sources } }],
+      },
+    ]
+    expect(await MessageV2.toModelMessages(citationsOnly, model)).toStrictEqual([
+      { role: "assistant", content: [{ type: "text", text: "Answer" }] },
+    ])
+  })
+
+  test("reasoning replay preserves provider signatures and excludes presentation-only namespaces", async () => {
+    const input: SessionV1.WithParts[] = [
+      {
+        info: assistantInfo("assistant", "user"),
+        parts: [
+          {
+            ...basePart("assistant", "reasoning"),
+            type: "reasoning",
+            text: "Recorded summary",
+            time: { start: 0, end: 1 },
+            metadata: { anthropic: { signature: "signed-provider-block" }, sources: [] },
+          },
+        ],
+      },
+    ]
+    expect(await MessageV2.toModelMessages(input, model)).toStrictEqual([
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "reasoning",
+            text: "Recorded summary",
+            providerOptions: { anthropic: { signature: "signed-provider-block" } },
+          },
+        ],
+      },
+    ])
+  })
+
   test("filters out messages with no parts", async () => {
     const input: SessionV1.WithParts[] = [
       {

@@ -158,7 +158,7 @@ export function ChatWorkspace(props: {
     savedKey = key
     const stored = readPanelState(localStorage, key)
     savedWritable = stored.writable
-    const tabs = stored.value.tabs.filter((tab) => tab.kind !== "chat")
+    const tabs = stored.value.tabs.filter((tab) => tab.kind !== "chat" && !(tab.kind === "document" && /\.(png|jpe?g|webp)$/i.test(tab.path ?? "")))
     setStore(
       reconcile({
         ...stored.value,
@@ -194,9 +194,11 @@ export function ChatWorkspace(props: {
       history?: { revision: number; source: string }[]
     },
     published = false,
+    explicit = false,
   ) => {
     catalog.set(item.id, item)
     window.dispatchEvent(new CustomEvent("bitsbytes:artifact-change", { detail: [...catalog.values()] }))
+    if (item.kind === "image" && !explicit) return
     if (item.sessionID !== owner() && !store.tabs.some((tab) => tab.kind === "chat" && tab.id === item.sessionID))
       return
     add(
@@ -240,6 +242,7 @@ export function ChatWorkspace(props: {
     window.addEventListener("bitsbytes:open-recorded-image", recordedImage)
     onCleanup(() => window.removeEventListener("bitsbytes:open-recorded-image", recordedImage))
     const unsubscribe = platform.bitsbytes!.subscribe((event) => {
+      if (event.type === "image") window.dispatchEvent(new CustomEvent("bitsbytes:image-change", { detail: event.job }))
       if (event.type === "artifact")
         artifact(event.artifact as Parameters<typeof artifact>[0], event.published === true)
       if (
@@ -321,13 +324,39 @@ export function ChatWorkspace(props: {
       if (!item || detail.handled) return
       if (item.sessionID !== owner() && !store.tabs.some((tab) => tab.id === item.sessionID)) return
       detail.handled = true
-      artifact(item)
+      artifact(item, false, true)
       const version = item.history?.find((row) => row.revision === detail.revision)
       setStore("tabs", (tab) => tab.id === item.id, { previewRevision: version?.revision ?? 0 })
       select(item.id)
     }
     window.addEventListener("bitsbytes:artifact-query", query)
     window.addEventListener("bitsbytes:open-artifact", openArtifact)
+    const imageQuery = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionID: string; receive: (jobs: unknown[]) => void; handled?: boolean }>).detail
+      if (detail.handled || (detail.sessionID !== owner() && !store.tabs.some(tab => tab.kind === "chat" && tab.id === detail.sessionID))) return
+      detail.handled = true
+      const token = generation
+      void platform.bitsbytes!.call<unknown[]>("images.list", { sessionID: detail.sessionID }).then(jobs => {
+        if (token === generation) detail.receive(jobs)
+      }).catch(() => { if (token === generation) detail.receive([]) })
+    }
+    const imageContent = (event: Event) => {
+      const detail = (event as CustomEvent<{ id: string; sessionID: string; revision: number; receive: (result: { data: Uint8Array; mime: string } | undefined) => void; handled?: boolean }>).detail
+      if (detail.handled || (detail.sessionID !== owner() && !store.tabs.some(tab => tab.kind === "chat" && tab.id === detail.sessionID))) return
+      detail.handled = true
+      const token = generation
+      const load = async () => {
+        const item = catalog.get(detail.id) ?? (await platform.bitsbytes!.call<Parameters<typeof artifact>[0][]>("artifacts.list")).find(row => row.id === detail.id)
+        if (token !== generation || !item || item.kind !== "image" || item.sessionID !== detail.sessionID) return undefined
+        if (!catalog.has(item.id)) artifact(item)
+        return platform.bitsbytes!.call<{ data: Uint8Array; mime: string }>("artifact.content", { id: detail.id, revision: detail.revision })
+      }
+      void load().then(result => {
+        if (token === generation) detail.receive(result)
+      }).catch(() => { if (token === generation) detail.receive(undefined) })
+    }
+    window.addEventListener("bitsbytes:image-query", imageQuery)
+    window.addEventListener("bitsbytes:image-content", imageContent)
     const fileLink = (event: MouseEvent) => {
       if (!(event.target instanceof Element)) return
       const link = event.target.closest("a[href]")
@@ -347,7 +376,7 @@ export function ChatWorkspace(props: {
         .bitsbytes!.call<Parameters<typeof artifact>[0]>("artifact.publish", { path, sessionID: owner() })
         .then((item) => {
           if (token !== generation) return
-          artifact(item)
+          artifact(item, false, true)
           select(item.id)
         })
         .catch((error) => {
@@ -358,6 +387,8 @@ export function ChatWorkspace(props: {
     onCleanup(() => {
       window.removeEventListener("bitsbytes:artifact-query", query)
       window.removeEventListener("bitsbytes:open-artifact", openArtifact)
+      window.removeEventListener("bitsbytes:image-query", imageQuery)
+      window.removeEventListener("bitsbytes:image-content", imageContent)
       window.removeEventListener("click", fileLink, true)
     })
     const runPanel = (event: Event) => {
@@ -724,17 +755,6 @@ export function ChatWorkspace(props: {
                 <div class="bb-panel-content" style={{ display: tab.id === store.active ? "flex" : "none" }}>
                   <Switch>
                     <Match when={tab.kind === "chat"}>
-                      <div
-                        class="bb-side-parent-context"
-                        role="note"
-                        title={language.t("panelRefinements.parentContextDescription")}
-                      >
-                        <Icon name="bubble-5" size="small" />
-                        <div>
-                          <span>{language.t("panelRefinements.parentContext")}</span>
-                          <p>{language.t("panelRefinements.parentContextDescription")}</p>
-                        </div>
-                      </div>
                       {props.sideChat(tab.id)}
                     </Match>
                     <Match when={tab.kind === "terminal"}>

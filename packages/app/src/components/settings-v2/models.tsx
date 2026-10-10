@@ -150,6 +150,14 @@ export const SettingsModelsV2: Component = () => {
                           <span class="settings-v2-section-title">{group.items[0].provider.name}</span>
                         </span>
                       </button>
+                      <Show when={group.category === "openrouter"}>
+                        <div class="settings-v2-models-provider-switch" data-component="provider-model-visibility">
+                          <span>{language.t("settings.models.all")}</span>
+                          <Switch checked={models.providerVisible(group.category)} onChange={checked => models.setProviderVisibility(group.category, checked)} disabled={!models.ready()} hideLabel>
+                            {language.t("settings.models.providerAll", { provider: group.items[0].provider.name })}
+                          </Switch>
+                        </div>
+                      </Show>
                     </h3>
                     <Show when={expanded()}>
                       <SettingsListV2>

@@ -1,4 +1,4 @@
-import { Component, createMemo, onCleanup, startTransition, For, Show } from "solid-js"
+import { Component, createEffect, createMemo, onCleanup, startTransition, For, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Dialog } from "@opencode-ai/ui/v2/dialog-v2"
 import { TabsV2 } from "@opencode-ai/ui/v2/tabs-v2"
@@ -27,7 +27,10 @@ export const DialogSettings: Component<{
   const layout = useLayout()
   const tabs = useTabs()
   const serverSync = useServerSync()
-  const [store, setStore] = createStore({ tab: props.defaultValue ?? "general", search: "" })
+  const [store, setStore] = createStore({ tab: props.defaultValue ?? "general", search: "", extensionsVisited: false })
+  createEffect(() => {
+    if (store.tab === "extensions") setStore("extensionsVisited", true)
+  })
   let root: HTMLDivElement | undefined
   let searchInput: HTMLInputElement | undefined
   let reveal: (() => void) | undefined
@@ -86,7 +89,9 @@ export const DialogSettings: Component<{
     ...(platform.settingsSearchEntries?.() ?? []),
   ])
   const results = createMemo(() => searchSettings(entries(), store.search))
-  const panelStyle = () => ({ display: store.search.trim() ? "none" : undefined })
+  const panelStyle = (tab?: string) => ({
+    display: store.search.trim() || (tab && store.tab !== tab) ? "none" : undefined,
+  })
   const selectResult = (entry: SettingsSearchEntry) => {
     const current = ++selection
     reveal?.()
@@ -221,7 +226,7 @@ export const DialogSettings: Component<{
                       <For each={platform.settingsPanels}>
                         {(panel) => (
                           <TabsV2.Trigger value={panel.id}>
-                            <Icon name="sliders" />
+                            <Icon name={panel.icon ?? "sliders"} />
                             {panel.title}
                           </TabsV2.Trigger>
                         )}
@@ -316,7 +321,12 @@ export const DialogSettings: Component<{
           </TabsV2.Content>
           <For each={platform.settingsPanels}>
             {(panel) => (
-              <TabsV2.Content value={panel.id} class="settings-v2-panel" style={panelStyle()}>
+              <TabsV2.Content
+                value={panel.id}
+                forceMount={panel.id === "extensions" && store.extensionsVisited}
+                class="settings-v2-panel"
+                style={panelStyle(panel.id)}
+              >
                 <panel.component />
               </TabsV2.Content>
             )}

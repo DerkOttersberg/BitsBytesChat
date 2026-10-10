@@ -9,6 +9,7 @@ export function SessionPermissionDock(props: {
   request: PermissionRequest
   responding: boolean
   onDecide: (response: "once" | "always" | "reject") => void
+  onStop?: () => void
 }) {
   const language = useLanguage()
 
@@ -32,7 +33,13 @@ export function SessionPermissionDock(props: {
       }
       footer={
         <>
-          <div />
+          <div>
+            <Show when={props.onStop}>
+              <Button variant="ghost" size="normal" onClick={() => props.onStop?.()}>
+                {language.t("bitsbytes.stop")}
+              </Button>
+            </Show>
+          </div>
           <div data-slot="permission-footer-actions">
             <Button variant="ghost" size="normal" onClick={() => props.onDecide("reject")} disabled={props.responding}>
               {language.t("ui.permission.deny")}

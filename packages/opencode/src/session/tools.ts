@@ -90,7 +90,17 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
           tool: { messageID: input.processor.message.id, callID: options.toolCallId },
           ruleset: Permission.merge(input.agent.permission, input.session.permission ?? []),
         })
-        .pipe(Effect.orDie),
+        .pipe(
+          Effect.raceFirst(Effect.callback<never>(resume => {
+            const signal = options.abortSignal
+            if (signal?.aborted) return resume(Effect.interrupt)
+            const cancel = () => resume(Effect.interrupt)
+            signal?.addEventListener("abort", cancel, { once: true })
+            return Effect.sync(() => signal?.removeEventListener("abort", cancel))
+          })),
+          Effect.tap(() => Effect.sync(() => options.abortSignal?.throwIfAborted())),
+          Effect.orDie,
+        ),
   })
 
   for (const item of yield* registry.tools({
@@ -424,7 +434,8 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             { args },
           )
           const result: Awaited<ReturnType<NonNullable<typeof execute>>> = yield* Effect.gen(function* () {
-            yield* ctx.ask({ permission: key, metadata: {}, patterns: ["*"], always: ["*"] })
+            yield* ctx.ask({ permission: key, metadata: args as Record<string, unknown>, patterns: ["*"], always: ["*"] })
+            ctx.abort.throwIfAborted()
             return yield* Effect.promise(() => execute(args, opts)).pipe(Effect.catchCause((cause) => Effect.gen(function* () {
               const error = Cause.squash(cause)
               if (error instanceof McpCatalog.ToolError && error.operation)

@@ -30,7 +30,7 @@ async function catalogue(body: unknown, status = 200) {
 test("dedicated audio catalogue accepts zero-context transcription models without chat tools", async () => {
   const model = {
     id: AUDIO_DEFAULT_MODEL,
-    name: "Whisper Turbo",
+    name: "Scribe v2",
     context_length: 0,
     supported_parameters: [],
     architecture: { input_modalities: ["audio"], output_modalities: ["transcription"] },
@@ -43,7 +43,7 @@ test("dedicated audio catalogue accepts zero-context transcription models withou
       { id: "malformed" },
     ],
   })
-  expect(await audioModels(request)).toEqual([{ id: AUDIO_DEFAULT_MODEL, name: "Whisper Turbo" }])
+  expect(await audioModels(request)).toEqual([{ id: AUDIO_DEFAULT_MODEL, name: "Scribe v2" }])
 })
 
 test("failed or damaged discovery stays actionable instead of advertising chat models", async () => {
@@ -57,6 +57,7 @@ test("audio selection is separate, validated and retains recommended defaults", 
     engine: "openrouter",
     audioModel: AUDIO_DEFAULT_MODEL,
     audioLanguage: "",
+    audioDiarization: true,
   })
   expect(
     audioPreferences({ engine: "openrouter", audioModel: "openai/gpt-4o-mini-transcribe", audioLanguage: "nl" })
@@ -66,17 +67,30 @@ test("audio selection is separate, validated and retains recommended defaults", 
   expect(() => audioPreferences({ engine: "openrouter", audioLanguage: "Dutch" })).toThrow("bb.error.audioLanguage")
 })
 
-test("retired cloud selection migrates to local without replacing historical recording data", () => {
+test("retired/local preferences migrate to cloud without submitting or replacing historical recordings", () => {
   const saved = { engine: "groq", model: "chat-model", provider: "chatgpt", microphone: 3 }
   const result = migrateAudioPreferences(saved)
-  expect(result).toEqual({ engine: "parakeet", audioModel: AUDIO_DEFAULT_MODEL, audioLanguage: "" })
+  expect(result).toEqual({ engine: "openrouter", audioModel: AUDIO_DEFAULT_MODEL, audioLanguage: "", audioDiarization: true })
   expect(saved).toEqual({ engine: "groq", model: "chat-model", provider: "chatgpt", microphone: 3 })
   expect(migrateAudioPreferences(result)).toEqual(result)
   expect(migrateAudioPreferences({ engine: "openrouter", audioModel: "damaged", audioLanguage: 5 })).toEqual({
     engine: "openrouter",
     audioModel: AUDIO_DEFAULT_MODEL,
     audioLanguage: "",
+    audioDiarization: true,
   })
+  expect(migrateAudioPreferences({ engine: "whisper", audioDiarization: false }).audioDiarization).toBe(false)
+  expect(migrateAudioPreferences({ engine: "openrouter", audioDiarization: "damaged" }).audioDiarization).toBe(true)
+})
+
+test("speaker separation is enabled only on verified Scribe models and the explicit toggle persists", () => {
+  for (const model of ["elevenlabs/scribe-v2", "elevenlabs/scribe-v2-medical"]) {
+    expect(audioPreferences({ engine: "openrouter", audioModel: model }).audioDiarization).toBe(true)
+    expect(audioPreferences({ engine: "openrouter", audioModel: model, audioDiarization: false }).audioDiarization).toBe(false)
+  }
+  expect(audioPreferences({ engine: "openrouter", audioModel: "openai/gpt-4o-mini-transcribe", audioDiarization: true }).audioDiarization).toBe(false)
+  expect(audioPreferences({ engine: "whisper", audioModel: AUDIO_DEFAULT_MODEL }).audioDiarization).toBe(false)
+  expect(() => audioPreferences({ engine: "openrouter", audioDiarization: "damaged" as unknown as boolean })).toThrow("bb.error.invalidSettings")
 })
 
 test("existing encrypted OpenRouter API connections are reused across both credential formats", () => {

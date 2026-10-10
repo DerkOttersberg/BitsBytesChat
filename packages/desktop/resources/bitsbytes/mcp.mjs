@@ -45,8 +45,11 @@ for (const action of ['open','list','navigate','back','forward','reload','stop',
 const send = value => process.stdout.write(JSON.stringify(value)+'\n')
 const pending = new Map()
 const lifetime = new AbortController()
-const generation = {name:'generate_image',description:'Generate a real PNG with the separately verified OpenAI image provider, then publish the actual image artifact. ChatGPT chat-model access does not supply this capability. Requires normal change permission. For preparing results repeat the same request with its job_id after retryAfterMs; this polls the existing billed job. Changing job_id cannot repeat the same billed request. After an uncertain or canceled submission, a new generation requires a new explicit user message. retry_of is the prior failed attemptID when recovering the same saved output. Never claim an image exists before status ready.',inputSchema:{type:'object',properties:{prompt:{type:'string',minLength:1,maxLength:32000},job_id:{type:'string'},retry_of:{type:'string'},quality:{type:'string',enum:['low','medium','high','auto']},size:{type:'string',enum:['auto','1024x1024','1536x1024','1024x1536']},background:{type:'string',enum:['opaque','transparent']}},required:['prompt']}}
+const generation = {name:'generate_image',description:'Generate a real PNG with the selected API image provider (OpenAI or OpenRouter), then publish the actual image artifact. Uses the configured API connection; model listing alone does not guarantee account access. Requires normal change permission. Prefer automatic size and an opaque background; explicit options must be supported by the selected model. For preparing results repeat the same request with its job_id after retryAfterMs; this polls the existing billed job. Changing job_id cannot repeat the same billed request. After an uncertain or canceled submission, a new generation requires a new explicit user message. retry_of is the prior failed attemptID when recovering the same saved output. Never claim an image exists before status ready.',inputSchema:{type:'object',properties:{prompt:{type:'string',minLength:1,maxLength:32000},job_id:{type:'string'},retry_of:{type:'string'},quality:{type:'string',enum:['low','medium','high','auto']},size:{type:'string',enum:['auto','1024x1024','1536x1024','1024x1536']},background:{type:'string',enum:['opaque','transparent']}},required:['prompt']}}
 for (const tool of tools) if (['create_artifact','run_artifact_script','publish_artifact','create_word','create_intake'].includes(tool.name)) tool.inputSchema.properties.retry_of={type:'string',description:'Explicit attemptID of the failed operation being retried, with the same output target.'}
+generation.description += ' For edits, morphs and merges, pass every supplied local reference photo in referenced_image_paths. Inspect image_capabilities first: text-only models cannot edit photos. Never describe an image-only text prompt as a merge of the actual reference photos. Generated images appear inline in the chat.'
+generation.inputSchema.properties.referenced_image_paths={type:'array',items:{type:'string'},minItems:1,maxItems:16,description:'Absolute local PNG, JPEG or WebP paths to edit or merge. Every supplied reference is sent to the image provider; only supported by models with supportsEditing=true.'}
+tools.push({name:'image_capabilities',description:'Read the selected image provider and model, editing support, available edit models and configuration errors. Check before editing or merging photos; supportsEditing=false means the selected model only accepts text. Read-only; does not generate images.',inputSchema:{type:'object',properties:{}}})
 const capability = async revision => {
   const response=await fetch(process.env.BITSBYTES_TOOL_URL,{method:'POST',signal:lifetime.signal,headers:{Authorization:'Bearer '+process.env.BITSBYTES_TOOL_TOKEN,'content-type':'application/json'},body:JSON.stringify({name:'images.capabilities',arguments:revision===undefined?{}:{revision}})})
   if(!response.ok)throw Error('Capability unavailable')
@@ -60,7 +63,7 @@ async function watchCapabilities() {
   while(!lifetime.signal.aborted) {
     try {
       const next=await capability(previous?.revision)
-      if(previous && (previous.available!==next.available || previous.model!==next.model))send({jsonrpc:'2.0',method:'notifications/tools/list_changed'})
+      if(previous && (previous.available!==next.available || previous.model!==next.model || previous.supportsEditing!==next.supportsEditing))send({jsonrpc:'2.0',method:'notifications/tools/list_changed'})
       previous=next
     } catch {
       if(lifetime.signal.aborted)return
@@ -75,16 +78,20 @@ async function handle(line) {
     if (request.method==='notifications/cancelled') { pending.get(request.params?.requestId)?.abort(); return }
     if (request.method==='notifications/initialized') {void watchCapabilities();return}
     if (!('id' in request)) return
-    if (request.method==='initialize') {send({jsonrpc:'2.0',id:request.id,result:{protocolVersion:'2024-11-05',capabilities:{tools:{listChanged:true}},serverInfo:{name:'bitsbytes-local',version:'0.3.5'}}});return}
+    if (request.method==='initialize') {send({jsonrpc:'2.0',id:request.id,result:{protocolVersion:'2024-11-05',capabilities:{tools:{listChanged:true}},serverInfo:{name:'bitsbytes-local',version:'0.3.6'}}});return}
     if (request.method==='ping') {send({jsonrpc:'2.0',id:request.id,result:{}});return}
-    if (request.method==='tools/list') {const status=await capability().catch(()=>({available:false}));send({jsonrpc:'2.0',id:request.id,result:{tools:status.available?[...tools,generation]:tools}});return}
+    if (request.method==='tools/list') {const status=await capability().catch(()=>({available:false}));const selected={...generation,description:generation.description+' Selected model: '+status.provider+'/'+status.model+'. '+(status.supportsEditing?'Supports reference-photo editing and merging.':'Text to image only; cannot edit or merge photos.')};send({jsonrpc:'2.0',id:request.id,result:{tools:status.available?[...tools,selected]:tools}});return}
     if (request.method==='tools/call') {
       const abort = new AbortController(); pending.set(request.id,abort)
+      const token=request.params?._meta?.progressToken
+      let progress=0
+      const heartbeat=token===undefined?undefined:setInterval(()=>send({jsonrpc:'2.0',method:'notifications/progress',params:{progressToken:token,progress:++progress}}),15000)
       try {
         const response=await fetch(process.env.BITSBYTES_TOOL_URL,{method:'POST',signal:abort.signal,headers:{Authorization:'Bearer '+process.env.BITSBYTES_TOOL_TOKEN,'content-type':'application/json'},body:JSON.stringify(request.params)})
         const result=await response.json()
-        send({jsonrpc:'2.0',id:request.id,result:{content:result.content??[{type:'text',text:JSON.stringify(result)}],isError:!response.ok||result.isError===true,...(result._meta?{_meta:result._meta}:{})}})
-      } finally { pending.delete(request.id) }
+        const blocks=result&&Array.isArray(result.content)?result.content:undefined
+        send({jsonrpc:'2.0',id:request.id,result:{content:blocks??[{type:'text',text:JSON.stringify(result)}],...(!blocks&&result&&typeof result==='object'&&!Array.isArray(result)?{structuredContent:result}:{}),isError:!response.ok||result?.isError===true,...(!blocks?{_meta:{...result?._meta,bitsbytesJson:true}}:result?._meta?{_meta:result._meta}:{})}})
+      } finally { clearInterval(heartbeat); pending.delete(request.id) }
       return
     }
     send({jsonrpc:'2.0',id:request.id,error:{code:-32601,message:'Unknown method'}})

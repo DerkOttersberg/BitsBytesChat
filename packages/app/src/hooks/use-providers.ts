@@ -3,7 +3,7 @@ import { decode64 } from "@/utils/base64"
 import { useParams } from "@solidjs/router"
 import { Iterable, pipe } from "effect"
 import { createEffect, createMemo, type Accessor } from "solid-js"
-import { selectProviderCatalog } from "./provider-catalog"
+import { offeredBitsBytesProviders, selectProviderCatalog } from "./provider-catalog"
 import { usePlatform } from "@/context/platform"
 
 export const popularProviders = [
@@ -43,8 +43,7 @@ export function useProviders(directory: Accessor<string | undefined>) {
   const offered = () => {
     const catalog = providers()
     if (!platform.bitsbytes) return catalog.all
-    const connected = new Set(catalog.connected)
-    return new Map([...catalog.all].filter(([id]) => !["opencode", "opencode-go"].includes(id) || connected.has(id)))
+    return offeredBitsBytesProviders(catalog)
   }
   return {
     all: () => providers().all,
@@ -61,7 +60,7 @@ export function useProviders(directory: Accessor<string | undefined>) {
     connected: () => {
       const connected = new Set(providers().connected)
       return pipe(
-        providers().all,
+        offered(),
         Iterable.map(([, p]) => p),
         Iterable.filter((p) => connected.has(p.id)),
         (v) => Array.from(v),
@@ -71,7 +70,7 @@ export function useProviders(directory: Accessor<string | undefined>) {
       const connected = new Set(providers().connected)
       const paid = [
         ...Iterable.filter(
-          providers().all,
+          offered(),
           ([id]) =>
             connected.has(id) &&
             (id !== "opencode" || Object.values(providers().all.get(id)?.models ?? {}).some((m) => m.cost?.input)),

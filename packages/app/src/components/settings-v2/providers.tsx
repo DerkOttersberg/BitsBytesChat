@@ -8,6 +8,7 @@ import { createMemo, type Accessor, type Component, For, Show } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useServerProtocol, useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
+import { usePlatform } from "@/context/platform"
 import { DialogConnectProvider, useProviderConnectController } from "../dialog-connect-provider"
 import { DialogCustomProvider } from "../dialog-custom-provider"
 import { SettingsListV2 } from "./parts/list"
@@ -35,6 +36,7 @@ export const SettingsProvidersV2: Component<{
 }> = (props) => {
   const dialog = useDialog()
   const language = useLanguage()
+  const platform = usePlatform()
   const serverSdk = useServerSDK()
   const protocol = useServerProtocol()
   const serverSync = useServerSync()
@@ -118,6 +120,12 @@ export const SettingsProvidersV2: Component<{
   }
 
   const disconnect = async (providerID: string, name: string) => {
+    if (providerID === "bitsbytes-chatgpt" && platform.bitsbytes) {
+      await platform.bitsbytes.call("auth.disconnect").then(() => serverSdk().client.global.dispose()).catch((err: unknown) => {
+        showToast({ title: language.t("common.requestFailed"), description: err instanceof Error ? err.message : String(err) })
+      })
+      return
+    }
     if (isConfigCustom(providerID)) {
       await serverSdk()
         .client.auth.remove({ providerID })

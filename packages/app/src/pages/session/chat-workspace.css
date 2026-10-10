@@ -29,8 +29,4 @@
 .bb-panel-content { height:100%; width:100%; min-height:0; flex-direction:column; overflow:hidden; }
 .bb-source-panel { font-family:inherit; font-size:13px; line-height:1.65; white-space:pre-wrap; overflow:auto; padding:20px; }
 .bb-embedded-chat { flex:1; height:100%; min-width:0; min-height:0; }
-.bb-side-parent-context { display:flex; flex-shrink:0; align-items:flex-start; gap:8px; padding:8px 12px; color:var(--text-weak); font-size:11px; background:var(--surface-base); }
-.bb-side-parent-context [data-component=icon] { margin-top:1px; flex-shrink:0; }
-.bb-side-parent-context span { font-weight:500; color:var(--text-base); }
-.bb-side-parent-context p { margin:2px 0 0; }
 .bb-workspace button:focus-visible { outline:2px solid var(--border-focus); outline-offset:1px; }

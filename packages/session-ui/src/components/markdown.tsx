@@ -32,6 +32,7 @@ import { markdownBlockKey, type MarkdownToken } from "./markdown-worker-protocol
 import { shouldResetCodeTokens, type RenderedCodeState } from "./markdown-code-state"
 import { getCachedMarkdown, sanitizeMarkdown, touchCachedMarkdown, type MarkdownCacheEntry } from "./markdown-cache"
 import { inlineCodeKind } from "./markdown-inline-code-kind"
+import { referenceKind } from "./reference-kind"
 
 type RenderedBlock =
   | (MarkdownCacheEntry & { key: string; mode: Exclude<Block["mode"], "code"> })
@@ -276,6 +277,12 @@ function markInlineCode(root: HTMLDivElement) {
 }
 
 function decorate(root: HTMLDivElement, labels: CopyLabels) {
+  for (const link of root.querySelectorAll<HTMLAnchorElement>("a[href]")) {
+    const kind = referenceKind(link.getAttribute("href") ?? "")
+    if (!kind) continue
+    link.dataset.referenceKind = kind
+    if (kind === "file") link.title = link.getAttribute("href") ?? ""
+  }
   const blocks = Array.from(root.querySelectorAll("pre"))
   for (const block of blocks) {
     ensureCodeWrapper(block, labels)
@@ -587,14 +594,21 @@ function disposeCode(key: string) {
   disposeStreamingCode(key)
 }
 
-function updateBlock(container: HTMLDivElement, index: number, block: RenderedBlock, labels: CopyLabels, imageSource?: (source: string) => string | undefined) {
+function updateBlock(
+  container: HTMLDivElement,
+  index: number,
+  block: RenderedBlock,
+  labels: CopyLabels,
+  imageSource?: (source: string) => string | undefined,
+) {
   const current = container.children[index]
   if (block.mode === "code") {
     updateCodeBlock(container, current, block, labels)
     return
   }
   if (
-    !imageSource && current instanceof HTMLDivElement &&
+    !imageSource &&
+    current instanceof HTMLDivElement &&
     current.dataset.markdownKey === block.key &&
     current.dataset.markdownHash === block.hash
   )
@@ -610,10 +624,13 @@ function updateBlock(container: HTMLDivElement, index: number, block: RenderedBl
     // become browser requests before the saved-resource resolver handles them.
     const template = document.createElement("template")
     template.innerHTML = block.html
-    template.content.querySelectorAll("img").forEach(image => {
+    template.content.querySelectorAll("img").forEach((image) => {
       const source = imageSource(image.getAttribute("src") ?? "")
       image.removeAttribute("srcset")
-      if (source) { image.setAttribute("src", source); return }
+      if (source) {
+        image.setAttribute("src", source)
+        return
+      }
       const fallback = document.createElement("span")
       fallback.textContent = image.alt
       fallback.dataset.imageUnavailable = ""

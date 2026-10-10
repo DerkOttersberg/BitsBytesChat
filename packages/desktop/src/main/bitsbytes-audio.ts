@@ -1,7 +1,9 @@
-import type { AudioModel, Engine, Settings } from "../bitsbytes/types"
+import type { AudioModel, Settings } from "../bitsbytes/types"
+import { AUDIO_DEFAULT_MODEL, audioSupportsDiarization } from "../bitsbytes/audio"
 import { stateRecord } from "./bitsbytes-state"
+import { providerApiKey } from "./bitsbytes-credentials"
 
-export const AUDIO_DEFAULT_MODEL = "openai/whisper-large-v3-turbo"
+export { AUDIO_DEFAULT_MODEL } from "../bitsbytes/audio"
 const MODEL_ID = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:/-]{0,180}$/i
 const LANGUAGE = /^[a-z]{2}$/
 
@@ -10,41 +12,31 @@ export function openrouterAudioKey(credentials: {
   providers?: Record<string, unknown>
   nativeCredentials?: { integrationID: string; value: unknown }[]
 }) {
-  if (credentials.openrouter?.trim()) return credentials.openrouter.trim()
-  const legacy = credentials.providers?.openrouter
-  if (stateRecord(legacy) && legacy.type === "api" && typeof legacy.key === "string" && legacy.key.trim())
-    return legacy.key.trim()
-  const native = credentials.nativeCredentials?.findLast(
-    (row) =>
-      row.integrationID === "openrouter" &&
-      stateRecord(row.value) &&
-      row.value.type === "key" &&
-      typeof row.value.key === "string" &&
-      row.value.key.trim(),
-  )?.value
-  return stateRecord(native) && typeof native.key === "string" ? native.key.trim() : undefined
+  return providerApiKey(credentials, "openrouter")
 }
 
-export function audioPreferences(settings: Pick<Settings, "engine" | "audioModel" | "audioLanguage">) {
+export function audioPreferences(settings: Pick<Settings, "engine" | "audioModel" | "audioLanguage" | "audioDiarization">) {
   if (!["parakeet", "whisper", "openrouter"].includes(settings.engine)) throw new Error("bb.error.invalidEngine")
   const audioModel = settings.audioModel ?? AUDIO_DEFAULT_MODEL
   const audioLanguage = settings.audioLanguage ?? ""
   if (!MODEL_ID.test(audioModel)) throw new Error("bb.error.audioModel")
   if (audioLanguage !== "" && !LANGUAGE.test(audioLanguage)) throw new Error("bb.error.audioLanguage")
-  return { engine: settings.engine, audioModel, audioLanguage }
+  if (settings.audioDiarization !== undefined && typeof settings.audioDiarization !== "boolean") throw new Error("bb.error.invalidSettings")
+  const audioDiarization = settings.engine === "openrouter" && audioSupportsDiarization(audioModel) && settings.audioDiarization !== false
+  return { engine: settings.engine, audioModel, audioLanguage, audioDiarization }
 }
 
-// Previous cloud selection is retired without sending old audio to a new paid provider.
+// Changes future recordings only. Historical audio and jobs are never submitted on migration.
 export function migrateAudioPreferences(settings: Record<string, unknown>) {
-  const engine: Engine = settings.engine === "groq" ? "parakeet" : (settings.engine as Engine)
   return audioPreferences({
-    engine: engine ?? "parakeet",
+    engine: "openrouter",
     audioModel:
-      typeof settings.audioModel === "string" && MODEL_ID.test(settings.audioModel) ? settings.audioModel : undefined,
+      settings.engine === "openrouter" && typeof settings.audioModel === "string" && MODEL_ID.test(settings.audioModel) ? settings.audioModel : undefined,
     audioLanguage:
       typeof settings.audioLanguage === "string" && LANGUAGE.test(settings.audioLanguage)
         ? settings.audioLanguage
         : undefined,
+    audioDiarization: typeof settings.audioDiarization === "boolean" ? settings.audioDiarization : undefined,
   })
 }
 

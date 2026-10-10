@@ -556,6 +556,37 @@ const verifyPartialFlushOnInterruption = (kind: FragmentKind) =>
   })
 
 describe("SessionRunnerLLM", () => {
+  it.effect("main and diagnostic OpenCode turns retain the original engine request identity", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const db = (yield* Database.Service).db
+      currentModel = Model.make({ id: "free-fixture", provider: "opencode", route: OpenAIChat.route })
+      requests.length = 0
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Main question" }), resume: false })
+      yield* session.resume(sessionID)
+      yield* insertSession(otherSessionID)
+      yield* db.update(SessionTable).set({
+        parent_id: sessionID,
+        metadata: { bitsbytesDiagnostic: { key: "b".repeat(32), parentID: sessionID, ownerID: sessionID } },
+      }).where(eq(SessionTable.id, otherSessionID)).run().pipe(Effect.orDie)
+      yield* session.prompt({ sessionID: otherSessionID, prompt: Prompt.make({ text: "Side question" }), resume: false })
+      yield* session.resume(otherSessionID)
+      expect(requests).toHaveLength(2)
+      for (const [index, id] of [sessionID, otherSessionID].entries()) {
+        expect(requests[index]?.http?.headers).toMatchObject({
+          "x-opencode-session": id,
+          "x-opencode-client": process.env.OPENCODE_CLIENT ?? "cli",
+        })
+        expect(requests[index]?.http?.headers?.["User-Agent"]).toMatch(/^opencode\//)
+        expect(requests[index]?.http?.headers?.["x-opencode-request"]).toBeTruthy()
+      }
+      expect(requests[1]?.http?.headers?.["x-opencode-parent-session-id"]).toBe(sessionID)
+      expect(JSON.stringify(requests[1]?.system)).toContain("Do not pursue, resume, delegate or rebuild the parent task")
+      requests.length = 0
+    }),
+  )
+
   it.effect("diagnostic sessions advertise only inspection tools and reject forged write or aliased MCP calls", () =>
     Effect.gen(function* () {
       yield* setup

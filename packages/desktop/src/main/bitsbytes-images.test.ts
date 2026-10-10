@@ -3,21 +3,47 @@ import { createServer, type ServerResponse } from "node:http"
 import { copyFile, mkdir, mkdtemp, readFile, rm, rmdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
-import type { DocumentArtifact } from "../bitsbytes/types"
+import type { DocumentArtifact, ImageJobState } from "../bitsbytes/types"
 import { BBImages, IMAGE_MODELS, pngDimensions, type GeneratedImage, type ImageConfiguration } from "./bitsbytes-images"
 
 const png = await readFile(new URL("../../icons/bitsbytes/64x64.png", import.meta.url))
 const imageResponse = JSON.stringify({ data: [{ b64_json: png.toString("base64") }] })
 const request = { prompt: "A small blue circle", job_id: "image-fixture" }
+const routerCatalogue = {
+  data: [
+    {
+      id: "fixture/image",
+      name: "Fixture image",
+      architecture: { input_modalities: ["text"], output_modalities: ["image"] },
+      supported_parameters: {
+        n: { type: "range", min: 1, max: 1 },
+        output_format: { type: "enum", values: ["png", "jpeg"] },
+      },
+    },
+    {
+      id: "fixture/chat",
+      name: "Fixture chat",
+      architecture: { input_modalities: ["text"], output_modalities: ["text"] },
+    },
+  ],
+}
 
 async function fixture(waitMs = 1000) {
   const root = await mkdtemp(join(tmpdir(), "bb-images-test-"))
   const state = {
     configuration: { key: "fixture-image-key", model: IMAGE_MODELS[0] } as ImageConfiguration | undefined,
+    connections: {} as Partial<Record<"openai" | "openrouter", ImageConfiguration>>,
+    routerKey: "fixture-router-key" as string | undefined,
+    openaiKey: undefined as string | undefined,
+    catalogue: routerCatalogue as { data: Record<string, unknown>[] },
+    catalogueRequests: 0,
     response: { status: 200, body: imageResponse, hold: false },
     requests: [] as { authorization: string | undefined; body: Record<string, unknown> }[],
     published: [] as { path: string; sessionID: string; image: GeneratedImage; inputID?: string }[],
     validations: 0,
+    validationStarted: undefined as (() => void) | undefined,
+    validationPause: undefined as Promise<void> | undefined,
+    progress: [] as ImageJobState[],
     changes: 0,
     failPublication: false,
     artifactError: false,
@@ -29,6 +55,12 @@ async function fixture(waitMs = 1000) {
     response.end(state.response.body)
   }
   const server = createServer(async (incoming, response) => {
+    if (incoming.method === "GET") {
+      state.catalogueRequests++
+      response.writeHead(200, { "content-type": "application/json" })
+      response.end(JSON.stringify(state.catalogue))
+      return
+    }
     const chunks: Buffer[] = []
     for await (const chunk of incoming) chunks.push(Buffer.from(chunk))
     state.requests.push({
@@ -46,12 +78,20 @@ async function fixture(waitMs = 1000) {
   if (!address || typeof address === "string") throw new Error("Fixture did not open a local TCP port")
   const options = {
     configuration: () => state.configuration,
+    connection: (provider: "openai" | "openrouter") => state.connections[provider],
+    openrouterKey: () => state.routerKey,
+    openaiKey: () => state.openaiKey,
     saveConfiguration: async (configuration: ImageConfiguration) => {
+      if (state.configuration) state.connections[state.configuration.provider ?? "openai"] = state.configuration
+      if (configuration.provider === "openrouter" || configuration.keySource === "provider") configuration = { ...configuration, key: undefined }
       state.configuration = configuration
+      state.connections[configuration.provider ?? "openai"] = configuration
     },
     validate: async (path: string) => {
       state.validations++
       expect(await readFile(path)).toEqual(png)
+      state.validationStarted?.()
+      if (state.validationPause) await state.validationPause
       if (state.blockJournal) await mkdir(join(root, "image-jobs.json.tmp"))
     },
     publish: async (
@@ -82,7 +122,9 @@ async function fixture(waitMs = 1000) {
     changed: () => {
       state.changes++
     },
+    progress: (job: ImageJobState) => state.progress.push(job),
     endpoint: `http://127.0.0.1:${address.port}/images/generations`,
+    catalogueEndpoint: `http://127.0.0.1:${address.port}/images/models`,
     waitMs,
   }
   const service = new BBImages(root, options)
@@ -117,21 +159,11 @@ async function ready(service: BBImages) {
   expect(verification.capability.available).toBe(true)
 }
 
-test("image capability requires a validated PNG and publishes the actual generation into the artifact system", async () => {
+test("configured images require no billed test and publish the first actual request", async () => {
   const f = await fixture()
   try {
-    expect(f.service.status()).toMatchObject({ configured: true, available: false })
-    await expect(f.service.generate(request, "ses_fixture", "msg_fixture")).rejects.toThrow("imageUnavailable")
+    expect(f.service.status()).toMatchObject({ configured: true, available: true })
     expect(f.state.requests).toHaveLength(0)
-    await ready(f.service)
-    expect(f.state.validations).toBe(1)
-    expect(f.state.published).toHaveLength(0)
-    expect(f.state.requests[0].body).toMatchObject({
-      model: IMAGE_MODELS[0],
-      quality: "low",
-      n: 1,
-      output_format: "png",
-    })
     const result = await f.service.generate(request, "ses_fixture", "msg_fixture")
     expect(result).toMatchObject({
       status: "ready",
@@ -153,7 +185,7 @@ test("image capability requires a validated PNG and publishes the actual generat
   }
 })
 
-test("missing credentials and changed keys or models cannot inherit a previous image capability", async () => {
+test("missing credentials disable images and changed keys/models do not inherit successful verification", async () => {
   const f = await fixture()
   try {
     f.state.configuration = undefined
@@ -162,10 +194,9 @@ test("missing credentials and changed keys or models cannot inherit a previous i
     await f.service.configure({ key: "fixture-image-key" })
     await ready(f.service)
     expect((await f.service.configure({ key: " " })).available).toBe(true)
-    expect((await f.service.configure({ model: IMAGE_MODELS[1] })).available).toBe(false)
-    await expect(f.service.generate(request, "ses_fixture", "msg_fixture")).rejects.toThrow("imageUnavailable")
+    expect((await f.service.configure({ model: IMAGE_MODELS[1] })).verifiedAt).toBeUndefined()
     await ready(f.service)
-    expect((await f.service.configure({ key: "fixture-other-key" })).available).toBe(false)
+    expect((await f.service.configure({ key: "fixture-other-key" })).verifiedAt).toBeUndefined()
     await ready(f.service)
     expect((await f.service.configure({ disconnect: true })).configured).toBe(false)
     expect(f.service.status().available).toBe(false)
@@ -207,14 +238,14 @@ test.each([
   JSON.stringify({ data: [] }),
   "{broken",
   "null",
-])("malformed successful responses never advertise image capability or publish a document: %s", async (body) => {
+])("malformed successful responses never claim verification or publish a document: %s", async (body) => {
   const f = await fixture()
   try {
     f.state.response.body = body
     const result = await f.service.verify()
     expect(result.status).toBe("error")
     expect(result.error).toBe("bb.error.imageOutput")
-    expect(result.capability.available).toBe(false)
+    expect(result.capability.verifiedAt).toBeUndefined()
     expect(f.state.validations).toBe(0)
     expect(f.state.published).toHaveLength(0)
   } finally {
@@ -232,7 +263,7 @@ test("oversized PNG dimensions are rejected before the decoder or publisher sees
     const result = await f.service.verify()
     expect(result.error).toBe("bb.error.imageOutput")
     expect(f.state.validations).toBe(0)
-    expect(f.service.status().available).toBe(false)
+    expect(f.service.status().verifiedAt).toBeUndefined()
   } finally {
     await f.cleanup()
   }
@@ -289,7 +320,7 @@ test("changing image credentials cancels an in-flight request without granting t
     await f.service.configure({ key: "fixture-replacement" })
     f.release()
     expect((await f.service.job(pending.job_id, "ses_fixture")).status).toBe("canceled")
-    expect(f.service.status().available).toBe(false)
+    expect(f.service.status().verifiedAt).toBeUndefined()
     expect(f.state.configuration?.key).toBe("fixture-replacement")
     expect(f.state.published).toHaveLength(0)
   } finally {
@@ -443,4 +474,244 @@ test("journal failure after receiving PNG bytes recovers locally after restart",
   } finally {
     await f.cleanup()
   }
+})
+
+test("OpenRouter uses its dedicated catalogue and native key, verifies PNG, and publishes provider provenance", async () => {
+  const f = await fixture()
+  try {
+    const [first, second] = await Promise.all([f.service.models("openrouter"), f.service.models("openrouter")])
+    expect(first).toEqual(second)
+    expect(first.map((row) => row.id)).toEqual(["fixture/image"])
+    expect(f.state.catalogueRequests).toBe(1)
+    await f.service.configure({ provider: "openrouter", model: "fixture/image" })
+    expect(f.state.configuration?.key).toBeUndefined()
+    expect(f.service.status().available).toBe(true)
+    await ready(f.service)
+    expect(f.state.requests[0]).toEqual({
+      authorization: "Bearer fixture-router-key",
+      body: {
+        model: "fixture/image",
+        prompt: "A simple blue circle on a white background.",
+        n: 1,
+        output_format: "png",
+      },
+    })
+    const result = await f.service.generate(request, "ses_fixture", "input_fixture")
+    expect(result.status).toBe("ready")
+    expect(f.state.published[0].image).toMatchObject({
+      provider: "openrouter",
+      model: "fixture/image",
+      width: 64,
+      height: 64,
+    })
+    const restarted = await f.restart()
+    expect(restarted.status().available).toBe(true)
+    expect((await restarted.generate(request, "ses_fixture", "input_fixture")).status).toBe("ready")
+    expect(f.state.requests).toHaveLength(2)
+    f.state.routerKey = "new-fixture-key"
+    expect(restarted.status().verifiedAt).toBeUndefined()
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test("switching image providers preserves independent OpenAI verification and disconnect leaves the chat key intact", async () => {
+  const f = await fixture()
+  try {
+    await ready(f.service)
+    const openai = f.state.configuration
+    await f.service.configure({ provider: "openrouter", model: "fixture/image" })
+    await ready(f.service)
+    await f.service.configure({ provider: "openai", model: IMAGE_MODELS[0] })
+    expect(f.state.configuration?.key).toBe(openai?.key)
+    expect(f.service.status().available).toBe(true)
+    await f.service.configure({ provider: "openrouter", model: "fixture/image" })
+    expect(f.service.status().available).toBe(true)
+    await f.service.configure({ provider: "openrouter", disconnect: true })
+    expect(f.service.status().available).toBe(false)
+    expect(f.service.status().configured).toBe(false)
+    expect(f.state.routerKey).toBe("fixture-router-key")
+    expect(f.service.status().openrouterConnected).toBe(true)
+    await f.service.configure({ provider: "openrouter", model: "fixture/image" })
+    expect(f.service.status().configured).toBe(true)
+    expect(f.service.status().available).toBe(true)
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test("OpenRouter authentication and credit failures never claim a successful image", async () => {
+  for (const status of [401, 402, 403]) {
+    const f = await fixture()
+    try {
+      await f.service.configure({ provider: "openrouter", model: "fixture/image" })
+      f.state.response = { status, body: JSON.stringify({ error: { code: "fixture-denied" } }), hold: false }
+      const result = await f.service.verify()
+      expect(result.status).toBe("error")
+      expect(result.error).toBe(
+        status === 401 ? "bb.error.imageCredential" : status === 402 ? "bb.error.imageQuota" : "bb.error.imageAccess",
+      )
+      expect(f.service.status().available).toBe(status === 402)
+      expect(f.service.status().verifiedAt).toBeUndefined()
+      expect(f.state.published).toHaveLength(0)
+    } finally {
+      await f.cleanup()
+    }
+  }
+})
+
+test("No image generation persists without losing provider choices or making any billed request", async () => {
+  const f = await fixture()
+  try {
+    await f.service.configure({ provider: "openrouter", model: "fixture/image" })
+    await f.service.configure({ provider: "none" })
+    expect(f.service.status()).toMatchObject({ enabled: false, available: false, model: "fixture/image" })
+    const restarted = await f.restart()
+    expect(restarted.status().enabled).toBe(false)
+    await restarted.configure({ provider: "openrouter" })
+    expect(restarted.status()).toMatchObject({ enabled: true, available: true, model: "fixture/image" })
+    expect(f.state.requests).toHaveLength(0)
+    expect(f.state.routerKey).toBe("fixture-router-key")
+  } finally { await f.cleanup() }
+})
+
+test("provider-managed OpenAI keys are not cached and disconnect immediately removes generation capability", async () => {
+  const f = await fixture()
+  try {
+    f.state.configuration = undefined
+    f.state.openaiKey = "current-native-api-key"
+    await f.service.configure({ provider: "openai" })
+    expect(f.state.configuration).toMatchObject({ keySource: "provider", key: undefined })
+    expect(f.service.status().available).toBe(true)
+    f.state.openaiKey = undefined
+    f.service.credentialsChanged()
+    expect(f.service.status()).toMatchObject({ configured: false, available: false })
+    await expect(f.service.generate(request, "ses_fixture", "native-disconnected")).rejects.toThrow("imageUnavailable")
+    expect(f.state.requests).toHaveLength(0)
+  } finally { await f.cleanup() }
+})
+
+test("turning images off or stopping during admission cannot start a billed request", async () => {
+  for (const action of ["off", "stop"]) {
+    const f = await fixture()
+    try {
+      const pending = f.service.generate(request, "ses_fixture", "during-admission")
+      if (action === "off") await f.service.configure({ provider: "none" })
+      else f.service.cancel("ses_fixture")
+      expect((await pending).status).toBe("canceled")
+      expect(f.state.requests).toHaveLength(0)
+      expect(f.state.published).toHaveLength(0)
+    } finally { await f.cleanup() }
+  }
+})
+
+test("auth diagnostics redact secrets and replacing the rejected credential recovers without a test charge", async () => {
+  const f = await fixture()
+  try {
+    await f.service.configure({ provider: "openrouter", model: "fixture/image" })
+    f.state.response = { status: 401, body: JSON.stringify({ error: { code: 401, message: "Invalid fixture-router-key Bearer sk-or-v1-secret" } }), hold: false }
+    const failed = await f.service.generate(request, "ses_fixture", "first")
+    expect(failed).toMatchObject({ status: "error", error: "bb.error.imageCredential", diagnostic: { status: 401, code: "401" } })
+    expect(failed.diagnostic?.message).not.toContain("fixture-router-key")
+    expect(failed.diagnostic?.message).not.toContain("sk-or-v1-secret")
+    expect(f.service.status().available).toBe(false)
+    f.state.routerKey = "replacement"
+    f.service.credentialsChanged()
+    expect(f.service.status()).toMatchObject({ available: true, error: undefined })
+    f.state.response = { status: 200, body: imageResponse, hold: false }
+    expect((await f.service.generate({ prompt: "New explicit request" }, "ses_fixture", "second")).status).toBe("ready")
+    expect(f.state.requests).toHaveLength(2)
+    expect(f.state.requests[1].authorization).toBe("Bearer replacement")
+  } finally { await f.cleanup() }
+})
+
+test.each(["openai", "openrouter"] as const)("%s sends actual reference bytes and retains chat/tool ownership", async (provider) => {
+  const f = await fixture()
+  try {
+    if (provider === "openrouter") {
+      f.state.catalogue = { data: [{
+        id: "fixture/edit", name: "Fixture edit",
+        architecture: { input_modalities: ["text", "image"], output_modalities: ["image"] },
+        supported_parameters: { input_references: { type: "array" } },
+      }] }
+      await f.service.configure({ provider, model: "fixture/edit" })
+    }
+    const paths = [join(f.root, "reference-one.png"), join(f.root, "reference-two.png")]
+    await Promise.all(paths.map(path => writeFile(path, png)))
+    const result = await f.service.generate({ ...request, referenced_image_paths: paths }, "ses_fixture", "reference-input", undefined, "reference-call")
+    expect(result.status).toBe("ready")
+    expect(f.state.requests).toHaveLength(1)
+    const url = `data:image/png;base64,${png.toString("base64")}`
+    expect(f.state.requests[0].body).toMatchObject(provider === "openai"
+      ? { images: [{ image_url: url }, { image_url: url }] }
+      : { input_references: [{ type: "image_url", image_url: { url } }, { type: "image_url", image_url: { url } }] })
+    expect(f.service.status().supportsEditing).toBe(true)
+    expect(f.service.list("ses_fixture")).toMatchObject([{ inputID: "reference-input", callID: "reference-call", status: "ready", artifact: { id: result.job_id } }])
+    expect(f.service.list("another-chat")).toEqual([])
+    expect(f.state.progress.map(job => job.status)).toEqual(["preparing", "ready"])
+    expect(f.state.progress.every(job => job.inputID === "reference-input" && job.callID === "reference-call")).toBe(true)
+    expect(f.state.progress[1].updated).toBeGreaterThanOrEqual(f.state.progress[0].updated)
+    expect(await readFile(join(f.root, "image-jobs.json"), "utf8")).not.toContain(url)
+  } finally { await f.cleanup() }
+})
+
+test("text-only editing and invalid reference files fail before any provider request", async () => {
+  const f = await fixture()
+  try {
+    const path = join(f.root, "reference.png")
+    await writeFile(path, png)
+    await f.service.configure({ provider: "openrouter", model: "fixture/image" })
+    await expect(f.service.generate({ ...request, referenced_image_paths: [path] }, "ses_fixture", "text-only")).rejects.toThrow("imageEditingUnsupported")
+    expect(f.state.validations).toBe(0)
+    await f.service.configure({ provider: "openai" })
+    await writeFile(path, "not an image")
+    await expect(f.service.generate({ ...request, referenced_image_paths: [path] }, "ses_fixture", "invalid-reference")).rejects.toThrow("imageReference")
+    await expect(f.service.generate({ ...request, referenced_image_paths: ["relative.png"] }, "ses_fixture", "relative-reference")).rejects.toThrow("imageReference")
+    expect(f.state.requests).toHaveLength(0)
+    expect(f.state.published).toHaveLength(0)
+    expect(f.service.list("ses_fixture")).toEqual([])
+  } finally { await f.cleanup() }
+})
+
+test.each(["stop", "off", "signal"])("%s during reference validation cancels without provider submission", async (action) => {
+  const f = await fixture()
+  const started = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  try {
+    const path = join(f.root, "reference.png")
+    await writeFile(path, png)
+    f.state.validationStarted = () => started.resolve()
+    f.state.validationPause = release.promise
+    const controller = new AbortController()
+    const pending = f.service.generate({ ...request, referenced_image_paths: [path] }, "ses_fixture", "validation-stop", controller.signal, "validation-call")
+    await started.promise
+    if (action === "off") await f.service.configure({ provider: "none" })
+    if (action === "stop") f.service.cancel("ses_fixture")
+    if (action === "signal") controller.abort()
+    release.resolve()
+    expect((await pending).status).toBe("canceled")
+    expect(f.state.requests).toHaveLength(0)
+    expect(f.state.published).toHaveLength(0)
+    expect(f.service.list("ses_fixture")).toMatchObject([{ status: "canceled", inputID: "validation-stop", callID: "validation-call" }])
+    expect((await f.service.generate({ ...request, referenced_image_paths: [path] }, "ses_fixture", "validation-stop")).status).toBe("canceled")
+    expect(f.state.requests).toHaveLength(0)
+  } finally { release.resolve(); await f.cleanup() }
+})
+
+test("concurrent reference preparation deduplicates the eventual image submission", async () => {
+  const f = await fixture()
+  try {
+    const path = join(f.root, "reference.png")
+    await writeFile(path, png)
+    const input = { ...request, referenced_image_paths: [path] }
+    const results = await Promise.all([
+      f.service.generate(input, "ses_fixture", "concurrent-references"),
+      f.service.generate(input, "ses_fixture", "concurrent-references"),
+    ])
+    expect(results.every(result => result.status === "ready")).toBe(true)
+    expect(results[0].job_id).toBe(results[1].job_id)
+    expect(f.state.requests).toHaveLength(1)
+    expect(f.state.published).toHaveLength(1)
+    expect(f.service.list("ses_fixture")).toHaveLength(1)
+  } finally { await f.cleanup() }
 })

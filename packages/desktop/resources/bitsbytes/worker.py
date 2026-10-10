@@ -18,6 +18,7 @@ import math
 import array
 import subprocess
 import base64
+import re
 from io import BytesIO
 
 RATE = 16000
@@ -33,7 +34,9 @@ RECORD = None
 ROOT = Path(os.environ.get("BITSBYTES_DATA", Path.home() / "AppData/Local/BitsBytesChat"))
 ASSETS = Path(__file__).parent
 OPENROUTER_STT_URL = "https://openrouter.ai/api/v1/audio/transcriptions"
-AUDIO_DEFAULT_MODEL = "openai/whisper-large-v3-turbo"
+AUDIO_DEFAULT_MODEL = "elevenlabs/scribe-v2"
+DIARIZATION_MODELS = {"elevenlabs/scribe-v2", "elevenlabs/scribe-v2-medical"}
+DIARIZATION_UPLOAD_LIMIT = 25_000_000
 
 
 def emit(value):
@@ -87,7 +90,10 @@ def create_job(args):
            "duration": 0, "skill": args.get("skill", ""), "engine": args.get("engine", "parakeet"),
            "segments": [], "transcript": "", "error": "", "recording": False}
     if job["engine"] == "openrouter":
-        job.update(audioModel=args.get("audioModel", AUDIO_DEFAULT_MODEL), audioLanguage=args.get("audioLanguage", ""))
+        job.update(audioModel=args.get("audioModel", AUDIO_DEFAULT_MODEL), audioLanguage=args.get("audioLanguage", ""),
+                   audioDiarization=args.get("audioDiarization", False), speakerLabel=args.get("speakerLabel", "speaker_{{number}}"))
+        if job["audioDiarization"] and job["audioModel"] not in DIARIZATION_MODELS:
+            raise ValueError("bb.error.audioDiarizationUnsupported")
     directory = job_dir(job["id"])
     directory.mkdir(parents=True)
     if args.get("template"):
@@ -289,38 +295,143 @@ def model(engine, acceleration="auto"):
     return MODELS[key]
 
 
+def diarization_audio(recording):
+    """One speech-quality MP3 request retains speaker identity across capture chunks."""
+    import av
+    import numpy
+    encoded = BytesIO()
+    with av.open(encoded, mode="w", format="mp3") as container:
+        stream = container.add_stream("libmp3lame", rate=RATE)
+        stream.layout = "mono"
+        stream.bit_rate = 32000
+        for chunk in recording["chunks"]:
+            with wave.open(chunk["path"], "rb") as audio:
+                if (audio.getnchannels(), audio.getsampwidth(), audio.getframerate()) != (1, 2, RATE):
+                    raise ValueError("bb.error.audioResponse")
+                while payload := audio.readframes(RATE * 10):
+                    frame = av.AudioFrame.from_ndarray(numpy.frombuffer(payload, dtype="<i2").reshape(1, -1),
+                                                       format="s16", layout="mono")
+                    frame.sample_rate = RATE
+                    for packet in stream.encode(frame):
+                        container.mux(packet)
+                    if encoded.tell() > DIARIZATION_UPLOAD_LIMIT:
+                        raise ValueError("bb.error.audioDiarizationLimit")
+        for packet in stream.encode(None):
+            container.mux(packet)
+    if len(encoded.getbuffer()) > DIARIZATION_UPLOAD_LIMIT:
+        raise ValueError("bb.error.audioDiarizationLimit")
+    return encoded.getvalue()
+
+
+def speaker_segments(result, recording):
+    rows = result.get("words") or result.get("segments")
+    if not isinstance(rows, list) or len(rows) > 100_000:
+        if not result["text"].strip():
+            return []
+        raise ValueError("bb.error.audioDiarizationResponse")
+    turns = []
+    labelled = False
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("bb.error.audioDiarizationResponse")
+        text = row.get("word", row.get("text"))
+        if not isinstance(text, str):
+            raise ValueError("bb.error.audioDiarizationResponse")
+        if not text.strip() or row.get("type") in ("spacing", "audio_event"):
+            continue
+        start, end = row.get("start"), row.get("end")
+        if (any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) for value in (start, end))
+                or not 0 <= start <= end <= recording["duration"] + 2):
+            raise ValueError("bb.error.audioDiarizationResponse")
+        speaker = row.get("speaker")
+        if type(speaker) is int and 0 <= speaker < 32:
+            speaker = f"speaker_{speaker}"
+        else:
+            if speaker is not None:
+                raise ValueError("bb.error.audioDiarizationResponse")
+            speaker = row.get("speaker_label", row.get("speaker_id"))
+            if speaker is not None and (not isinstance(speaker, str) or not re.fullmatch(r"speaker_(?:[0-9]|[12][0-9]|3[01])", speaker)):
+                raise ValueError("bb.error.audioDiarizationResponse")
+        labelled = labelled or speaker is not None
+        if turns and turns[-1].get("speaker") == speaker:
+            if start < turns[-1]["start"]:
+                raise ValueError("bb.error.audioDiarizationResponse")
+            turns[-1]["words"].append(text.strip())
+            turns[-1]["end"] = max(turns[-1]["end"], end)
+            continue
+        turn = {"start": recording["start"] + start, "end": recording["start"] + end, "words": [text.strip()]}
+        if speaker is not None:
+            turn["speaker"] = speaker
+        turns.append(turn)
+    if result["text"].strip() and not labelled:
+        raise ValueError("bb.error.audioDiarizationResponse")
+    for turn in turns:
+        turn["text"] = re.sub(r"\s+([,.!?;:])", r"\1", " ".join(turn.pop("words")))
+    return turns
+
+
+def save_transcript(job):
+    names = job.get("speakerNames", {})
+    lines = []
+    for segment in job["segments"]:
+        if not segment["text"].strip():
+            continue
+        speaker = segment.get("speaker")
+        name = names.get(speaker) if speaker else None
+        if speaker and not name:
+            name = job.get("speakerLabel", "speaker_{{number}}").replace("{{number}}", str(int(speaker.split("_")[1]) + 1))
+        lines.append((name + ": " if name else "") + segment["text"].strip())
+    job["transcript"] = "\n".join(lines)
+    path = job_dir(job["id"]) / "transcript.txt"
+    temporary = path.with_suffix(f".{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(job["transcript"], encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def openrouter_request(chunk, args, endpoint=OPENROUTER_STT_URL):
     import httpx
+    diarization = args.get("audioDiarization", False)
+    if diarization and args["audioModel"] not in DIARIZATION_MODELS:
+        raise ValueError("bb.error.audioDiarizationUnsupported")
     payload = {"model": args["audioModel"], "input_audio": {
-        "data": base64.b64encode(Path(chunk["path"]).read_bytes()).decode("ascii"), "format": "wav"},
-        "response_format": "json"}
+        "data": base64.b64encode(diarization_audio(chunk) if diarization else Path(chunk["path"]).read_bytes()).decode("ascii"),
+        "format": "mp3" if diarization else "wav"},
+        "response_format": "verbose_json" if diarization else "json"}
+    if diarization:
+        payload.update(timestamp_granularities=["word"], provider={"options": {"elevenlabs": {"diarize": True}}})
     if args.get("audioLanguage"):
         payload["language"] = args["audioLanguage"]
     try:
         # Stream a bounded response; never include upstream bodies, credentials or audio in errors.
         with httpx.stream("POST", endpoint, headers={"Authorization": "Bearer " + args["key"],
-                          "X-Title": "Bits & Bytes Chat"}, json=payload, timeout=60) as response:
+                          "X-Title": "Bits & Bytes Chat"}, json=payload, timeout=180 if diarization else 60) as response:
             errors = {401: "audioKeyRejected", 403: "audioKeyRejected", 402: "audioCredits",
                       429: "audioQuota", 400: "audioModelRejected", 404: "audioModelRejected", 422: "audioModelRejected",
-                      408: "audioUncertain", 504: "audioUncertain"}
+                      408: "audioDiarizationUncertain" if diarization else "audioUncertain",
+                      504: "audioDiarizationUncertain" if diarization else "audioUncertain"}
             if response.status_code != 200:
                 raise RuntimeError("bb.error." + errors.get(response.status_code, "audioProviderError"))
             body = bytearray()
             for part in response.iter_bytes():
                 body.extend(part)
-                if len(body) > 1024 * 1024:
+                if len(body) > (32 * 1024 * 1024 if diarization else 1024 * 1024):
                     raise RuntimeError("bb.error.audioResponse")
     except httpx.ConnectError:
         raise RuntimeError("bb.error.audioNetwork") from None
     except httpx.HTTPError:
         # A timed-out POST might have been processed. Leave this chunk uncommitted for explicit retry.
-        raise RuntimeError("bb.error.audioUncertain") from None
+        raise RuntimeError("bb.error.audioDiarizationUncertain" if diarization else "bb.error.audioUncertain") from None
     try:
         result = json.loads(body)
     except (ValueError, UnicodeError):
         raise RuntimeError("bb.error.audioResponse") from None
-    if not isinstance(result, dict) or not isinstance(result.get("text"), str) or len(result["text"]) > 262144:
+    if not isinstance(result, dict) or not isinstance(result.get("text"), str) or len(result["text"]) > (2 * 1024 * 1024 if diarization else 262144):
         raise RuntimeError("bb.error.audioResponse")
+    if diarization:
+        return speaker_segments(result, chunk)
     return [{"start": chunk["start"], "end": chunk["start"] + chunk["duration"], "text": result["text"].strip()}]
 
 
@@ -339,15 +450,15 @@ def transcribe_cloud(chunk, args):
                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                              env={**os.environ, "PYTHONUTF8": "1"},
                              creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
-    request = json.dumps({"chunk": chunk, "args": {key: args.get(key) for key in ("key", "audioModel", "audioLanguage")},
+    request = json.dumps({"chunk": chunk, "args": {key: args.get(key) for key in ("key", "audioModel", "audioLanguage", "audioDiarization")},
                           "endpoint": OPENROUTER_STT_URL}).encode("utf-8")
-    deadline = time.monotonic() + 65
+    deadline = time.monotonic() + (215 if args.get("audioDiarization") else 65)
     try:
         while True:
             if cancellation.is_set():
                 raise AudioCancelled()
             if time.monotonic() >= deadline:
-                raise RuntimeError("bb.error.audioUncertain")
+                raise RuntimeError("bb.error.audioDiarizationUncertain" if args.get("audioDiarization") else "bb.error.audioUncertain")
             try:
                 output, _ = child.communicate(input=request, timeout=0.1)
                 break
@@ -410,9 +521,35 @@ def transcribe(args):
     cancellation = CANCEL.setdefault(job_id, threading.Event())
     cancellation.clear()
     started = time.time()
+    # Capture remains chunked and recoverable. One finalized provider request gives
+    # the entire recording a single speaker namespace; per-chunk IDs cannot be joined safely.
+    while read_job(job_id).get("audioDiarization") and read_job(job_id).get("recording") and not cancellation.is_set():
+        time.sleep(0.1)
+    if cancellation.is_set():
+        return update_job(job_id, status="cancelled")
     with ASR_LOCK:
+        if cancellation.is_set():
+            return update_job(job_id, status="cancelled")
         update_job(job_id, status="transcribing", error="")
         try:
+            job = read_job(job_id)
+            if job.get("audioDiarization") and not job.get("diarizationComplete"):
+                if not job["chunks"]:
+                    raise ValueError("bb.error.audioEmpty")
+                segments = transcribe_cloud({"start": 0, "duration": job["duration"], "chunks": job["chunks"]},
+                    {**args, "_cancellation": cancellation, "audioDiarization": True,
+                     "audioModel": job.get("audioModel", AUDIO_DEFAULT_MODEL), "audioLanguage": job.get("audioLanguage", "")})
+                if cancellation.is_set():
+                    return update_job(job_id, status="cancelled")
+                with LOCK:
+                    job = read_job(job_id)
+                    job.update(segments=segments, diarizationComplete=True)
+                    for chunk in job["chunks"]:
+                        chunk.update(done=True, segments=[])
+                    save_transcript(job)
+                    save_job(job)
+            if job.get("audioDiarization"):
+                return update_job(job_id, status="transcribed", processingSeconds=time.time() - started)
             while not cancellation.is_set():
                 job = read_job(job_id)
                 chunk = next((row for row in job["chunks"] if not row.get("done")), None)
@@ -431,8 +568,7 @@ def transcribe(args):
                     job["chunks"][index]["done"] = True
                     job["chunks"][index]["segments"] = segments
                     job["segments"] = [item for row in job["chunks"] for item in row.get("segments", [])]
-                    job["transcript"] = "\n".join(row["text"].strip() for row in job["segments"] if row["text"].strip())
-                    (job_dir(job_id) / "transcript.txt").write_text(job["transcript"], encoding="utf-8")
+                    save_transcript(job)
                     save_job(job)
         except AudioCancelled:
             cancellation.set()
@@ -690,14 +826,18 @@ def dispatch(method, args):
             os.replace(staging, snapshot)
             return update_job(job["id"], template=str(snapshot), templateHash=hashlib.sha256(snapshot.read_bytes()).hexdigest(), error="")
     if method == "job.update":
-        allowed = {"sessionID", "engine", "skill", "audioModel", "audioLanguage"}
+        allowed = {"sessionID", "engine", "skill", "audioModel", "audioLanguage", "audioDiarization", "speakerLabel"}
         values = {key: value for key, value in args["values"].items() if key in allowed}
         with LOCK:
             job = read_job(args["id"])
             changed = (values.get("engine", job["engine"]) != job["engine"] or
                        values.get("engine", job["engine"]) == "openrouter" and any(
                            key in values and values[key] != job.get(key, default)
-                           for key, default in (("audioModel", AUDIO_DEFAULT_MODEL), ("audioLanguage", ""))))
+                           for key, default in (("audioModel", AUDIO_DEFAULT_MODEL), ("audioLanguage", ""), ("audioDiarization", False))))
+            if "audioDiarization" in values and type(values["audioDiarization"]) is not bool:
+                raise ValueError("bb.error.invalidSettings")
+            if values.get("audioDiarization", job.get("audioDiarization")) and values.get("audioModel", job.get("audioModel")) not in DIARIZATION_MODELS:
+                raise ValueError("bb.error.audioDiarizationUnsupported")
             if changed:
                 if job.get("recording") or job.get("status") == "transcribing":
                     raise ValueError("bb.error.activeJob")
@@ -705,10 +845,27 @@ def dispatch(method, args):
                     chunk["done"] = False
                     chunk.pop("segments", None)
                 job.update(values, segments=[], transcript="", status="recorded", error="")
+                job.pop("diarizationComplete", None)
+                job.pop("speakerNames", None)
                 (job_dir(job["id"]) / "transcript.txt").write_text("", encoding="utf-8")
                 save_job(job)
                 return job
             return update_job(args["id"], **values)
+    if method == "job.speakers":
+        with LOCK:
+            job = read_job(args["id"])
+            if job.get("recording") or job["status"] == "transcribing":
+                raise ValueError("bb.error.activeJob")
+            speakers = {segment.get("speaker") for segment in job["segments"] if segment.get("speaker")}
+            names = args.get("names")
+            if (not isinstance(names, dict) or any(speaker not in speakers or not isinstance(name, str)
+                    or len(name.strip()) > 80 or any(ord(char) < 32 or ord(char) == 127 for char in name)
+                    for speaker, name in names.items())):
+                raise ValueError("bb.error.audioSpeakerName")
+            job["speakerNames"] = {speaker: name.strip() for speaker, name in names.items() if name.strip()}
+            save_transcript(job)
+            save_job(job)
+            return job
     if method == "import":
         return import_audio(args)
     if method == "import.resume":

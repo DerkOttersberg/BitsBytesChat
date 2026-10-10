@@ -697,6 +697,70 @@ it.instance(
 // reply tests
 
 it.instance(
+  "interrupting an approval removes it and dismisses it exactly once",
+  () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2Bridge.Service
+      const replies: unknown[] = []
+      const unsub = yield* events.listen((event) => {
+        if (event.type === Permission.Event.Replied.type) replies.push(event.data)
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
+      const id = PermissionV1.ID.make("per_interrupted")
+      const sessionID = SessionID.make("session_interrupted")
+      const fiber = yield* ask({
+        id,
+        sessionID,
+        permission: "edit",
+        patterns: ["fixture.txt"],
+        metadata: {},
+        always: [],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      yield* waitForPending(1)
+      yield* Fiber.interrupt(fiber)
+      expect(yield* list()).toEqual([])
+      expect(replies).toEqual([{ sessionID, requestID: id, reply: "reject" }])
+      expect(yield* fail(reply({ requestID: id, reply: "once" }))).toBeInstanceOf(PermissionV1.NotFoundError)
+      expect(yield* list()).toEqual([])
+      expect(replies).toHaveLength(1)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "a completed approval is not dismissed by the ask finalizer",
+  () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2Bridge.Service
+      const replies: unknown[] = []
+      const unsub = yield* events.listen((event) => {
+        if (event.type === Permission.Event.Replied.type) replies.push(event.data)
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
+      const id = PermissionV1.ID.make("per_approved")
+      const sessionID = SessionID.make("session_approved")
+      const fiber = yield* ask({
+        id,
+        sessionID,
+        permission: "edit",
+        patterns: ["fixture.txt"],
+        metadata: {},
+        always: [],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      yield* waitForPending(1)
+      yield* reply({ requestID: id, reply: "once" })
+      yield* Fiber.join(fiber)
+      expect(yield* list()).toEqual([])
+      expect(replies).toEqual([{ sessionID, requestID: id, reply: "once" }])
+    }),
+  { git: true },
+)
+
+it.instance(
   "reply - once resolves the pending ask",
   () =>
     Effect.gen(function* () {

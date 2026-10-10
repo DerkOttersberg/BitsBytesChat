@@ -101,11 +101,16 @@ const layer = Layer.effect(
 
       const deferred = yield* Deferred.make<void, PermissionV1.RejectedError | PermissionV1.CorrectedError>()
       pending.set(id, { info, deferred })
-      yield* events.publish(Event.Asked, info)
       return yield* Effect.ensuring(
-        Deferred.await(deferred),
-        Effect.sync(() => {
+        Effect.gen(function* () {
+          yield* events.publish(Event.Asked, info)
+          yield* Deferred.await(deferred)
+        }),
+        Effect.gen(function* () {
+          if (!pending.has(id)) return
           pending.delete(id)
+          // A stopped tool must also dismiss its approval in connected clients.
+          yield* events.publish(Event.Replied, { sessionID: info.sessionID, requestID: id, reply: "reject" })
         }),
       )
     })

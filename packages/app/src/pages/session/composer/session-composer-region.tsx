@@ -52,6 +52,7 @@ export function SessionComposerRegion(props: {
               <SessionPermissionDock
                 request={request}
                 responding={controller.state.permissionResponding()}
+                onStop={platform.bitsbytes ? () => void controller.stop() : undefined}
                 onDecide={(response) => {
                   controller.onResponseSubmit()
                   controller.state.decide(response)

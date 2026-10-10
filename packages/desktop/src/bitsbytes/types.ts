@@ -9,6 +9,7 @@ export type Settings = {
   engine: Engine
   audioModel?: string
   audioLanguage?: string
+  audioDiarization?: boolean
   acceleration: "auto" | "cpu"
   provider: "chatgpt" | "openrouter"
   model: string
@@ -21,10 +22,10 @@ export type Artifact = { saved: boolean; path: string; used_fallback: boolean; v
 export type ArtifactVersion = { revision: number; hash: string; source: string; pdf: string; updated: number; turnID?: string }
 export type SpreadsheetGrid = { sheets: string[]; sheet: string; rows: string[][]; formulas?: string[][]; total: number; columns?: number; offset: number; shortened?: boolean }
 export type DocumentArtifact = { id: string; sessionID: string; turnID?: string; turnIDs?: string[]; filename: string; path: string; revision: number; hash: string; kind?: "document" | "presentation" | "spreadsheet" | "pdf" | "html" | "code" | "image"; mime?: string; source?: string; history?: ArtifactVersion[]; status: "queued" | "exporting" | "ready" | "error"; updated: number; pdf: string; error: string; image?: { width: number; height: number; provider: string; model: string; jobID: string } }
-export type Segment = { start: number; end: number; text: string }
+export type Segment = { start: number; end: number; text: string; speaker?: string }
 export type Job = {
   id: string; title: string; created: number; updated: number; status: string; duration: number
-  skill: string; engine: Engine | "groq"; audioModel?: string; audioLanguage?: string; transcript: string; recording: boolean; error: string
+  skill: string; engine: Engine | "groq"; audioModel?: string; audioLanguage?: string; audioDiarization?: boolean; speakerLabel?: string; speakerNames?: Record<string, string>; transcript: string; recording: boolean; error: string
   chunks: { path: string; start: number; duration: number; done: boolean }[]
   segments: Segment[]; artifact?: Artifact; sessionID?: string; processingSeconds?: number; template?: string
 }
@@ -34,12 +35,13 @@ export type Skill = {
 }
 export type Model = { id: string; name: string; context: number; efforts?: string[]; defaultEffort?: string }
 export type AudioModel = { id: string; name: string }
-export type ImageProviderState = { configured: boolean; available: boolean; model: string; models: readonly string[]; verifiedAt?: number; error?: string; revision: number }
+export type ImageProviderState = { provider: "openai" | "openrouter"; enabled: boolean; openrouterConnected?: boolean; connections?: Partial<Record<"openai" | "openrouter", { model: string; configured: boolean }>>; configured: boolean; available: boolean; model: string; models: readonly string[]; supportsEditing?: boolean; editingModels?: readonly string[]; verifiedAt?: number; error?: string; revision: number }
+export type ImageJobState = { job_id: string; sessionID: string; inputID?: string; callID?: string; created: number; updated: number; status: "preparing" | "ready" | "error" | "canceled" | "uncertain"; artifact?: DocumentArtifact; error?: string }
 export type State = {
   modelsUpdated: number; modelError: string; settings: Settings; jobs: Job[]; skills: Skill[]; models: Model[]; root: string
   workerReady: boolean; workerError?: string; account: string; planVerified: boolean; openrouterSet: boolean
 }
-export type BBEvent = { type: "run"; sessionID: string } | { type: "access"; sessionID: string; mode: "ask" | "auto" | "full" } | { type: "artifact"; artifact: DocumentArtifact; published?: boolean } | { type: "browser"; id: string; sessionID: string; url: string; title: string; loading: boolean; canBack: boolean; canForward: boolean; closed?: boolean } | { type: "refresh" } | { type: "job"; job: Job } | { type: "meter"; level: number } | { type: "duration"; id: string; duration: number } | { type: "notice"; message: string }
+export type BBEvent = { type: "image"; job: ImageJobState } | { type: "run"; sessionID: string } | { type: "access"; sessionID: string; mode: "ask" | "auto" | "full" } | { type: "artifact"; artifact: DocumentArtifact; published?: boolean } | { type: "browser"; id: string; sessionID: string; url: string; title: string; loading: boolean; canBack: boolean; canForward: boolean; closed?: boolean } | { type: "refresh" } | { type: "job"; job: Job } | { type: "meter"; level: number } | { type: "duration"; id: string; duration: number } | { type: "notice"; message: string }
 export type BBAPI = {
   call: <T = unknown>(method: string, args?: Record<string, unknown>) => Promise<T>
   subscribe: (listener: (event: BBEvent) => void) => () => void

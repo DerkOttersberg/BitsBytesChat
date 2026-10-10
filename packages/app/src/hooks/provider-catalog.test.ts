@@ -1,11 +1,23 @@
 import { expect, test } from "bun:test"
 import type { NormalizedProviderListResponse } from "@opencode-ai/session-ui/context"
-import { resolveDefaultModel, selectProviderCatalog } from "./provider-catalog"
+import { offeredBitsBytesProviders, resolveDefaultModel, selectProviderCatalog } from "./provider-catalog"
 
 const catalog = (id: string): NormalizedProviderListResponse => ({
   all: new Map([[id, { id, name: id, source: "api", env: [], options: {}, models: {} }]]),
   connected: [id],
   default: { [id]: `${id}-model` },
+})
+
+test("prefers native OpenAI without mutating the legacy catalog or hiding OpenCode free models", () => {
+  const value = catalog("openai")
+  for (const id of ["bitsbytes-chatgpt", "opencode", "opencode-go", "openrouter"]) {
+    value.all.set(id, { id, name: id, source: "config", env: [], options: {}, models: {} })
+  }
+  value.connected.push("bitsbytes-chatgpt")
+  expect([...offeredBitsBytesProviders(value).keys()]).toEqual(["openai", "opencode", "opencode-go", "openrouter"])
+  expect(value.all.has("bitsbytes-chatgpt")).toBe(true)
+  value.connected = ["bitsbytes-chatgpt"]
+  expect(offeredBitsBytesProviders(value)).toBe(value.all)
 })
 
 test("selects the ready catalog for an explicit directory", () => {

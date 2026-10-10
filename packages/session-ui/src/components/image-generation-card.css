@@ -1,0 +1,132 @@
+.bb-image-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-block: 12px;
+}
+.bb-image-card {
+  position: relative;
+  width: min(100%, 384px);
+}
+.bb-image-placeholder {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 260px;
+  aspect-ratio: 1;
+  border-radius: 20px;
+  overflow: hidden;
+  background: var(--surface-base, #f4f4f4);
+  color: var(--text-weak, #777);
+}
+.bb-image-placeholder span {
+  position: relative;
+  z-index: 1;
+  padding: 20px;
+  text-align: center;
+  font-size: 13px;
+  align-self: end;
+}
+.bb-image-dots {
+  position: absolute;
+  inset: 18%;
+  background-image: radial-gradient(circle, var(--text-weak, #777) 1px, transparent 1.5px);
+  background-size: 12px 12px;
+  opacity: 0.2;
+  mask-image: radial-gradient(ellipse, #000 12%, transparent 72%);
+  animation: bb-image-breathe 2.8s ease-in-out infinite;
+}
+.bb-image-placeholder[data-animated="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 20%, var(--surface-raised-base, #fff) 48%, transparent 75%);
+  opacity: 0.55;
+  transform: translateX(-100%);
+  animation: bb-image-shimmer 3.2s ease-in-out infinite;
+}
+.bb-image-preview {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  border-radius: 20px;
+  cursor: zoom-in;
+  background: var(--surface-base, #f4f4f4);
+}
+.bb-image-preview img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 600px;
+  object-fit: contain;
+}
+.bb-image-card[data-loaded="false"] .bb-image-preview {
+  position: absolute;
+  visibility: hidden;
+}
+.bb-image-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 2px;
+}
+.bb-image-actions a,
+.bb-image-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-weak, #777);
+  text-decoration: none;
+  cursor: pointer;
+}
+.bb-image-actions a:hover,
+.bb-image-actions button:hover {
+  color: var(--text-strong, #222);
+}
+.bb-image-error {
+  margin-block: 8px;
+  font-size: 12px;
+  color: var(--text-weak, #777);
+}
+.bb-image-error summary {
+  cursor: pointer;
+}
+.bb-image-error pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-block: 8px;
+}
+@keyframes bb-image-breathe {
+  0%,
+  100% {
+    opacity: 0.13;
+    transform: scale(0.95);
+  }
+  50% {
+    opacity: 0.32;
+    transform: scale(1.04);
+  }
+}
+@keyframes bb-image-shimmer {
+  0%,
+  15% {
+    transform: translateX(-100%);
+  }
+  85%,
+  100% {
+    transform: translateX(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bb-image-dots {
+    animation: none;
+  }
+  .bb-image-placeholder[data-animated="true"]::after {
+    animation: none;
+    transform: none;
+    opacity: 0.15;
+  }
+}

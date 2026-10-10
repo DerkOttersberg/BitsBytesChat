@@ -1,0 +1,273 @@
+import assert from "node:assert/strict"
+import { randomUUID } from "node:crypto"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { createServer } from "node:http"
+import { createRequire } from "node:module"
+import { constants, setPriority } from "node:os"
+import { join, resolve } from "node:path"
+import { pathToFileURL } from "node:url"
+import { captureHidden } from "./qa-capture.mjs"
+
+// Only owned, invisible QA windows, loopback inference, and fictional credentials.
+setPriority(process.pid, constants.priority.PRIORITY_BELOW_NORMAL)
+const root = resolve("../..")
+const { _electron } = createRequire(join(root, ".tools/qa/package.json"))("playwright")
+const profile = join(root, ".tools/qa/extension-settings-" + randomUUID())
+const data = join(profile, "BitsBytesChat"), configPath = join(data, "config/opencode/opencode.json")
+const results = join(root, ".tools/qa/results"), name = process.env.BB_QA_REPORT || "extension-settings"
+const report = { profile, checks: [], errors: [], localChatRequests: [], paidRequests: false }
+await Promise.all([join(data, "workspace"), join(data, "config/opencode"), results].map(path => mkdir(path, { recursive: true })))
+const mcp = createServer(async (request, response) => {
+  if (request.method !== "POST") { response.writeHead(405).end(); return }
+  let text = ""; for await (const chunk of request) text += chunk
+  const message = JSON.parse(text)
+  if (request.url.startsWith("/v1/chat/completions")) {
+    const skillTest = message.messages?.some(row => JSON.stringify(row.content ?? "").includes("Apply this skill to the sample below."))
+    report.localChatRequests.push({ model: message.model, kind: skillTest ? "skill-test" : "plugin" })
+    const content = skillTest ? "The local QA fixture verifies automatic settings saves." : "Local plugin QA reply."
+    response.writeHead(200, { "content-type": "text/event-stream" })
+    response.write("data: " + JSON.stringify({ id: "qa-reply", object: "chat.completion.chunk", model: "fixture", choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }] }) + "\n\n")
+    response.write("data: " + JSON.stringify({ id: "qa-reply", object: "chat.completion.chunk", model: "fixture", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }) + "\n\n")
+    response.end("data: [DONE]\n\n"); return
+  }
+  if (message.id === undefined) { response.writeHead(202).end(); return }
+  response.writeHead(200, { "content-type": "application/json" })
+  response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: message.method === "initialize" ? { protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "Local QA MCP", version: "1" } } : { tools: [] } }))
+})
+await new Promise(done => mcp.listen(0, "127.0.0.1", done))
+await writeFile(configPath, JSON.stringify({
+  model: "opencode/fixture", small_model: "opencode/fixture",
+  provider: {
+    opencode: { name: "Free fixture", npm: "@ai-sdk/openai-compatible", whitelist: ["fixture"], options: { baseURL: `http://127.0.0.1:${mcp.address().port}/v1`, apiKey: "fictional" }, models: { fixture: { name: "Free fixture", tool_call: true, limit: { context: 128000, output: 8192 } } } },
+    openrouter: { name: "OpenRouter", whitelist: ["fixture/chat"], options: { baseURL: "http://127.0.0.1:1/v1", apiKey: "fictional-router-key" }, models: { "fixture/chat": { name: "Chat-only fixture", tool_call: true, limit: { context: 128000, output: 8192 } } } },
+  },
+  mcp: { QA_MCP: { type: "remote", url: `http://127.0.0.1:${mcp.address().port}/mcp`, headers: { Authorization: "Bearer fictional-mcp-secret" }, enabled: false } },
+}))
+const plugin = join(profile, "qa-plugin.mjs"), marker = join(profile, "plugin-loaded.txt")
+await writeFile(plugin, `import {writeFile} from 'node:fs/promises'; export const Fixture = async () => { await writeFile(${JSON.stringify(marker)},'loaded'); return {} }`)
+const pluginURL = pathToFileURL(plugin).href
+let app, page
+const check = label => { report.checks.push(label); console.log("PASS", label) }
+const poll = async (read, accept, label) => { for (let count = 0; count < 200; count++) { const value = await read(); if (accept(value)) return value; await new Promise(done => setTimeout(done, 100)) }; throw Error("Timed out: " + label) }
+const call = (method, args = {}) => page.evaluate(({ method, args }) => window.api.bitsbytes.call(method, args), { method, args })
+const settings = () => page.locator(".settings-v2-dialog")
+const noImageRequests = async () => {
+  const jobs = JSON.parse(await readFile(join(data, "image-jobs.json"), "utf8"))
+  report.paidRequests = jobs.length > 0
+  assert.deepEqual(jobs, [], "Settings changes must not start generation or verification jobs")
+}
+const launch = async () => {
+  app = await _electron.launch({ executablePath: process.env.BB_QA_EXECUTABLE || join(root, "packages/desktop/node_modules/electron/dist/electron.exe"), args: process.env.BB_QA_MAIN ? [process.env.BB_QA_MAIN] : process.env.BB_QA_EXECUTABLE ? [] : [join(root, "packages/desktop")], env: { ...process.env, BB_QA_ISOLATED: "1", BB_QA_HIDDEN: "1", BB_QA_CAPTURE: "1", LOCALAPPDATA: profile }, timeout: 90000 })
+  page = await app.firstWindow(); page.setDefaultTimeout(25000)
+  page.on("pageerror", error => report.errors.push(error.message))
+  await app.evaluate(({ BrowserWindow }) => { const window = BrowserWindow.getAllWindows()[0]; window.webContents.setBackgroundThrottling(false); window.setContentSize(1380, 900) })
+  await page.locator(".bb-org-sidebar").waitFor({ timeout: 90000 })
+  await page.evaluate(() => window.api.awaitInitialization())
+  assert.equal(await page.locator(".bb-org-utility").getByText("Skills", { exact: true }).count(), 0)
+  await page.locator(".bb-org-account").getByRole("button", { name: "Settings", exact: true }).click()
+}
+try {
+  await launch()
+  const navigation = settings().locator('[data-slot="tabs-v2-list"]')
+  for (const [label, icon] of [["Audio", "microphone"], ["Image generation", "photo"], ["Extensions", "mcp"], ["Permissions", "shield"], ["Mobile access", "mobile"]]) {
+    const row = navigation.getByRole("tab", { name: label, exact: true })
+    assert.equal(await row.locator("svg use").getAttribute("href"), `#opencode-icon-${icon}`)
+  }
+  await settings().getByRole("tab", { name: "Extensions", exact: true }).click()
+  const extension = () => settings().locator(".bb-clean-settings").filter({ has: page.getByRole("heading", { name: "Extensions", exact: true }) })
+  const toggle = () => extension().getByRole("switch", { name: "Enable QA_MCP", exact: true })
+  await toggle().waitFor()
+  assert.equal(await extension().locator("textarea").count(), 0)
+  await captureHidden(app, page, join(results, name + "-mcp.png"))
+  await toggle().click()
+  await poll(() => toggle().isEnabled(), value => value, "MCP lifecycle")
+  assert.equal(await toggle().isChecked(), true)
+  assert.equal((await call("mcp.settings.list")).servers.find(row => row.name === "QA_MCP").status, "connected")
+  assert.equal(JSON.parse(await readFile(configPath, "utf8")).mcp.QA_MCP.headers.Authorization, "Bearer fictional-mcp-secret")
+  await toggle().click()
+  await poll(() => toggle().isEnabled(), value => value, "MCP disable")
+  assert.equal(await toggle().isChecked(), false)
+  const mcpRow = extension().getByRole("group", { name: "QA_MCP", exact: true })
+  await mcpRow.hover()
+  await mcpRow.getByRole("button", { name: "Edit", exact: true }).click()
+  await extension().locator("textarea").waitFor()
+  assert.equal(await extension().getByRole("textbox", { name: "JSON", exact: true }).count(), 1)
+  assert.equal((await extension().locator("textarea").inputValue()).includes("fictional-mcp-secret"), false)
+  assert.equal(await extension().locator("details").count(), 0)
+  assert.equal(await extension().getByRole("button", { name: /example|Refresh MCP status/i }).count(), 0)
+  await extension().getByRole("button", { name: "Cancel", exact: true }).click()
+  check("Extensions shows compact MCP rows; live toggles preserve masked credentials and the editor opens on demand")
+
+  await extension().getByRole("tab", { name: "Plugins", exact: true }).click()
+  await extension().getByRole("button", { name: "Add plugin", exact: true }).click()
+  await extension().getByRole("textbox", { name: "Package or local file URL", exact: true }).fill(pluginURL)
+  await extension().getByRole("button", { name: "Save", exact: true }).click()
+  const pluginSwitch = () => extension().getByRole("switch", { name: "Enable " + pluginURL, exact: true })
+  await pluginSwitch().waitFor()
+  assert.equal(await pluginSwitch().isChecked(), true)
+  await pluginSwitch().click()
+  await poll(() => pluginSwitch().isEnabled(), value => value, "plugin save")
+  assert.deepEqual(JSON.parse(await readFile(configPath, "utf8")).plugin, [])
+  await captureHidden(app, page, join(results, name + "-plugins.png"))
+  check("Plugins supports packages and local files, durable enable/disable, and a concise restart status")
+
+  await extension().getByRole("tab", { name: "Skills", exact: true }).click()
+  await extension().getByRole("button", { name: "New skill", exact: true }).click()
+  await extension().getByRole("textbox", { name: "Name", exact: true }).fill("QA compact skill")
+  await extension().getByRole("textbox", { name: "Short description", exact: true }).fill("Summarize sample text in one sentence.")
+  await extension().getByRole("textbox", { name: "Instructions", exact: true }).fill("Summarize the provided input in one sentence. Return plain text.")
+  const advanced = () => extension().locator("fieldset > details")
+  assert.equal(await advanced().locator(":scope > summary").textContent(), "Advanced")
+  assert.equal(await advanced().getAttribute("open"), null)
+  assert.equal(await extension().getByRole("button", { name: "Test skill", exact: true }).count(), 0)
+  assert.equal(await extension().getByRole("button", { name: "Choose template", exact: true }).count(), 0)
+  await extension().getByRole("tab", { name: "MCPs", exact: true }).click()
+  await extension().getByRole("tab", { name: "Skills", exact: true }).click()
+  assert.equal(await extension().getByRole("textbox", { name: "Name", exact: true }).inputValue(), "QA compact skill")
+  await settings().getByRole("tab", { name: "Permissions", exact: true }).click()
+  assert.equal(await settings().getByRole("switch").count(), 3)
+  assert.equal(await settings().getByRole("textbox", { name: "JSON", exact: true }).count(), 0)
+  await captureHidden(app, page, join(results, name + "-permissions.png"))
+  await settings().getByRole("tab", { name: "Extensions", exact: true }).click()
+  assert.equal(await extension().getByRole("textbox", { name: "Name", exact: true }).inputValue(), "QA compact skill")
+  assert.equal(await extension().getByRole("textbox", { name: "Short description", exact: true }).inputValue(), "Summarize sample text in one sentence.")
+  await extension().getByRole("button", { name: "Save", exact: true }).click()
+  await poll(() => extension().getByRole("button", { name: "Save", exact: true }).isEnabled(), value => value, "skill save")
+  const savedSkill = (await call("state")).skills.find(skill => skill.name === "QA compact skill")
+  assert.equal(savedSkill.revision, 1)
+  assert.match(savedSkill.instructions, /^---\r?\n[\s\S]*description: "Summarize sample text in one sentence\."/)
+  assert.equal((await extension().getByRole("textbox", { name: "Instructions", exact: true }).inputValue()).startsWith("---"), false)
+  await advanced().locator(":scope > summary").click()
+  assert.equal(await extension().getByRole("textbox", { name: "Default prompt", exact: true }).isVisible(), true)
+  await advanced().locator(":scope > summary").click()
+  await extension().getByRole("button", { name: "Close", exact: true }).click()
+  assert.equal(await extension().getByText("Summarize sample text in one sentence.", { exact: true }).count(), 1)
+  await captureHidden(app, page, join(results, name + "-skills.png"))
+  const skill = () => extension().getByRole("switch", { name: "Enable QA compact skill", exact: true })
+  for (const enabled of [true, false, true]) {
+    await skill().click(); await poll(() => skill().isEnabled(), value => value, "skill toggle")
+    const current = (await call("state")).skills.find(row => row.id === savedSkill.id)
+    assert.equal(current.enabled, enabled)
+    assert.equal(current.revision, savedSkill.revision)
+    assert.deepEqual(current.versions, savedSkill.versions)
+  }
+  check("Skills shows short descriptions, keeps Advanced collapsed, preserves drafts, and toggles without adding revisions")
+
+  await call("selection.set", { providerID: "opencode", modelID: "fixture" })
+  const artifactsBefore = await call("artifacts.list")
+  const tested = await call("skill.test", { id: savedSkill.id, instructions: savedSkill.instructions, input: "The QA fixture runs locally. The settings save automatically." })
+  assert.equal(tested.text, "The local QA fixture verifies automatic settings saves.")
+  assert.equal(tested.artifact, undefined)
+  assert.deepEqual(await call("artifacts.list"), artifactsBefore)
+  assert.ok(report.localChatRequests.some(request => request.kind === "skill-test"))
+  check("A general skill test uses loopback inference, returns plain text, and publishes no artifact")
+
+  const search = settings().getByRole("searchbox", { name: "Search settings", exact: true })
+  await search.fill("Plugins")
+  await settings().getByRole("button").filter({ hasText: "Plugins" }).first().click()
+  assert.equal(await extension().getByRole("tab", { name: "Plugins", exact: true }).getAttribute("aria-selected"), "true")
+  const openaiModel = (await call("images.models", { provider: "openai" }))[0].id
+  await call("images.configure", { provider: "openai", model: openaiModel, key: "fictional-image-key" })
+  await call("images.configure", { provider: "none" })
+  await noImageRequests()
+  await search.fill("Image model")
+  await settings().getByRole("button").filter({ hasText: "Image model" }).first().click()
+  const images = () => settings().locator("[data-bb-image-settings]")
+  const provider = () => settings().getByRole("combobox", { name: "Provider", exact: true })
+  const imageModel = () => settings().getByRole("combobox", { name: "Image model", exact: true })
+  await provider().waitFor()
+  assert.equal(await provider().inputValue(), "none")
+  assert.deepEqual(await provider().locator("option").evaluateAll(rows => rows.map(row => row.value)), ["none", "openrouter", "openai"])
+  assert.equal(await imageModel().count(), 0)
+  assert.equal(await images().locator("input, button, details").count(), 0)
+  await provider().selectOption("openrouter")
+  await poll(() => call("images.status"), value => value.provider === "openrouter" && value.enabled, "image provider autosave")
+  await poll(() => imageModel().isEnabled(), value => value, "public image catalogue")
+  const options = await imageModel().locator("option").evaluateAll(rows => rows.map(row => ({ id: row.value, name: row.textContent })))
+  const available = options.filter(row => row.id)
+  assert.ok(available.length > 0)
+  assert.equal(available.some(row => row.id === "fixture/chat"), false)
+  const initialModel = await imageModel().inputValue()
+  const selected = (available.find(row => row.id !== initialModel) ?? available[0]).id
+  await imageModel().selectOption(selected)
+  const selectedStatus = await poll(() => call("images.status"), value => value.model === selected && value.provider === "openrouter" && value.enabled, "image model autosave")
+  assert.equal(selectedStatus.available, true)
+  assert.equal(selectedStatus.verifiedAt, undefined)
+  await noImageRequests()
+  await poll(() => images().getByText("Saving…", { exact: true }).count(), value => value === 0, "image save complete")
+  await captureHidden(app, page, join(results, name + "-images.png"))
+  await provider().selectOption("openai")
+  const independent = await poll(() => call("images.status"), value => value.provider === "openai" && value.enabled, "OpenAI provider autosave")
+  assert.equal(independent.model, openaiModel)
+  assert.equal(independent.configured, true)
+  assert.equal(independent.available, true)
+  assert.equal(JSON.stringify(independent).includes("fictional-image-key"), false)
+  await poll(() => imageModel().isEnabled(), value => value, "OpenAI image choices")
+  assert.equal(await imageModel().inputValue(), openaiModel)
+  assert.equal(await images().locator("input, button, details").count(), 0)
+  await provider().selectOption("openrouter")
+  await poll(() => call("images.status"), value => value.provider === "openrouter" && value.model === selected && value.enabled, "OpenRouter selection restored")
+  await poll(() => imageModel().isEnabled(), value => value, "restored image choice")
+  assert.equal(await imageModel().inputValue(), selected)
+  const capability = await call("images.status")
+  assert.equal(capability.connections.openai.configured, true)
+  assert.equal(JSON.stringify(capability).includes("fictional-image-key"), false)
+  await provider().selectOption("none")
+  const disabledImages = await poll(() => call("images.status"), value => !value.enabled, "No image generation autosave")
+  assert.equal(disabledImages.available, false)
+  assert.equal(disabledImages.connections.openai.configured, true)
+  assert.equal(await imageModel().count(), 0)
+  await noImageRequests()
+  await captureHidden(app, page, join(results, name + "-images-none.png"))
+  await page.emulateMedia({ colorScheme: "dark" })
+  await page.waitForFunction(() => document.documentElement.dataset.colorScheme === "dark")
+  await settings().getByRole("tab", { name: "Extensions", exact: true }).click()
+  await extension().getByRole("tab", { name: "MCPs", exact: true }).click()
+  await captureHidden(app, page, join(results, name + "-dark.png"))
+  await page.emulateMedia({ colorScheme: "light" })
+  check("Image dropdowns autosave, retain independent OpenAI credentials and model choices, and disable generation without billed image jobs")
+  await page.keyboard.press("Escape")
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(window => window.isVisible() || window.isFocused())), false)
+  await app.close(); app = undefined
+  await launch()
+  await settings().getByRole("tab", { name: "Image generation", exact: true }).click()
+  await provider().waitFor()
+  assert.equal(await provider().inputValue(), "none")
+  assert.equal(await imageModel().count(), 0)
+  const restartedImages = await call("images.status")
+  assert.equal(restartedImages.enabled, false)
+  assert.equal(restartedImages.available, false)
+  assert.equal(restartedImages.connections.openrouter.model, selected)
+  assert.equal(restartedImages.connections.openai.model, openaiModel)
+  assert.equal(restartedImages.connections.openai.configured, true)
+  await noImageRequests()
+  check("No image generation persists across restart while saved provider models and independent credentials remain available")
+  await settings().getByRole("tab", { name: "Extensions", exact: true }).click()
+  await extension().getByRole("tab", { name: "Skills", exact: true }).click()
+  await skill().waitFor(); assert.equal(await skill().isChecked(), true)
+  const restartedSkill = (await call("state")).skills.find(row => row.id === savedSkill.id)
+  assert.equal(restartedSkill.revision, savedSkill.revision)
+  assert.deepEqual(restartedSkill.versions, savedSkill.versions)
+  await extension().getByRole("tab", { name: "Plugins", exact: true }).click()
+  await pluginSwitch().waitFor(); assert.equal(await pluginSwitch().isChecked(), false)
+  await pluginSwitch().click(); await poll(() => pluginSwitch().isEnabled(), value => value, "plugin enable")
+  await app.close(); app = undefined
+  await launch()
+  await settings().getByRole("tab", { name: "Extensions", exact: true }).click()
+  await extension().getByRole("tab", { name: "Plugins", exact: true }).click()
+  await pluginSwitch().waitFor(); assert.equal(await pluginSwitch().isChecked(), true)
+  const server = await page.evaluate(() => window.api.awaitInitialization())
+  const headers = { "content-type": "application/json", "x-opencode-directory": encodeURIComponent(join(data, "workspace")) }
+  if (server.password) headers.authorization = "Basic " + Buffer.from(`${server.username ?? "opencode"}:${server.password}`).toString("base64")
+  const session = await fetch(server.url + "/session", { method: "POST", headers, body: JSON.stringify({ title: "Local plugin QA", permission: [{ permission: "*", pattern: "*", action: "deny" }] }) }).then(response => { assert.ok(response.ok); return response.json() })
+  const submitted = await fetch(server.url + `/session/${session.id}/prompt_async`, { method: "POST", headers, body: JSON.stringify({ model: { providerID: "opencode", modelID: "fixture" }, parts: [{ type: "text", text: "Reply briefly. This is an isolated local fixture." }] }) })
+  assert.ok(submitted.ok)
+  await poll(() => readFile(marker, "utf8").catch(() => ""), value => value === "loaded", "real native plugin load")
+  await poll(() => report.localChatRequests.some(request => request.kind === "plugin"), value => value, "real loopback plugin inference")
+  await extension().getByRole("button", { name: "Remove", exact: true }).click()
+  await poll(() => call("plugins.settings.list"), value => value.plugins.length === 0, "plugin remove")
+  check("An owned restart preserves image/skill/plugin settings and loads the enabled local plugin through the native engine")
+  await noImageRequests()
+  assert.deepEqual(report.errors, [])
+} catch (error) { report.failure = error.stack || String(error); report.alerts = await page?.getByRole("alert").allTextContents().catch(() => []); throw error }
+finally { await app?.close(); mcp.closeAllConnections(); await new Promise(done => mcp.close(done)); await writeFile(join(results, name + ".json"), JSON.stringify(report, null, 2)) }

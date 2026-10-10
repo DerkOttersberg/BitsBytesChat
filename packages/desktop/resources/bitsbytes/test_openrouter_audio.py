@@ -76,7 +76,7 @@ class OpenRouterAudio(unittest.TestCase):
         self.thread.join(2)
 
     def recording(self, durations=(30,), **preferences):
-        job = worker.create_job({"engine": "openrouter", **preferences})
+        job = worker.create_job({"engine": "openrouter", "audioDiarization": False, **preferences})
         for duration in durations:
             worker.add_chunk(job["id"], bytes(worker.RATE * 2 * duration))
         return worker.read_job(job["id"])
@@ -205,6 +205,106 @@ class OpenRouterAudio(unittest.TestCase):
         result = worker.transcribe({"id": job["id"], "key": "fixture-key"})
         self.assertEqual(result["status"], "transcribed")
         self.assertEqual(len(self.requests), 1)
+
+    def diarized_response(self):
+        return {"text": "Hallo. Hoi! Nog een vraag.", "words": [
+            {"word": "Hallo.", "start": 0, "end": 1, "speaker": 0},
+            {"word": "Hoi!", "start": 31, "end": 32, "speaker": 1},
+            {"word": "Nog", "start": 61, "end": 62, "speaker": 0},
+            {"word": "een", "start": 62, "end": 63, "speaker": 0},
+            {"word": "vraag.", "start": 63, "end": 64, "speaker": 0},
+        ]}
+
+    def test_speakers_are_requested_once_for_the_entire_recording_and_survive_restart(self):
+        import av
+        job = self.recording((30, 30, 5), audioModel="elevenlabs/scribe-v2", audioLanguage="nl",
+                             audioDiarization=True, speakerLabel="Speaker {{number}}")
+        self.responses = [(200, self.diarized_response())]
+        result = worker.transcribe({"id": job["id"], "key": "fixture-key", "audioDiarization": False})
+        self.assertEqual(len(self.requests), 1)
+        payload = self.requests[0]["body"]
+        self.assertEqual(payload["model"], "elevenlabs/scribe-v2")
+        self.assertEqual(payload["language"], "nl")
+        self.assertEqual(payload["provider"]["options"]["elevenlabs"], {"diarize": True})
+        self.assertEqual(payload["response_format"], "verbose_json")
+        self.assertEqual(payload["timestamp_granularities"], ["word"])
+        self.assertEqual(payload["input_audio"]["format"], "mp3")
+        with av.open(io.BytesIO(base64.b64decode(payload["input_audio"]["data"]))) as container:
+            self.assertAlmostEqual(sum(frame.samples / frame.sample_rate for frame in container.decode(audio=0)), 65, delta=0.2)
+        self.assertEqual(result["transcript"], "Speaker 1: Hallo.\nSpeaker 2: Hoi!\nSpeaker 1: Nog een vraag.")
+        self.assertEqual([turn["speaker"] for turn in result["segments"]], ["speaker_0", "speaker_1", "speaker_0"])
+        self.assertEqual(result["segments"][-1]["start"], 61)
+        self.assertTrue(all(chunk["done"] for chunk in result["chunks"]))
+        self.assertEqual((worker.job_dir(job["id"]) / "transcript.txt").read_text(), result["transcript"])
+        worker.recover()
+        restored = worker.transcribe({"id": job["id"], "key": "fixture-key"})
+        self.assertEqual(restored["transcript"], result["transcript"])
+        self.assertEqual(len(self.requests), 1, "A completed diarization must not be submitted twice")
+
+    def test_diarization_waits_until_finish_and_cancel_does_not_upload(self):
+        job = self.recording((1,), audioModel="elevenlabs/scribe-v2", audioDiarization=True)
+        worker.update_job(job["id"], recording=True, status="recording")
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            future = pool.submit(worker.transcribe, {"id": job["id"], "key": "fixture-key"})
+            time.sleep(0.25)
+            self.assertFalse(future.done())
+            self.assertEqual(self.requests, [])
+            worker.dispatch("transcribe.cancel", {"id": job["id"]})
+            result = future.result(timeout=2)
+        self.assertEqual(result["status"], "cancelled")
+        self.assertEqual(self.requests, [])
+
+    def test_cancel_diarization_terminates_the_owned_process_without_committing_labels(self):
+        self.delay = True
+        self.responses = [(200, {"text": "Hoi", "words": [{"word": "Hoi", "start": 0, "end": 1, "speaker": 0}]})]
+        job = self.recording((1,), audioModel="elevenlabs/scribe-v2", audioDiarization=True)
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            future = pool.submit(worker.transcribe, {"id": job["id"], "key": "fixture-key"})
+            self.assertTrue(self.received.wait(15), "Owned codec/request startup did not reach the fixture")
+            worker.dispatch("transcribe.cancel", {"id": job["id"]})
+            result = future.result(timeout=2)
+            self.release.set()
+        self.assertEqual(result["status"], "cancelled")
+        self.assertFalse(result.get("diarizationComplete"))
+        self.assertEqual(result["transcript"], "")
+        self.assertFalse(result["chunks"][0]["done"])
+
+    def test_missing_speaker_labels_is_actionable_without_silent_fallback_or_retry(self):
+        job = self.recording((1,), audioModel="elevenlabs/scribe-v2", audioDiarization=True)
+        with self.assertRaisesRegex(RuntimeError, "audioDiarizationResponse"):
+            worker.transcribe({"id": job["id"], "key": "fixture-key"})
+        saved = worker.read_job(job["id"])
+        self.assertEqual(saved["status"], "error")
+        self.assertFalse(saved["chunks"][0]["done"])
+        self.assertEqual(len(self.requests), 1)
+        self.assertTrue(Path(saved["chunks"][0]["path"]).exists())
+
+    def test_speaker_names_update_plain_transcript_but_never_send_another_request(self):
+        job = self.recording((30, 30, 5), audioModel="elevenlabs/scribe-v2", audioDiarization=True,
+                             speakerLabel="Speaker {{number}}")
+        self.responses = [(200, self.diarized_response())]
+        worker.transcribe({"id": job["id"], "key": "fixture-key"})
+        saved = worker.dispatch("job.speakers", {"id": job["id"], "names": {"speaker_0": "Derk", "speaker_1": "Tom"}})
+        self.assertEqual(saved["transcript"], "Derk: Hallo.\nTom: Hoi!\nDerk: Nog een vraag.")
+        self.assertEqual(len(self.requests), 1)
+        for names in ({"speaker_3": "Unknown"}, {"speaker_0": "Injected\nline"}, {"speaker_0": "x" * 81}):
+            with self.assertRaisesRegex(ValueError, "audioSpeakerName"):
+                worker.dispatch("job.speakers", {"id": job["id"], "names": names})
+        self.assertEqual(worker.read_job(job["id"])["transcript"], saved["transcript"])
+        worker.recover()
+        self.assertEqual(worker.read_job(job["id"])["speakerNames"], {"speaker_0": "Derk", "speaker_1": "Tom"})
+
+    def test_turning_diarization_off_rebuilds_plain_text_from_the_retained_audio(self):
+        job = self.recording((1,), audioModel="elevenlabs/scribe-v2", audioDiarization=True)
+        self.responses = [(200, {"text": "Hoi", "words": [{"word": "Hoi", "start": 0, "end": 1, "speaker": 0}]})]
+        worker.transcribe({"id": job["id"], "key": "fixture-key"})
+        changed = worker.dispatch("job.update", {"id": job["id"], "values": {"audioDiarization": False}})
+        self.assertFalse(changed.get("diarizationComplete"))
+        self.assertEqual(changed["segments"], [])
+        plain = worker.transcribe({"id": job["id"], "key": "fixture-key"})
+        self.assertEqual(plain["transcript"], "Nederlands: café.")
+        self.assertEqual(self.requests[-1]["body"]["response_format"], "json")
+        self.assertNotIn("provider", self.requests[-1]["body"])
 
 
 if __name__ == "__main__":

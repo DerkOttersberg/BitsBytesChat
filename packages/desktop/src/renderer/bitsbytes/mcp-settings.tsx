@@ -1,20 +1,21 @@
-import { For, onMount, Show } from "solid-js"
+import { For, onCleanup, onMount, Show } from "solid-js"
 import { createStore } from "solid-js/store"
+import { Icon } from "@opencode-ai/ui/icon"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
+import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
 import type { CustomMcpEntry, CustomMcpState } from "../../bitsbytes/types"
 import { bbt, bbError } from "../../bitsbytes/copy"
 
-const localExample = { type: "local", command: ["your-mcp-server", "--stdio"], enabled: false, timeout: 10000 }
-const remoteExample = { type: "remote", url: "https://example.com/mcp", enabled: false, timeout: 10000 }
 export function McpSettings() {
   const [store, setStore] = createStore({
     servers: [] as CustomMcpEntry[],
     name: "",
     original: "",
-    config: JSON.stringify(localExample, null, 2),
+    config: "",
     busy: false,
     error: "",
     notice: "",
+    editing: false,
   })
   const status = (value: string) =>
     bbt(
@@ -34,24 +35,38 @@ export function McpSettings() {
     )
   const refresh = async () => {
     const value = await window.api.bitsbytes.call<CustomMcpState>("mcp.settings.list")
-    setStore({ servers: value.servers, error: value.error ? bbError(value.error) : "" })
+    setStore({
+      servers: value.servers,
+      error: value.error && !value.servers.some((server) => server.error === value.error) ? bbError(value.error) : "",
+    })
   }
-  async function run(action: "save" | "remove") {
+  async function run(action: "save" | "remove", server?: CustomMcpEntry) {
     setStore({ busy: true, error: "", notice: "" })
     try {
       const value = await window.api.bitsbytes.call<CustomMcpState>(`mcp.settings.${action}`, {
-        name: store.name,
-        ...(action === "save" ? { config: JSON.parse(store.config) } : {}),
+        name: server?.name ?? store.name,
+        ...(action === "save"
+          ? { config: server?.config ? JSON.parse(JSON.stringify(server.config)) : JSON.parse(store.config) }
+          : {}),
       })
       setStore({
         servers: value.servers,
-        error: value.error ? bbError(value.error) : "",
+        error: value.error && !value.servers.some((server) => server.error === value.error) ? bbError(value.error) : "",
         notice: bbt(value.error ? "mcpSavedWarning" : "mcpSaved"),
       })
-      if (action === "remove") setStore({ name: "", original: "", config: JSON.stringify(localExample, null, 2) })
-      else {
-        const saved = value.servers.find((server) => server.name === store.name)
-        if (saved?.config) setStore({ original: saved.name, config: JSON.stringify(saved.config, null, 2) })
+      if (action === "remove") {
+        if (!server || store.original === server.name) setStore({ name: "", original: "", config: "", editing: false })
+        return
+      }
+      if (!server) {
+        const saved = value.servers.find((server) => server.name === store.name.trim())
+        if (saved?.config)
+          setStore({
+            name: saved.name,
+            original: saved.name,
+            config: JSON.stringify(saved.config, null, 2),
+            editing: !!value.error,
+          })
       }
     } catch (error) {
       setStore("error", error instanceof SyntaxError ? bbt("bb.error.mcpConfig") : bbError(error))
@@ -59,136 +74,144 @@ export function McpSettings() {
       setStore("busy", false)
     }
   }
-  onMount(() => void refresh().catch((error) => setStore("error", bbError(error))))
+  onMount(() => {
+    void refresh().catch((error) => setStore("error", bbError(error)))
+    const unsubscribe = window.api.bitsbytes.subscribe((event) => {
+      if (event.type === "refresh" && !store.busy) void refresh().catch((error) => setStore("error", bbError(error)))
+    })
+    onCleanup(unsubscribe)
+  })
   return (
     <section class="bb-mcp-settings" data-setting-key="tools-mcp">
-      <h3>{bbt("mcpTitle")}</h3>
-      <p class="bb-subtle">{bbt("mcpHint")}</p>
+      <div class="bb-settings-section-heading">
+        <span>{bbt("extensions.global")}</span>
+        <ButtonV2
+          variant="neutral"
+          disabled={store.busy}
+          onClick={() => setStore({ editing: true, name: "", original: "", config: "", error: "", notice: "" })}
+        >
+          {bbt("mcpNew")}
+        </ButtonV2>
+      </div>
       <Show when={store.error}>
         <p class="bb-error" role="alert">
           {store.error}
         </p>
       </Show>
-      <Show when={store.notice}>
-        <p class="bb-subtle" role="status">
-          {store.notice}
-        </p>
-      </Show>
       <Show when={store.servers.length} fallback={<p class="bb-subtle">{bbt("mcpEmpty")}</p>}>
         <For each={store.servers}>
           {(server) => (
-            <button
-              class="bb-mcp-row"
-              disabled={store.busy}
-              onClick={() =>
-                setStore({
-                  name: server.name,
-                  original: server.name,
-                  config: JSON.stringify(server.config ?? localExample, null, 2),
-                  error: server.error ? bbError(server.error) : "",
-                  notice: "",
-                })
-              }
-            >
-              <strong>{server.name}</strong>
-              <span>{status(server.status)}</span>
-            </button>
+            <div class="bb-mcp-server" role="group" aria-label={server.name}>
+              <div class="bb-extension-row">
+                <span class="bb-extension-label">
+                  <Icon name="mcp" size="small" />
+                  <strong>{server.name}</strong>
+                  <small>{status(server.status)}</small>
+                </span>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  aria-label={bbt("extensions.toggle", { name: server.name })}
+                  checked={server.config?.enabled !== false}
+                  disabled={store.busy || !server.config}
+                  onChange={(event) => {
+                    const enabled = event.currentTarget.checked
+                    event.currentTarget.checked = server.config?.enabled !== false
+                    void run("save", {
+                      ...server,
+                      config: server.config ? { ...server.config, enabled } : undefined,
+                    })
+                  }}
+                />
+                <Show
+                  when={server.config && server.config.enabled !== false && (server.status === "failed" || server.error)}
+                >
+                  <ButtonV2
+                    variant="ghost-muted"
+                    size="small"
+                    disabled={store.busy}
+                    onClick={() => void run("save", server)}
+                  >
+                    {bbt("mcpRetry")}
+                  </ButtonV2>
+                </Show>
+                <IconButtonV2
+                  class="bb-mcp-edit"
+                  variant="ghost-muted"
+                  size="small"
+                  icon={<Icon name="edit" size="small" />}
+                  aria-label={bbt("edit")}
+                  title={bbt("edit")}
+                  disabled={store.busy}
+                  onClick={() =>
+                    setStore({
+                      name: server.name,
+                      original: server.name,
+                      config: server.config ? JSON.stringify(server.config, null, 2) : "",
+                      error: "",
+                      notice: "",
+                      editing: true,
+                    })
+                  }
+                />
+                <IconButtonV2
+                  class="bb-mcp-edit"
+                  variant="ghost-muted"
+                  size="small"
+                  icon={<Icon name="trash" size="small" />}
+                  aria-label={bbt("mcpRemove")}
+                  title={bbt("mcpRemove")}
+                  disabled={store.busy}
+                  onClick={() => void run("remove", server)}
+                />
+              </div>
+              <Show when={server.error}>
+                {(error) => (
+                  <p class="bb-error" role="alert">
+                    {bbError(error())}
+                  </p>
+                )}
+              </Show>
+            </div>
           )}
         </For>
       </Show>
-      <div class="bb-actions">
-        <ButtonV2
-          variant="neutral"
-          disabled={store.busy}
-          onClick={() =>
-            setStore({ name: "", original: "", config: JSON.stringify(localExample, null, 2), error: "", notice: "" })
-          }
-        >
-          {bbt("mcpNew")}
-        </ButtonV2>
-        <ButtonV2
-          variant="neutral"
-          disabled={store.busy}
-          onClick={() => void refresh().catch((error) => setStore("error", bbError(error)))}
-        >
-          {bbt("mcpRefresh")}
-        </ButtonV2>
-      </div>
-      <label>
-        {bbt("name")}
-        <input
-          autocomplete="off"
-          value={store.name}
-          disabled={store.busy || !!store.original}
-          onInput={(event) => setStore("name", event.currentTarget.value)}
-        />
-      </label>
-      <label>
-        {bbt("mcpConfig")}
-        <textarea
-          class="bb-code"
-          rows="10"
-          spellcheck={false}
-          value={store.config}
-          disabled={store.busy}
-          onInput={(event) => setStore("config", event.currentTarget.value)}
-        />
-      </label>
-      <p class="bb-subtle">{bbt("mcpConfigHint")}</p>
-      <div class="bb-actions">
-        <ButtonV2
-          variant="neutral"
-          disabled={store.busy || !!store.original}
-          onClick={() => setStore("config", JSON.stringify(localExample, null, 2))}
-        >
-          {bbt("mcpLocalExample")}
-        </ButtonV2>
-        <ButtonV2
-          variant="neutral"
-          disabled={store.busy || !!store.original}
-          onClick={() => setStore("config", JSON.stringify(remoteExample, null, 2))}
-        >
-          {bbt("mcpRemoteExample")}
-        </ButtonV2>
-        <ButtonV2
-          variant="neutral"
-          disabled={store.busy || !!store.original}
-          onClick={() =>
-            setStore({
-              name: "Roblox_Studio",
-              config: JSON.stringify(
-                {
-                  type: "local",
-                  command: ["cmd.exe", "/c", "%LOCALAPPDATA%\\Roblox\\mcp.bat"],
-                  enabled: false,
-                  timeout: 60000,
-                },
-                null,
-                2,
-              ),
-            })
-          }
-        >
-          {bbt("mcpRobloxExample")}
-        </ButtonV2>
-        <ButtonV2 disabled={store.busy || !store.name.trim()} onClick={() => void run("save")}>
-          {bbt("save")}
-        </ButtonV2>
-        <Show when={store.original}>
-          <ButtonV2 variant="neutral" disabled={store.busy} onClick={() => void run("remove")}>
-            {bbt("mcpRemove")}
-          </ButtonV2>
-        </Show>
-      </div>
-      <p class="bb-subtle">
-        {bbt("mcpRobloxHint")}{" "}
-        <button
-          class="bb-mcp-help"
-          onClick={() => void window.api.openExternal("https://create.roblox.com/docs/studio/mcp")}
-        >
-          {bbt("mcpRoblox")}
-        </button>
-      </p>
+      <Show when={store.editing}>
+        <div class="bb-settings-editor">
+          <label>
+            {bbt("name")}
+            <input
+              autocomplete="off"
+              value={store.name}
+              disabled={store.busy || !!store.original}
+              onInput={(event) => setStore("name", event.currentTarget.value)}
+            />
+          </label>
+          <label>
+            {bbt("mcpJson")}
+            <textarea
+              class="bb-code"
+              rows="6"
+              spellcheck={false}
+              value={store.config}
+              disabled={store.busy}
+              onInput={(event) => setStore("config", event.currentTarget.value)}
+            />
+          </label>
+          <div class="bb-actions">
+            <ButtonV2 disabled={store.busy || !store.name.trim() || !store.config.trim()} onClick={() => void run("save")}>
+              {bbt("save")}
+            </ButtonV2>
+            <ButtonV2
+              variant="neutral"
+              disabled={store.busy}
+              onClick={() => setStore({ editing: false, name: "", original: "", config: "" })}
+            >
+              {bbt("cancel")}
+            </ButtonV2>
+          </div>
+        </div>
+      </Show>
     </section>
   )
 }

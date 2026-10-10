@@ -5,6 +5,7 @@ import { createServer } from "node:http"
 import { createRequire } from "node:module"
 import { constants, setPriority } from "node:os"
 import { join, resolve } from "node:path"
+import { captureHidden } from "./qa-capture.mjs"
 
 // Own isolated windows and a test Python environment. No real keys, microphone or paid requests.
 setPriority(process.pid, constants.priority.PRIORITY_BELOW_NORMAL)
@@ -27,10 +28,12 @@ const fixture = createServer(async (request, response) => {
   assert.equal(request.method, "POST")
   assert.equal(request.headers.authorization, "Bearer bb-fixture-audio-key")
   const bytes = Buffer.from(body.input_audio.data, "base64")
-  assert.equal(bytes.subarray(0, 4).toString(), "RIFF")
-  assert.equal(body.input_audio.format, "wav")
-  assert.equal(body.response_format, "json")
-  report.requests.push({ model: body.model, language: body.language || "", wavBytes: bytes.length })
+  const diarization = body.provider?.options?.elevenlabs?.diarize === true
+  assert.equal(body.input_audio.format, diarization ? "mp3" : "wav")
+  assert.equal(body.response_format, diarization ? "verbose_json" : "json")
+  if (!diarization) assert.equal(bytes.subarray(0, 4).toString(), "RIFF")
+  if (diarization) assert.deepEqual(body.timestamp_granularities, ["word"])
+  report.requests.push({ model: body.model, language: body.language || "", audioBytes: bytes.length, diarization })
   if (hold)
     await new Promise((done) => {
       release = done
@@ -38,7 +41,12 @@ const fixture = createServer(async (request, response) => {
   const status = outcomes.shift() || 200
   response.writeHead(status, { "content-type": "application/json" })
   response.end(
-    JSON.stringify(status === 200 ? { text: "Fictional local transcription." } : { error: "Local rate-limit fixture" }),
+    JSON.stringify(status === 200 ? diarization ? { text: "Hallo Derk. Hoi! Nogmaals.", words: [
+      { word: "Hallo", start: 0, end: 1, speaker: 0 },
+      { word: "Derk.", start: 1, end: 2, speaker: 0 },
+      { word: "Hoi!", start: 28, end: 29, speaker: 1 },
+      { word: "Nogmaals.", start: 30, end: 31, speaker: 0 },
+    ] } : { text: "Fictional local transcription." } : { error: "Local rate-limit fixture" }),
   )
 })
 await new Promise((done) => fixture.listen(0, "127.0.0.1", done))
@@ -130,6 +138,7 @@ const launch = async () => {
       ...process.env,
       BB_QA_ISOLATED: "1",
       BB_QA_HIDDEN: "1",
+      BB_QA_CAPTURE: "1",
       LOCALAPPDATA: profile,
       PYTHONPATH: python,
       BB_QA_AUDIO_ENDPOINT: endpoint,
@@ -151,44 +160,40 @@ const launch = async () => {
 try {
   const original = await launch()
   assert.equal(original.workerReady, true)
-  assert.equal(original.settings.engine, "parakeet")
+  assert.equal(original.settings.engine, "openrouter")
   assert.equal(original.settings.intakeFolder, "retained-fixture-folder")
-  assert.equal(original.settings.audioModel, "openai/whisper-large-v3-turbo")
+  assert.equal(original.settings.audioModel, "elevenlabs/scribe-v2")
+  assert.equal(original.settings.audioDiarization, true)
   assert.equal(original.settings.audioLanguage, "")
   assert.equal(original.jobs.find((job) => job.id === "legacy-fixture").transcript, "Saved historical text.")
-  check("Retired cloud selection migrates to local; historical transcript and recording identity survive")
+  assert.equal(report.requests.length, 0)
+  check("Retired/local preferences migrate to OpenRouter without sending historical audio; saved transcripts survive")
   await page.locator(".bb-org-account").getByRole("button", { name: "Settings", exact: true }).click()
-  const settings = page.locator(".settings-v2-dialog")
-  await settings.getByRole("searchbox", { name: "Search settings", exact: true }).fill("Audio transcription")
-  await settings.locator(".settings-v2-search-result").filter({ hasText: "Audio transcription" }).first().click()
-  const engine = settings.locator('[data-setting-key="audio-engine"] select')
-  await engine.selectOption("openrouter")
-  assert.deepEqual(await engine.locator("option").evaluateAll((nodes) => nodes.map((node) => node.value)), [
-    "parakeet",
-    "whisper",
-    "openrouter",
-  ])
-  const model = settings.getByRole("combobox", { name: "Transcription model", exact: true })
+  let settings = page.locator(".settings-v2-dialog")
+  await settings.getByRole("searchbox", { name: "Search settings", exact: true }).fill("Separate speakers")
+  await settings.locator(".settings-v2-search-result").filter({ hasText: "Separate speakers" }).first().click()
+  assert.equal(await settings.locator('[data-setting-key="audio-engine"], [data-setting-key="audio-acceleration"]').count(), 0)
+  assert.equal(await settings.getByRole("button", { name: /Download Parakeet|Download Whisper/ }).count(), 0)
+  let separation = settings.getByRole("checkbox", { name: "Separate speakers", exact: true })
+  assert.equal(await separation.isChecked(), true)
+  let model = settings.getByRole("combobox", { name: "Transcription model", exact: true })
   await poll(
     () => model.locator('option[value="openai/gpt-4o-mini-transcribe"]').count(),
     (count) => count === 1,
     "actual public transcription catalogue",
   )
+  assert.equal(await model.inputValue(), "elevenlabs/scribe-v2")
   await model.selectOption("openai/gpt-4o-mini-transcribe")
+  await poll(() => call("state"), state => state.settings.audioModel === "openai/gpt-4o-mini-transcribe", "model autosave without Save")
+  assert.equal(await separation.isEnabled(), false)
+  assert.equal(await separation.isChecked(), false)
   await settings.getByRole("textbox", { name: "Audio language (optional)", exact: true }).fill("nl")
-  const key = settings.locator('[data-setting-key="audio-openrouter-key"] input')
-  await key.fill("bb-fixture-audio-key")
-  await settings.getByRole("button", { name: "Save keys securely", exact: true }).click()
-  await poll(
-    () => key.inputValue(),
-    (value) => value === "",
-    "masked saved connection",
-  )
-  assert.equal(await key.getAttribute("type"), "password")
+  assert.equal(await settings.locator('[data-setting-key="audio-openrouter-key"], input[type="password"]').count(), 0)
+  await call("keys.save", { openrouter: "bb-fixture-audio-key" })
   await settings.getByRole("button", { name: "Save", exact: true }).click()
   const selected = await poll(
     () => call("state"),
-    (state) => state.settings.engine === "openrouter",
+    (state) => state.settings.engine === "openrouter" && state.settings.audioModel === "openai/gpt-4o-mini-transcribe" && state.settings.audioLanguage === "nl",
     "saved audio preferences",
   )
   assert.equal(selected.settings.audioModel, "openai/gpt-4o-mini-transcribe")
@@ -219,6 +224,8 @@ try {
     value: { type: "key", key: "bb-initial-v2-fixture", metadata: { fixture: true } },
   })
   await call("keys.save", { openrouter: "bb-fixture-audio-key" })
+  await credential("credentials.v2.import", { records: [{ id: "cred_stale_import", integrationID: "openrouter", label: "Stale database copy", value: { type: "key", key: "stale-key" } }] })
+  assert.equal((await credential("credentials.v2.all")).filter(row => row.integrationID === "openrouter").length, 1)
   const native = (await credential("credentials.v2.all")).find((row) => row.id === "cred_audio_fixture")
   assert.equal(native.value.key, "bb-fixture-audio-key")
   assert.equal(native.value.metadata.fixture, true)
@@ -285,6 +292,44 @@ try {
   hold = false
   release?.()
   check("Cancel stops the owned cloud request promptly and leaves uncommitted audio recoverable")
+  await page.locator(".bb-org-account").getByRole("button", { name: "Settings", exact: true }).click()
+  await settings.getByRole("searchbox", { name: "Search settings", exact: true }).fill("Separate speakers")
+  await settings.locator(".settings-v2-search-result").filter({ hasText: "Separate speakers" }).first().click()
+  await model.selectOption("elevenlabs/scribe-v2")
+  await poll(() => call("state"), state => state.settings.audioModel === "elevenlabs/scribe-v2", "Scribe autosave without Save")
+  assert.equal(await separation.isEnabled(), true)
+  await separation.uncheck()
+  await settings.getByRole("button", { name: "Save", exact: true }).click()
+  await poll(() => call("state"), state => state.settings.audioDiarization === false, "speaker toggle off")
+  await separation.check()
+  await settings.getByRole("button", { name: "Save", exact: true }).click()
+  await poll(() => call("state"), state => state.settings.audioDiarization === true, "speaker toggle on")
+  await captureHidden(app, page, join(results, name + "-audio.png"))
+  await page.keyboard.press("Escape")
+  check("Minimal Audio settings expose a searchable Scribe speaker toggle; unsupported models disable it and saves persist")
+  const labelled = await call("import", { path: recording, title: "Speaker separation fixture", engine: "openrouter" })
+  const speakerRequests = report.requests.length
+  const diarized = await call("transcribe", { id: labelled.id })
+  assert.equal(report.requests.length, speakerRequests + 1)
+  assert.equal(report.requests.at(-1).diarization, true)
+  assert.deepEqual(diarized.segments.map(turn => turn.speaker), ["speaker_0", "speaker_1", "speaker_0"])
+  assert.equal(diarized.transcript, "Speaker 1: Hallo Derk.\nSpeaker 2: Hoi!\nSpeaker 1: Nogmaals.")
+  const originalReference = await call("transcript.snapshot", { id: labelled.id })
+  const originalSource = join(data, "recordings", labelled.id, "sources", `${originalReference.revision}.txt`)
+  await page.locator(".bb-org-sidebar").getByRole("button", { name: "Recordings", exact: true }).click()
+  await page.locator(".bb-job").filter({ hasText: "Speaker separation fixture" }).getByRole("button", { name: "Transcript", exact: true }).click()
+  await page.locator(".bb-modal pre").getByText(diarized.transcript, { exact: true }).waitFor()
+  await page.locator(".bb-speaker-names summary").click()
+  await page.getByRole("textbox", { name: "Speaker 1", exact: true }).fill("Derk")
+  await page.locator(".bb-modal").getByRole("button", { name: "Save", exact: true }).click()
+  const named = "Derk: Hallo Derk.\nSpeaker 2: Hoi!\nDerk: Nogmaals."
+  await page.locator(".bb-modal pre").getByText(named, { exact: true }).waitFor()
+  assert.equal(report.requests.length, speakerRequests + 1)
+  assert.equal(await readFile(originalSource, "utf8"), diarized.transcript)
+  assert.notEqual((await call("transcript.snapshot", { id: labelled.id })).revision, originalReference.revision)
+  await captureHidden(app, page, join(results, name + "-speakers.png"))
+  await page.getByRole("button", { name: "Close transcript", exact: true }).click()
+  check("One actual encoded recording yields persistent speaker turns; renaming updates text without API calls or changing old attachments")
   assert.equal(
     await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows().some((window) => window.isVisible() || window.isFocused()),
@@ -294,15 +339,42 @@ try {
   await app.close()
   app = undefined
   const restored = await launch()
-  assert.equal(restored.settings.audioModel, "openai/gpt-4o-mini-transcribe")
+  settings = page.locator(".settings-v2-dialog")
+  separation = settings.getByRole("checkbox", { name: "Separate speakers", exact: true })
+  model = settings.getByRole("combobox", { name: "Transcription model", exact: true })
+  assert.equal(restored.settings.audioModel, "elevenlabs/scribe-v2")
   assert.equal(restored.settings.audioLanguage, "nl")
+  assert.equal(restored.settings.audioDiarization, true)
   assert.equal(restored.openrouterSet, true)
   assert.equal(restored.jobs.find((row) => row.id === job.id).transcript, completed.transcript)
   assert.equal(restored.jobs.find((row) => row.id === "legacy-fixture").transcript, "Saved historical text.")
-  assert.equal(report.requests.length, before + 1)
+  assert.equal(restored.jobs.find(row => row.id === labelled.id).transcript, named)
+  assert.equal(report.requests.length, speakerRequests + 1)
   check(
     "Restart restores preferences, encrypted connection and old/new transcripts without repeating provider requests",
   )
+  await page.locator(".bb-org-account").getByRole("button", { name: "Settings", exact: true }).click()
+  await settings.getByRole("searchbox", { name: "Search settings", exact: true }).fill("Separate speakers")
+  await settings.locator(".settings-v2-search-result").filter({ hasText: "Separate speakers" }).first().click()
+  await poll(() => model.isEnabled(), value => value, "catalogue after restart")
+  assert.equal(await model.inputValue(), "elevenlabs/scribe-v2")
+  await model.selectOption("openai/gpt-4o-mini-transcribe")
+  await poll(() => call("state"), state => state.settings.audioModel === "openai/gpt-4o-mini-transcribe", "second model autosave")
+  await model.selectOption("elevenlabs/scribe-v2")
+  await poll(() => call("state"), state => state.settings.audioModel === "elevenlabs/scribe-v2", "restored Scribe autosave")
+  // Close/reopen the page: asynchronous options must not replace the native selection.
+  await settings.getByRole("tab", { name: "Models", exact: true }).click()
+  await settings.getByRole("tab", { name: "Audio", exact: true }).click()
+  await poll(() => model.isEnabled(), value => value, "reopened catalogue")
+  assert.equal(await model.inputValue(), "elevenlabs/scribe-v2")
+  await page.keyboard.press("Escape")
+  const afterRestart = await call("import", { path: recording, title: "Saved Scribe selection", engine: "openrouter" })
+  const lastRequest = report.requests.length
+  await call("transcribe", { id: afterRestart.id })
+  assert.equal(report.requests.length, lastRequest + 1)
+  assert.equal(report.requests.at(-1).model, "elevenlabs/scribe-v2")
+  assert.equal(report.requests.at(-1).diarization, true)
+  check("Model changes persist without Save; reopening and restart display Scribe and the actual worker request uses that exact model")
   assert.deepEqual(report.errors, [])
   assert.equal(
     await app.evaluate(({ BrowserWindow }) =>

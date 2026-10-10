@@ -37,6 +37,8 @@ import "./styles.css"
 import { Splash } from "@opencode-ai/ui/logo"
 import { useTheme } from "@opencode-ai/ui/theme/context"
 import { BitsBytesSettings } from "./bitsbytes/settings"
+import { ExtensionsSettings } from "./bitsbytes/extensions-settings"
+import { ImageGenerationSettings } from "./bitsbytes/image-settings"
 import { nativeSettingsSearchEntries } from "./bitsbytes/settings-search"
 import { bbt } from "../bitsbytes/copy"
 import { BitsBytesShell } from "./bitsbytes/shell"
@@ -359,11 +361,12 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
   platform.applicationName = bbt("brand")
   platform.bitsbytes = window.api.bitsbytes
   platform.settingsPanels = [
-    { id: "audio", title: bbt("audioPage"), component: () => <BitsBytesSettings page="audio" /> },
-    { id: "tools", title: bbt("toolsPage"), component: () => <BitsBytesSettings page="tools" /> },
-    { id: "mobile", title: mobileCopy.title, component: MobileSettings },
+    { id: "audio", title: bbt("audioPage"), icon: "microphone", component: () => <BitsBytesSettings page="audio" /> },
+    { id: "images", title: bbt("imageGeneration.title"), icon: "photo", component: ImageGenerationSettings },
+    { id: "extensions", title: bbt("extensions.title"), icon: "mcp", component: ExtensionsSettings },
+    { id: "tools", title: bbt("toolsPage"), icon: "shield", component: () => <BitsBytesSettings page="tools" /> },
+    { id: "mobile", title: mobileCopy.title, icon: "mobile", component: MobileSettings },
   ]
-  platform.providerSettings = () => <BitsBytesSettings page="chatgpt" />
   platform.settingsSearchEntries = nativeSettingsSearchEntries
   const loadLocale = async () => {
     const current = await platform.storage?.("opencode.global.dat").getItem("language")

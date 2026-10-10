@@ -1125,14 +1125,6 @@ export function OrganizationShell(props: ParentProps) {
             </button>
             <button
               class="bb-org-utility"
-              classList={{ active: state.view === "skills" }}
-              onClick={() => setView("skills", true)}
-            >
-              <Icon name="brain" size="small" />
-              {language.t("organization.skills")}
-            </button>
-            <button
-              class="bb-org-utility"
               classList={{ active: state.view === "artifacts" }}
               onClick={() => {
                 setView("artifacts", true)

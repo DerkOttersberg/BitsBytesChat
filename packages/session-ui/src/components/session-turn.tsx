@@ -26,6 +26,7 @@ import { TextReveal } from "@opencode-ai/ui/text-reveal"
 import { createAutoScroll } from "@opencode-ai/ui/hooks"
 import { useI18n } from "@opencode-ai/ui/context/i18n"
 import { normalize } from "./session-diff"
+import { isImageGenerationTool } from "./tool-presentation"
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
@@ -353,25 +354,33 @@ export function SessionTurn(
   const assistantDerived = createMemo(() => {
     let visible = 0
     let reason: string | undefined
+    let generatingImage = false
     const show = showReasoningSummaries()
     for (const message of assistantMessages()) {
       for (const part of list(data.store.part?.[message.id], emptyParts)) {
         if (partState(part, show) === "visible") {
           visible++
         }
+        if (
+          part.type === "tool" &&
+          (part.state.status === "pending" || part.state.status === "running") &&
+          isImageGenerationTool(part)
+        )
+          generatingImage = true
         if (part.type === "reasoning" && part.text) {
           const h = heading(part.text)
           if (h) reason = h
         }
       }
     }
-    return { visible, reason }
+    return { visible, reason, generatingImage }
   })
   const assistantVisible = createMemo(() => assistantDerived().visible)
   const reasoningHeading = createMemo(() => assistantDerived().reason)
   const showThinking = createMemo(() => {
     if (!working() || !!error()) return false
     if (status().type === "retry") return false
+    if (assistantDerived().generatingImage) return false
     if (showReasoningSummaries()) return assistantVisible() === 0
     return true
   })

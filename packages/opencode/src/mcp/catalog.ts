@@ -71,7 +71,7 @@ export function convertTool(
       const result = await client.callTool(
         {
           name: mcpTool.name,
-          _meta: sessionID ? { sessionID, ...(inputID ? { inputID } : {}), ...(agent ? { agent } : {}) } : undefined,
+          _meta: sessionID ? { sessionID, callID: options.toolCallId, ...(inputID ? { inputID } : {}), ...(agent ? { agent } : {}) } : undefined,
           arguments: (args || {}) as Record<string, unknown>,
         },
         CallToolResultSchema,

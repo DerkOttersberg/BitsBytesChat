@@ -1,4 +1,4 @@
-import { Component, createSignal, startTransition } from "solid-js"
+import { Component, For, createSignal, startTransition } from "solid-js"
 import { Dialog } from "@opencode-ai/ui/dialog"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { Icon } from "@opencode-ai/ui/icon"
@@ -45,6 +45,14 @@ export const DialogSettings: Component<{ defaultValue?: string }> = (props) => {
                       <Icon name="keyboard" />
                       {language.t("settings.tab.shortcuts")}
                     </Tabs.Trigger>
+                    <For each={platform.settingsPanels}>
+                      {(panel) => (
+                        <Tabs.Trigger value={panel.id}>
+                          <Icon name={panel.icon ?? "sliders"} />
+                          {panel.title}
+                        </Tabs.Trigger>
+                      )}
+                    </For>
                     <Tabs.Trigger value="servers">
                       <Icon name="server" />
                       {language.t("status.popover.tab.servers")}
@@ -88,6 +96,13 @@ export const DialogSettings: Component<{ defaultValue?: string }> = (props) => {
         <Tabs.Content value="models" class="no-scrollbar">
           <SettingsModels />
         </Tabs.Content>
+        <For each={platform.settingsPanels}>
+          {(panel) => (
+            <Tabs.Content value={panel.id} class="no-scrollbar">
+              <panel.component />
+            </Tabs.Content>
+          )}
+        </For>
       </Tabs>
     </Dialog>
   )

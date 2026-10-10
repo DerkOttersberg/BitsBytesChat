@@ -3,6 +3,7 @@ import csv
 from contextlib import closing
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -327,6 +328,8 @@ def create(spec, folder):
         raise ValueError('bb.error.invalidFilename')
     path = folder / filename
     ext = path.suffix.lower()
+    if ext in {'.docx', '.pdf'}:
+        document_blocks(spec)
     if ext == '.docx':
         from docx import Document
         from docx.shared import Inches, Pt
@@ -398,13 +401,7 @@ def create(spec, folder):
                 slide.notes_slide.notes_text_frame.text = definition['notes']
         deck.save(path)
     elif ext == '.pdf':
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-        from reportlab.lib.styles import getSampleStyleSheet
-        from xml.sax.saxutils import escape
-        styles = getSampleStyleSheet()
-        blocks = [Paragraph(escape(spec.get('title', '')), styles['Title']), Spacer(1, 12)]
-        blocks.extend(Paragraph(escape(block.get('text', '')).replace('\n', '<br/>'), styles['BodyText']) for block in spec.get('blocks', []))
-        SimpleDocTemplate(str(path)).build(blocks)
+        create_pdf(spec, path)
     elif ext == '.csv':
         with path.open('w', encoding='utf-8-sig', newline='') as stream:
             csv.writer(stream).writerows(spec.get('rows', []))
@@ -413,6 +410,154 @@ def create(spec, folder):
     else:
         raise ValueError('bb.error.unsupportedArtifact')
     return validate(path)
+
+
+def document_blocks(spec):
+    blocks = spec.get('blocks', [])
+    if not isinstance(spec.get('title', ''), str) or not isinstance(blocks, list):
+        raise ValueError('bb.error.invalidDocument')
+    for block in blocks:
+        if not isinstance(block, dict):
+            raise ValueError('bb.error.invalidDocument')
+        kind = block.get('type', 'paragraph')
+        if not isinstance(kind, str) or kind not in {'paragraph', 'heading', 'bullet', 'table', 'image', 'pagebreak'}:
+            raise ValueError('bb.error.unsupportedArtifact')
+        if not isinstance(block.get('text', ''), str):
+            raise ValueError('bb.error.invalidDocument')
+        if kind == 'table':
+            rows = block.get('rows')
+            if (not isinstance(rows, list) or not rows
+                    or any(not isinstance(row, list) or not row for row in rows)
+                    or any(not isinstance(value, (str, int, float, bool, type(None))) for row in rows for value in row)):
+                raise ValueError('bb.error.invalidDocument')
+        if kind == 'heading':
+            level = block.get('level', 1)
+            if type(level) not in (int, float) or not math.isfinite(level):
+                raise ValueError('bb.error.invalidDocument')
+        if kind == 'image':
+            width = block.get('width', 5)
+            if (not isinstance(block.get('path'), str) or not block['path']
+                    or type(width) not in (int, float) or not math.isfinite(width) or width <= 0):
+                raise ValueError('bb.error.invalidDocument')
+    return blocks
+
+
+def pdf_fonts(text):
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    fonts = Path(os.environ.get('WINDIR', 'C:/Windows')) / 'Fonts'
+    candidates = [(fonts / 'arial.ttf', fonts / 'arialbd.ttf'),
+                  (Path('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'), Path('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf')),
+                  (Path('/Library/Fonts/Arial.ttf'), Path('/Library/Fonts/Arial Bold.ttf'))]
+    # Matplotlib is part of the managed artifact runtime and bundles DejaVu on
+    # every platform, including machines without a system TrueType font.
+    from matplotlib import get_data_path
+    bundled = Path(get_data_path()) / 'fonts' / 'ttf'
+    candidates.append((bundled / 'DejaVuSans.ttf', bundled / 'DejaVuSans-Bold.ttf'))
+    characters = {ord(character) for character in text if character not in '\n\r\t'}
+    available = False
+    for index, (regular, bold) in enumerate(candidates):
+        if not regular.is_file() or not bold.is_file():
+            continue
+        normal_name, bold_name = f'BBPDF{index}', f'BBPDF{index}Bold'
+        try:
+            normal = TTFont(normal_name, str(regular))
+            heading = TTFont(bold_name, str(bold))
+        except Exception:
+            continue
+        available = True
+        if any(code not in normal.face.charToGlyph or code not in heading.face.charToGlyph for code in characters):
+            continue
+        pdfmetrics.registerFont(normal)
+        pdfmetrics.registerFont(heading)
+        pdfmetrics.registerFontFamily(normal_name, normal=normal_name, bold=bold_name, italic=normal_name, boldItalic=bold_name)
+        return normal_name, bold_name
+    raise ValueError('bb.error.pdfUnsupportedText' if available else 'bb.error.pdfFontUnavailable')
+
+
+def create_pdf(spec, path):
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, LongTable, TableStyle, Image, PageBreak
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.colors import HexColor, white
+    from xml.sax.saxutils import escape
+    blocks = document_blocks(spec)
+    content = [spec.get('title', ''), '\u2022']
+    for block in blocks:
+        content.append(block.get('text', ''))
+        if block.get('type') == 'table':
+            content.extend('' if value is None else str(value) for row in block['rows'] for value in row)
+    regular, bold = pdf_fonts(''.join(content))
+    body = ParagraphStyle('Body', fontName=regular, fontSize=10.5, leading=15, spaceAfter=8, splitLongWords=True)
+    bullet = ParagraphStyle('Bullet', parent=body, leftIndent=15, firstLineIndent=0, bulletIndent=2,
+                            bulletFontName=regular, bulletFontSize=10.5)
+    title = ParagraphStyle('Title', parent=body, fontName=bold, fontSize=24, leading=29, spaceAfter=18, keepWithNext=True)
+    cell = ParagraphStyle('Cell', parent=body, fontSize=9, leading=12, spaceAfter=0)
+    header = ParagraphStyle('Header', parent=cell, fontName=bold, textColor=white)
+    document = SimpleDocTemplate(str(path), pagesize=A4, leftMargin=54, rightMargin=54, topMargin=54,
+                                 bottomMargin=54, title=spec.get('title', ''), author='')
+    # SimpleDocTemplate's frame reserves six points of internal padding per side.
+    width, height = document.width - 12, document.height - 12
+    def paragraph(text, style, **kwargs):
+        return Paragraph(escape(text).replace('\r\n', '\n').replace('\r', '\n').replace('\n', '<br/>').replace('\t', '    '), style, **kwargs)
+    story = []
+    if spec.get('title'):
+        story.append(paragraph(spec['title'], title))
+    for block in blocks:
+        kind = block.get('type', 'paragraph')
+        if kind == 'heading':
+            level = min(4, max(1, int(block.get('level', 1))))
+            size = {1: 18, 2: 15, 3: 12, 4: 11}[level]
+            style = ParagraphStyle(f'Heading{level}', parent=body, fontName=bold, fontSize=size, leading=size * 1.3,
+                                   spaceBefore=12, spaceAfter=6, keepWithNext=True)
+            story.append(paragraph(block.get('text', ''), style))
+        elif kind == 'table':
+            columns = max(map(len, block['rows']))
+            rows = [[paragraph('' if value is None else str(value), header if index == 0 else cell)
+                     for value in row + [''] * (columns - len(row))] for index, row in enumerate(block['rows'])]
+            table = LongTable(rows, colWidths=[width / columns] * columns, repeatRows=1, splitByRow=1, splitInRow=1,
+                              hAlign='LEFT', spaceBefore=4, spaceAfter=12)
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), HexColor('#255478')),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, HexColor('#F0F4F7')]),
+                ('GRID', (0, 0), (-1, -1), .4, HexColor('#C9D2DA')),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 7), ('RIGHTPADDING', (0, 0), (-1, -1), 7),
+                ('TOPPADDING', (0, 0), (-1, -1), 6), ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ]))
+            story.append(table)
+        elif kind == 'image':
+            picture = Image(block['path'])
+            scale = min(float(block.get('width', 5)) * 72 / picture.imageWidth, width / picture.imageWidth,
+                        height / picture.imageHeight)
+            picture.drawWidth, picture.drawHeight = picture.imageWidth * scale, picture.imageHeight * scale
+            picture.hAlign = 'LEFT'
+            picture.spaceAfter = 10
+            story.append(picture)
+        elif kind == 'pagebreak':
+            story.append(PageBreak())
+        elif kind == 'bullet':
+            story.append(paragraph(block.get('text', ''), bullet, bulletText='\u2022'))
+        else:
+            story.append(paragraph(block.get('text', ''), body))
+    document.build(story or [Spacer(1, 1)])
+
+
+def normalize_image(path, output):
+    from PIL import Image
+    try:
+        with Image.open(path) as source:
+            if source.format not in {'PNG', 'JPEG', 'WEBP'} or not 0 < source.width * source.height <= 40000000:
+                raise ValueError('bb.error.imageOutput')
+            source.verify()
+        with Image.open(path) as source:
+            source.load()
+            metadata = {'width': source.width, 'height': source.height, 'sourceFormat': source.format}
+            normalized = source.convert('RGBA' if 'A' in source.getbands() or 'transparency' in source.info else 'RGB')
+            normalized.save(output, format='PNG')
+        return metadata
+    except Exception as error:
+        raise ValueError('bb.error.imageOutput') from error
 
 
 def pages(path, folder, start=0, limit=4):
@@ -443,6 +588,8 @@ def main():
         return grid(args['path'], args.get('sheet'), max(0, int(args.get('offset', 0))), min(500, max(1, int(args.get('limit', 200)))))
     if action == 'create':
         return create(args['spec'], args['folder'])
+    if action == 'normalize_image':
+        return normalize_image(args['path'], args['output'])
     if action == 'pages':
         return pages(args['path'], args['folder'], max(0, int(args.get('start', 0))), min(8, max(1, int(args.get('limit', 4)))))
     raise ValueError('bb.error.unknownMethod')

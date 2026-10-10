@@ -10,6 +10,13 @@ type Entry = {
 }
 type Input = { sessionID: string; tool: string; jobID: string; outputKey?: string; retryOf?: string }
 
+/** Only already-sanitized public job details may be attached to a tool failure. */
+export class BBToolResultError extends Error {
+  constructor(message: string, readonly details: Record<string, unknown>) {
+    super(message)
+  }
+}
+
 export class BBToolOperationError extends Error {
   constructor(
     error: unknown,
@@ -21,6 +28,15 @@ export class BBToolOperationError extends Error {
 
 export function toolOperationMetadata(error: unknown) {
   return error instanceof BBToolOperationError ? { [ToolOperation.key]: error.info } : undefined
+}
+
+export function toolFailureResult(error: Error) {
+  const source = error instanceof BBToolOperationError ? error.cause : error
+  return {
+    ...(source instanceof BBToolResultError ? source.details : {}),
+    error: error.message,
+    _meta: toolOperationMetadata(error),
+  }
 }
 
 /** No prompts, credentials, source code, or raw arguments belong in this journal. */

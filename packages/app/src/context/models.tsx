@@ -1,17 +1,17 @@
-import { type Accessor, createMemo, createResource } from "solid-js"
+import { type Accessor, type ParentProps, createContext, createMemo, createResource, useContext } from "solid-js"
 import { createStore } from "solid-js/store"
 import { DateTime } from "luxon"
 import { filter, firstBy, flat, groupBy, mapValues, pipe, uniqueBy, values } from "remeda"
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { useProviders } from "@/hooks/use-providers"
 import { Persist, persisted } from "@/utils/persist"
+import { modelVisible, providerModelVisibility, type ModelKey, type ModelPreference, type ModelVisibility, type ProviderVisibility } from "./model-visibility"
 
-export type ModelKey = { providerID: string; modelID: string }
+export type { ModelKey } from "./model-visibility"
 
-type Visibility = "show" | "hide"
-type User = ModelKey & { visibility: Visibility; favorite?: boolean }
 type Store = {
-  user: User[]
+  user: ModelPreference[]
+  providerVisibility: ProviderVisibility
   recent: ModelKey[]
   variant?: Record<string, string | undefined>
 }
@@ -22,20 +22,30 @@ function modelKey(model: ModelKey) {
   return `${model.providerID}:${model.modelID}`
 }
 
-export const { use: useModels, provider: ModelsProvider } = createSimpleContext({
+function modelPreferences() {
+  return persisted(
+    Persist.global("model", ["model.v1"]),
+    createStore<Store>({ user: [], providerVisibility: {}, recent: [], variant: {} }),
+  )
+}
+
+const ModelPreferencesContext = createContext<ReturnType<typeof modelPreferences>>()
+type ModelsProps = { directory?: Accessor<string | undefined> }
+
+// Catalogues vary by directory; visibility choices belong to the user. Nested
+// chat and settings providers must share one live, durable preferences store.
+export function ModelsProvider(props: ParentProps<ModelsProps>) {
+  const preferences = useContext(ModelPreferencesContext) ?? modelPreferences()
+  return <ModelPreferencesContext.Provider value={preferences}><ScopedModelsProvider {...props} /></ModelPreferencesContext.Provider>
+}
+
+export const { use: useModels, provider: ScopedModelsProvider } = createSimpleContext({
   name: "Models",
   gate: false,
-  init: (props: { directory?: Accessor<string | undefined> } = {}) => {
+  init: (props: ModelsProps = {}) => {
     const providers = useProviders(() => props.directory?.())
 
-    const [store, setStore, _, ready] = persisted(
-      Persist.global("model", ["model.v1"]),
-      createStore<Store>({
-        user: [],
-        recent: [],
-        variant: {},
-      }),
-    )
+    const [store, setStore, _, ready] = useContext(ModelPreferencesContext)!
 
     const available = createMemo(() =>
       providers.connected().flatMap((p) =>
@@ -88,7 +98,7 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
     const latestSet = createMemo(() => new Set(latest().map((x) => modelKey(x))))
 
     const visibility = createMemo(() => {
-      const map = new Map<string, Visibility>()
+      const map = new Map<string, ModelVisibility>()
       for (const item of store.user) map.set(`${item.providerID}:${item.modelID}`, item.visibility)
       return map
     })
@@ -103,7 +113,7 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
 
     const find = (key: ModelKey) => list().find((m) => m.id === key.modelID && m.provider.id === key.providerID)
 
-    function update(model: ModelKey, state: Visibility) {
+    function update(model: ModelKey, state: ModelVisibility) {
       const index = store.user.findIndex((x) => x.modelID === model.modelID && x.providerID === model.providerID)
       if (index >= 0) {
         setStore("user", index, (current) => ({ ...current, visibility: state }))
@@ -114,13 +124,8 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
 
     const visible = (model: ModelKey) => {
       const key = modelKey(model)
-      const state = visibility().get(key)
-      if (state === "hide") return false
-      if (state === "show") return true
-      if (latestSet().has(key)) return true
       const date = release().get(key)
-      if (!date?.isValid) return true
-      return false
+      return modelVisible(model, visibility().get(key), store.providerVisibility, latestSet().has(key) || !date?.isValid)
     }
 
     const setVisibility = (model: ModelKey, state: boolean) => {
@@ -160,6 +165,13 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
       find,
       visible,
       setVisibility,
+      providerVisible: (providerID: string) => {
+        const items = list().filter(model => model.provider.id === providerID)
+        return items.length > 0 && items.every(model => visible({ providerID, modelID: model.id }))
+      },
+      setProviderVisibility: (providerID: string, visible: boolean) => {
+        setStore(providerModelVisibility(store.user, store.providerVisibility, providerID, visible))
+      },
       recent: {
         list: () => recentModels()!,
         push,

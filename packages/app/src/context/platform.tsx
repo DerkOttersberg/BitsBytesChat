@@ -1,5 +1,6 @@
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import type { AsyncStorage, SyncStorage } from "@solid-primitives/storage"
+import type { IconProps } from "@opencode-ai/ui/icon"
 import type { Accessor, Component, JSX } from "solid-js"
 import type { DesktopMenuAction } from "../desktop-menu"
 import { ServerConnection } from "./server"
@@ -32,7 +33,7 @@ export type FatalRendererErrorLog = {
 
 type PlatformBase = {
   applicationName?: string
-  settingsPanels?: { id: string; title: string; component: Component }[]
+  settingsPanels?: { id: string; title: string; icon?: IconProps["name"]; component: Component }[]
   settingsSearchEntries?: () => {
     id: string
     tab: string

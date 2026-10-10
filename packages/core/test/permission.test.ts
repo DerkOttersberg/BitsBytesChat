@@ -283,6 +283,43 @@ describe("PermissionV2", () => {
     }),
   )
 
+  it.effect("interrupting an approval removes it and publishes one dismissal", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const events = yield* EventV2.Service
+      const replies: unknown[] = []
+      const unsubscribe = yield* events.listen(event =>
+        Effect.sync(() => { if (event.type === PermissionV2.Event.Replied.type) replies.push(event.data) }),
+      )
+      yield* Effect.addFinalizer(() => unsubscribe)
+      const { service, fiber, request } = yield* waitForRequest()
+      expect(yield* service.list()).toEqual([request])
+      yield* Fiber.interrupt(fiber)
+      expect(yield* service.list()).toEqual([])
+      expect(replies).toEqual([{ sessionID: request.sessionID, requestID: request.id, reply: "reject" }])
+      const late = yield* service.reply({ requestID: request.id, reply: "once" }).pipe(Effect.flip)
+      expect(late).toBeInstanceOf(PermissionV2.NotFoundError)
+      expect(replies).toHaveLength(1)
+    }),
+  )
+
+  it.effect("a completed approval never emits a cancellation dismissal", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const events = yield* EventV2.Service
+      const replies: unknown[] = []
+      const unsubscribe = yield* events.listen(event =>
+        Effect.sync(() => { if (event.type === PermissionV2.Event.Replied.type) replies.push(event.data) }),
+      )
+      yield* Effect.addFinalizer(() => unsubscribe)
+      const { service, fiber, request } = yield* waitForRequest()
+      yield* service.reply({ requestID: request.id, reply: "once" })
+      yield* Fiber.join(fiber)
+      expect(replies).toEqual([{ sessionID: request.sessionID, requestID: request.id, reply: "once" }])
+      expect(yield* service.list()).toEqual([])
+    }),
+  )
+
   it.effect("stores and removes saved resources for a project", () =>
     Effect.gen(function* () {
       yield* setup()

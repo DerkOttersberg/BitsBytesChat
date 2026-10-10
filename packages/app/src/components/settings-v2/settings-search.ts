@@ -59,6 +59,11 @@ export function revealSetting(root: HTMLElement, target: string) {
       (item) => item.dataset.action === target || item.dataset.settingKey === target,
     )
     if (!anchor) return
+    // Extension tabs and collapsed editors reveal their own search targets.
+    for (let parent = anchor.parentElement; parent && parent !== root; parent = parent.parentElement) {
+      if (parent instanceof HTMLDetailsElement) parent.open = true
+    }
+    if (anchor.dataset.settingReveal !== undefined) anchor.click()
     observer.disconnect()
     clearTimeout(timeout)
     selected = anchor.closest<HTMLElement>('[data-component="settings-v2-row"],label,section') ?? anchor
@@ -66,9 +71,12 @@ export function revealSetting(root: HTMLElement, target: string) {
     selected.scrollIntoView?.({ block: "center", behavior: "auto" })
     const control = anchor.matches("input,button,select,textarea")
       ? anchor
-      : selected.querySelector<HTMLElement>(
+      : (anchor.querySelector<HTMLElement>(
           "input:not([disabled]),button:not([disabled]),select:not([disabled]),textarea:not([disabled])",
-        )
+        ) ??
+        selected.querySelector<HTMLElement>(
+          "input:not([disabled]),button:not([disabled]),select:not([disabled]),textarea:not([disabled])",
+        ))
     control?.focus({ preventScroll: true })
     highlight = setTimeout(() => selected?.classList.remove("settings-v2-search-highlight"), 2500)
   }

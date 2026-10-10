@@ -1183,6 +1183,8 @@ export const dict = {
   "settings.providers.tag.custom": "Custom",
   "settings.providers.tag.other": "Other",
   "settings.models.title": "Models",
+  "settings.models.all": "All models",
+  "settings.models.providerAll": "All {{provider}} models",
   "settings.models.description": "Model settings will be configurable here.",
   "settings.agents.title": "Agents",
   "settings.agents.description": "Agent settings will be configurable here.",

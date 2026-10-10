@@ -25,14 +25,14 @@ const ctx: Tool.Context = {
 
 function mcpTool(
   name: string,
-  handler: (args: Record<string, unknown>) => unknown,
+  handler: (args: Record<string, unknown>, metadata?: Record<string, unknown>) => unknown,
   inputSchema: Record<string, unknown> = { type: "object", properties: {} },
   outputSchema?: Record<string, unknown>,
 ): MCP.McpTool {
   return {
     def: { name, description: name, inputSchema, ...(outputSchema ? { outputSchema } : {}) } as MCPToolDef,
     client: {
-      callTool: async (params: { arguments?: Record<string, unknown> }) => handler(params.arguments ?? {}),
+      callTool: async (params: { arguments?: Record<string, unknown>; _meta?: Record<string, unknown> }) => handler(params.arguments ?? {}, params._meta),
     } as unknown as MCP.McpTool["client"],
   }
 }
@@ -389,6 +389,70 @@ describe("code mode execute", () => {
     expect(output.metadata.error).toBeUndefined()
     expect(called).toEqual([])
     expect(output.metadata.toolCalls).toEqual([{ tool: "a.tool", status: "error" }])
+  })
+
+  test("a delayed approval prevents child execution until the user approves", async () => {
+    const asked = Promise.withResolvers<unknown>()
+    const approval = Promise.withResolvers<void>()
+    const executions: Record<string, unknown>[] = []
+    const tool = await build({ images_generate: mcpTool("generate", args => {
+      executions.push(args)
+      return { content: [{ type: "text", text: "ready" }] }
+    }) })
+    const pending = Effect.runPromise(tool.execute({ code: "return await tools.images.generate({ prompt: 'A blue circle' })" }, {
+      ...ctx,
+      ask: request => Effect.sync(() => asked.resolve(request)).pipe(Effect.andThen(Effect.promise(() => approval.promise))),
+    }))
+    try {
+      expect(await asked.promise).toMatchObject({ permission: "images_generate", metadata: { prompt: "A blue circle" } })
+      expect(executions).toEqual([])
+      approval.resolve()
+      expect((await pending).output).toBe("ready")
+      expect(executions).toEqual([{ prompt: "A blue circle" }])
+    } finally { approval.resolve() }
+  })
+
+  test("stopping a pending approval prevents execution even after a late approval", async () => {
+    const asked = Promise.withResolvers<void>()
+    const approval = Promise.withResolvers<void>()
+    const controller = new AbortController()
+    const executions: string[] = []
+    const tool = await build({ images_generate: mcpTool("generate", () => {
+      executions.push("submitted")
+      return { content: [{ type: "text", text: "ready" }] }
+    }) })
+    const pending = Effect.runPromise(tool.execute({ code: "return await tools.images.generate({})" }, {
+      ...ctx, abort: controller.signal,
+      ask: () => Effect.sync(() => asked.resolve()).pipe(Effect.andThen(Effect.promise(() => approval.promise))),
+    }))
+    try {
+      await asked.promise
+      expect(executions).toEqual([])
+      controller.abort()
+      expect((await pending).output).toBe("Execution cancelled.")
+      approval.resolve()
+      await Promise.resolve()
+      expect(executions).toEqual([])
+    } finally { approval.resolve() }
+  })
+
+  test.each([{ value: ["first", "second"] }, { value: [] }, { value: 17 }, { value: true }, { value: false }, { value: null }, { value: "a string" }])("preserves marked JSON values as native data: %p", async row => {
+    const value = row.value
+    const tool = await build({ fixture_value: mcpTool("value", () => ({
+      content: [{ type: "text", text: JSON.stringify(value) }], _meta: { bitsbytesJson: true },
+    })) })
+    const output = await Effect.runPromise(tool.execute({ code: "const value = await tools.fixture.value({}); return { value, array: Array.isArray(value), type: typeof value }" }, ctx))
+    expect(JSON.parse(output.output)).toEqual({ value, array: Array.isArray(value), type: typeof value })
+  })
+
+  test("child image calls retain their parent chat and call identity in transport metadata", async () => {
+    const metadata: unknown[] = []
+    const tool = await build({ images_generate: mcpTool("generate", (_args, meta) => {
+      metadata.push(meta)
+      return { content: [{ type: "text", text: "ready" }] }
+    }) })
+    await Effect.runPromise(tool.execute({ code: "return await tools.images.generate({})" }, ctx))
+    expect(metadata).toEqual([{ sessionID: ctx.sessionID, callID: ctx.callID, inputID: undefined, agent: ctx.agent }])
   })
 
   test("child calls fire plugin tool.execute hooks with the MCP key and synthetic parent/N call ids", async () => {

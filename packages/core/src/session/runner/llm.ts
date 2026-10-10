@@ -42,6 +42,8 @@ import { makeLocationNode } from "../../effect/app-node"
 import { llmClient } from "../../effect/app-node-platform"
 import { SessionStatusEvent } from "@opencode-ai/schema/session-status-event"
 import { randomUUID } from "node:crypto"
+import { Flag } from "../../flag/flag"
+import { InstallationVersion } from "../../installation/version"
 
 /**
  * Runs one durable coding-agent Session until it settles.
@@ -232,6 +234,12 @@ const layer = Layer.effect(
             ...(session.parentID ? { "x-opencode-parent-session-id": session.parentID } : {}),
             "x-session-affinity": session.id,
             "X-Session-Id": session.id,
+            ...(model.provider.startsWith("opencode") ? {
+              "User-Agent": `opencode/${InstallationVersion}`,
+              "x-opencode-session": session.id,
+              ...(inputID ? { "x-opencode-request": inputID } : {}),
+              "x-opencode-client": Flag.OPENCODE_CLIENT,
+            } : {}),
             ...(session.parentID ? { "x-parent-session-id": session.parentID } : {}),
           },
         },

@@ -2,6 +2,12 @@ import type { NormalizedProviderListResponse } from "@opencode-ai/session-ui/con
 
 const emptyProviderCatalog: NormalizedProviderListResponse = { all: new Map(), connected: [], default: {} }
 
+/** Keep legacy IDs resolvable, while preferring the native OpenAI connection in pickers. */
+export function offeredBitsBytesProviders(catalog: NormalizedProviderListResponse) {
+  if (!catalog.connected.includes("openai")) return catalog.all
+  return new Map([...catalog.all].filter(([id]) => id !== "bitsbytes-chatgpt"))
+}
+
 type DirectoryCatalog = {
   ready: boolean
   providers: NormalizedProviderListResponse

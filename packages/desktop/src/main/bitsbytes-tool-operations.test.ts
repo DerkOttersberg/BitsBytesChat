@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { tmpdir } from "node:os"
-import { BBToolOperationError, BBToolOperations, toolOperationMetadata } from "./bitsbytes-tool-operations"
+import { BBToolOperationError, BBToolOperations, BBToolResultError, toolFailureResult, toolOperationMetadata } from "./bitsbytes-tool-operations"
 import { ToolOperation } from "@opencode-ai/core/tool-operation"
 
 const folders: string[] = []
@@ -20,6 +20,21 @@ afterEach(async () => {
 })
 const input = { sessionID: "chat", tool: "create_artifact", jobID: "job", outputKey: "report.docx" }
 const artifact = { id: "document", revision: 1, hash: "validated-hash" }
+
+test("failed image tools preserve sanitized job diagnostics and failed retry lineage", async () => {
+  const f = await fixture()
+  const details = { job_id: "image-job", status: "error", diagnostic: { status: 401, message: "Invalid API key" } }
+  const original = new BBToolResultError("bb.error.imageAuth", details)
+  expect(toolFailureResult(original)).toMatchObject({ ...details, error: "bb.error.imageAuth" })
+  const error = await f.operations.run({ ...input, tool: "generate_image" }, async () => { throw original }).catch(error => error)
+  const response = toolFailureResult(error)
+  expect(response).toMatchObject({ ...details, error: "bb.error.imageAuth" })
+  expect(ToolOperation.metadata(response._meta)?.tool).toBe("generate_image")
+  const journal = JSON.parse(await readFile(join(f.root, "operations.json"), "utf8"))
+  expect(journal[0].status).toBe("failed")
+  expect(JSON.stringify(journal)).not.toContain("Invalid API key")
+  expect(toolFailureResult(new Error("ordinary"))).toEqual({ error: "ordinary", _meta: undefined })
+})
 
 test("durable explicit retry preserves diagnostics and exact output identity", async () => {
   const f = await fixture()

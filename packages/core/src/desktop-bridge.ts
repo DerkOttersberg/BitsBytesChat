@@ -19,7 +19,7 @@ export async function call<T>(name: string, args: Record<string, unknown> = {}):
 // Read-only tools are safe in Ask mode. Unknown tools require approval.
 export async function permission(sessionID: string, action: string, details?: ApprovalDetails): Promise<"ask" | "allow" | "deny" | undefined> {
   if (!enabled()) return
-  const readonly = /^(read|glob|grep|ls|list|search|skill|question|todowrite|todoread|webfetch|websearch|codesearch|bitsbytes.local.(read_transcript|list_skills|inspect_template|inspect_artifact|get_goal|read_artifact_pages|browser_inspect|browser_screenshot))$/.test(action)
+  const readonly = /^(read|glob|grep|ls|list|search|skill|question|todowrite|todoread|webfetch|websearch|codesearch|bitsbytes.local.(read_transcript|list_skills|inspect_template|inspect_artifact|get_goal|read_artifact_pages|browser_inspect|browser_screenshot|image_capabilities))$/.test(action)
   const run = await call<{ plan: boolean; diagnostic?: boolean }>("runs.permission", { sessionID }).catch(() => ({ plan: true, diagnostic: false }))
   if (run.diagnostic) return /^(read|glob|grep|parent_progress)$/.test(action) ? "allow" : "deny"
   if (run.plan) return readonly ? "allow" : "deny"

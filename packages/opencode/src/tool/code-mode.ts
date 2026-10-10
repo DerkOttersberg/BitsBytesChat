@@ -107,6 +107,9 @@ function projectMcpResult(result: CallToolResult, collect: (attachment: Attachme
   }
 
   if (result.structuredContent !== undefined && result.structuredContent !== null) return result.structuredContent
+  // The local adapter marks serialized arrays/scalars so programs receive the
+  // actual JSON value rather than a string requiring an extra parse step.
+  if (result._meta?.bitsbytesJson === true && text.length === 1) return JSON.parse(text[0]!)
   if (text.length > 0) return text.join("\n")
   if (files > 0) {
     const noun = files === images ? "image" : "file"
@@ -144,11 +147,12 @@ const invokeChildTool = Effect.fn("CodeMode.invokeChildTool")(function* (input: 
     { args: input.args },
   )
   const result: CallToolResult = yield* Effect.gen(function* () {
-    yield* input.ctx.ask({ permission: input.entry.key, metadata: {}, patterns: ["*"], always: ["*"] })
+    yield* input.ctx.ask({ permission: input.entry.key, metadata: input.args, patterns: ["*"], always: ["*"] })
+    input.ctx.abort.throwIfAborted()
     // Deliberately mirrors McpCatalog.convertTool's transport call so the MCP service stays free of tool-loop concerns.
     return yield* Effect.promise(async () => {
       const raw = await input.entry.tool.client.callTool(
-        { name: input.entry.tool.def.name, arguments: input.args, _meta: { sessionID: input.ctx.sessionID } },
+        { name: input.entry.tool.def.name, arguments: input.args, _meta: { sessionID: input.ctx.sessionID, callID: input.ctx.callID, inputID: input.ctx.messages.findLast(message => message.info.role === "user")?.info.id, agent: input.ctx.agent } },
         CallToolResultSchema,
         {
           resetTimeoutOnProgress: true,

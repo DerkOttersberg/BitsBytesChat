@@ -46,6 +46,21 @@ interface FetchDecompressionError extends Error {
 export const SYNTHETIC_ATTACHMENT_PROMPT = "Attached media from tool result:"
 export { isMedia }
 
+// UI citations are persisted beside provider metadata, but are not SDK provider options.
+// Each SDK namespace must be an object; arrays and scalar presentation fields break replay.
+function providerMetadata(value: SessionV1.TextPart["metadata"]) {
+  if (!value) return
+  const entries = Object.entries(value).filter(
+    ([key, data]) =>
+      key !== "sources" &&
+      !key.startsWith("bitsbytes.") &&
+      data !== null &&
+      typeof data === "object" &&
+      !Array.isArray(data),
+  )
+  return entries.length ? Object.fromEntries(entries) : undefined
+}
+
 function truncateToolOutput(text: string, maxChars?: number) {
   if (!maxChars || text.length <= maxChars) return text
   const omitted = text.length - maxChars
@@ -284,7 +299,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
           assistantMessage.parts.push({
             type: "text",
             text,
-            ...(differentModel ? {} : { providerMetadata: part.metadata }),
+            ...(differentModel ? {} : { providerMetadata: providerMetadata(part.metadata) }),
           })
         }
         if (part.type === "step-start")
@@ -375,7 +390,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
           assistantMessage.parts.push({
             type: "reasoning",
             text: part.text,
-            providerMetadata: part.metadata,
+            providerMetadata: providerMetadata(part.metadata),
           })
         }
       }

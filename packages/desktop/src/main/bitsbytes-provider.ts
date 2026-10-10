@@ -12,9 +12,11 @@ import { catalogModels } from "./bitsbytes-models"
 import { readState, stateRecord } from "./bitsbytes-state"
 import type { ImageConfiguration } from "./bitsbytes-images"
 import { openrouterAudioKey } from "./bitsbytes-audio"
+import { normalizeProviderCredentials, providerApiKey } from "./bitsbytes-credentials"
 
 type Credentials = {
   images?: ImageConfiguration
+  imageConnections?: Partial<Record<"openai" | "openrouter", ImageConfiguration>>
   host: string; client?: string; access?: string; refresh?: string; idToken?: string
   expires?: number; scopes?: string[]; subject?: string; email?: string; verified?: boolean
   openrouter?: string; groq?: string; providers?: Record<string, unknown>; nativeCredentials?: { id: string; integrationID: string; label: string; value: unknown }[]
@@ -37,10 +39,12 @@ export class BBProvider {
   private signing?: Promise<void>
   constructor(private root: string, private changed: () => void) {}
   get openrouterKey() { return openrouterAudioKey(this.credentials) }
+  get openaiKey() { return providerApiKey(this.credentials, "openai") }
 
   async start() {
     const raw = await readFile(join(this.root, "credentials.bin")).catch(() => null)
     if (raw) this.credentials = JSON.parse(safeStorage.decryptString(raw))
+    this.credentials.providers = normalizeProviderCredentials(this.credentials.providers)
     this.catalog = await readState(this.root, "model-catalog.json", {}, value => stateRecord(value)
       && Object.values(value).every(models => Array.isArray(models) && models.every(model => stateRecord(model)
         && typeof model.id === "string" && typeof model.name === "string" && Number.isFinite(model.context))))
@@ -187,7 +191,7 @@ export class BBProvider {
     } finally { clearTimeout(timer); listener.close(); this.changed() }
   }
   async disconnect() {
-    this.credentials = { host: this.credentials.host, openrouter: this.credentials.openrouter, groq: this.credentials.groq, providers: this.credentials.providers, nativeCredentials: this.credentials.nativeCredentials }
+    this.credentials = { host: this.credentials.host, openrouter: this.credentials.openrouter, groq: this.credentials.groq, providers: this.credentials.providers, nativeCredentials: this.credentials.nativeCredentials, images: this.credentials.images, imageConnections: this.credentials.imageConnections }
     delete this.catalog.chatgpt
     await writeFile(join(this.root, "model-catalog.json"), JSON.stringify(this.catalog))
     this.models = []

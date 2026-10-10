@@ -4,6 +4,10 @@ import { type Accessor, createEffect, createMemo, createResource, onCleanup } fr
 import { createStore } from "solid-js/store"
 import type { PromptInputState } from "@/components/prompt-input"
 import { useSync } from "@/context/sync"
+import { useSDK } from "@/context/sdk"
+import { usePlatform } from "@/context/platform"
+import { useLanguage } from "@/context/language"
+import { showToast } from "@/utils/toast"
 import { getSessionHandoff, setSessionHandoff } from "@/pages/session/handoff"
 import type { SessionComposerController } from "./session-composer-state"
 
@@ -40,6 +44,9 @@ export function createSessionComposerRegionController(input: {
   setDockRef: (el: HTMLDivElement) => void
 }) {
   const sync = useSync()
+  const sdk = useSDK()
+  const platform = usePlatform()
+  const language = useLanguage()
   const [store, setStore] = createStore({
     ready: input.ready() || input.state.dock(),
     height: 320,
@@ -119,6 +126,24 @@ export function createSessionComposerRegionController(input: {
     (promise) => promise.then(() => true),
   )
 
+  const stop = async () => {
+    const sessionID = input.sessionID()
+    if (!sessionID || !platform.bitsbytes) return
+    const stopped = await platform.bitsbytes
+      .call<{ interruptionOwned?: boolean }>("runs.stop", { sessionID })
+      .catch((error: unknown) => {
+        showToast({
+          variant: "error",
+          title: language.t("common.requestFailed"),
+          description: error instanceof Error ? error.message : String(error),
+        })
+      })
+    if (stopped?.interruptionOwned) return
+    await sdk()
+      .api.session.interrupt({ sessionID })
+      .catch(() => {})
+  }
+
   return {
     state: input.state,
     centered: input.centered,
@@ -126,6 +151,7 @@ export function createSessionComposerRegionController(input: {
     followup: input.followup,
     revert: input.revert,
     onResponseSubmit: input.onResponseSubmit,
+    stop,
     openParent: input.openParent,
     setPromptRef: input.setPromptRef,
     setDockRef: input.setDockRef,

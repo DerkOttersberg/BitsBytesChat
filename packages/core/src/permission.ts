@@ -211,8 +211,11 @@ const layer = Layer.effect(
           return yield* restore(Deferred.await(item.deferred)).pipe(
             EffectRuntime.catchTag("PermissionV2.DeclinedError", (error) => EffectRuntime.die(error)),
             EffectRuntime.ensuring(
-              EffectRuntime.sync(() => {
+              EffectRuntime.gen(function* () {
+                if (!pending.has(item.request.id)) return
                 pending.delete(item.request.id)
+                if (!(yield* Deferred.isDone(item.deferred)))
+                  yield* events.publish(Event.Replied, { sessionID: item.request.sessionID, requestID: item.request.id, reply: "reject" })
               }),
             ),
           )

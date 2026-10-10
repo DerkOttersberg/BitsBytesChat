@@ -112,6 +112,14 @@ const SettingsModelsContent: Component = () => {
                   <div class="flex items-center gap-2 pb-2">
                     <ProviderIcon id={group.category} class="size-5 shrink-0 icon-strong-base" />
                     <span class="text-14-medium text-text-strong">{group.items[0].provider.name}</span>
+                    <Show when={group.category === "openrouter"}>
+                      <div class="ml-auto flex items-center gap-2 text-12-regular text-text-weak" data-component="provider-model-visibility">
+                        <span>{language.t("settings.models.all")}</span>
+                        <Switch checked={models.providerVisible(group.category)} onChange={checked => models.setProviderVisibility(group.category, checked)} disabled={!models.ready()} hideLabel>
+                          {language.t("settings.models.providerAll", { provider: group.items[0].provider.name })}
+                        </Switch>
+                      </div>
+                    </Show>
                   </div>
                   <SettingsList>
                     <For each={group.items}>

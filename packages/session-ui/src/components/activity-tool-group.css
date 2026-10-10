@@ -1,0 +1,173 @@
+[data-component="collapsible"].bb-tool-activity {
+  gap: 2px;
+  > [data-slot="collapsible-trigger"] {
+    width: fit-content;
+    max-width: 100%;
+    min-height: 28px;
+    height: auto;
+    gap: 7px;
+    color: var(--text-weak);
+    font-size: 13px;
+    line-height: 20px;
+    font-weight: 400;
+    cursor: pointer;
+    > [data-component="icon"] {
+      flex-shrink: 0;
+    }
+    > [data-component="text-shimmer"] {
+      min-width: 0;
+      text-align: start;
+    }
+    [data-slot="collapsible-arrow"] {
+      width: 16px;
+      height: 16px;
+      opacity: 1;
+    }
+    &:hover {
+      color: var(--text-strong);
+    }
+    &:focus-visible {
+      outline: 2px solid var(--text-interactive-base);
+      outline-offset: 3px;
+      border-radius: 4px;
+    }
+  }
+  [data-slot="activity-interrupted"] {
+    font-size: 11px;
+  }
+  [data-slot="activity-list"] {
+    max-height: min(360px, 45dvh);
+    overflow: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong-base) transparent;
+    overscroll-behavior: contain;
+    padding: 2px 6px 5px 0;
+    min-width: 0;
+  }
+  [data-slot="activity-item"] {
+    min-width: 0;
+    [data-slot="collapsible-trigger"] {
+      min-height: 26px;
+      height: auto;
+      padding-block: 3px;
+      font-weight: 400;
+    }
+    [data-slot="basic-tool-tool-title"],
+    [data-slot="message-part-title-text"] {
+      color: var(--text-weak);
+      font-size: 13px;
+    }
+    [data-slot="basic-tool-tool-subtitle"],
+    [data-slot="message-part-title-filename"] {
+      font-size: 13px;
+    }
+    [data-component="edit-trigger"],
+    [data-component="write-trigger"] {
+      padding: 0;
+      width: auto;
+      gap: 6px;
+    }
+    [data-slot="message-part-path"] {
+      display: none;
+    }
+    [data-slot="message-part-title-filename"] {
+      text-decoration: underline;
+      text-decoration-color: var(--border-strong-base);
+      text-underline-offset: 3px;
+    }
+    [data-slot="message-part-actions"] {
+      margin-inline-start: 4px;
+    }
+    [data-component="diff-changes"] {
+      font-size: 11px;
+    }
+    [data-component="bash-output"] {
+      margin-block: 3px 8px;
+    }
+  }
+}
+
+[data-component="collapsible"].bb-reasoning {
+  > [data-slot="collapsible-trigger"] {
+    width: fit-content;
+    max-width: 100%;
+    gap: 7px;
+    color: var(--text-weak);
+    font-size: 13px;
+    cursor: pointer;
+  }
+  [data-slot="collapsible-arrow"] {
+    opacity: 1;
+    width: 16px;
+  }
+  [data-slot="reasoning-details"] {
+    max-height: min(320px, 40dvh);
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    padding-block: 4px;
+  }
+}
+
+[data-component="collapsible"].bb-turn-changes {
+  > [data-slot="session-turn-diffs-header"] {
+    width: fit-content;
+    max-width: 100%;
+    height: 32px;
+    padding-block: 2px;
+    gap: 7px;
+    position: static;
+    background: transparent;
+    cursor: pointer;
+    color: var(--text-weak);
+  }
+  [data-slot="session-turn-diffs-label"] {
+    color: var(--text-weak);
+    font-weight: 400;
+    font-size: 13px;
+  }
+  [data-slot="collapsible-arrow"] {
+    opacity: 1;
+    width: 16px;
+  }
+  [data-component="session-turn-diffs-content"] {
+    max-height: 45dvh;
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+}
+
+[data-component="session-turn"] [data-component="bash-output"] {
+  position: relative;
+  background: var(--surface-raised-base, var(--background-stronger));
+  border: 1px solid var(--border-weak-base);
+  border-radius: 10px;
+  padding: 10px 12px;
+  [data-slot="command-label"] {
+    font-size: 12px;
+    color: var(--text-weak);
+    margin-bottom: 10px;
+  }
+  [data-slot="command-status"] {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 4px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-weak);
+  }
+  [data-slot="bash-scroll"] {
+    max-height: min(260px, 35dvh);
+    scrollbar-width: thin;
+  }
+  [data-slot="bash-pre"] {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  [data-slot="bash-scroll"]::-webkit-scrollbar {
+    display: block;
+    width: 5px;
+  }
+}
