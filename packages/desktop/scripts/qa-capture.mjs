@@ -3,18 +3,24 @@ import { writeFile } from "node:fs/promises"
 // Hidden Windows windows can expose an old compositor frame to CDP. Observe
 // a fresh software paint instead; BB_QA_CAPTURE enables this only in QA.
 export async function captureHidden(app, page, path) {
-  const viewport = await page.evaluate(async () => {
-    await document.fonts.ready
-    // A native resize or theme change can precede the compositor's next frame.
-    // Wait through layout and paint before requesting the retained bitmap.
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-    return {
-      width: innerWidth,
-      height: innerHeight,
-      scale: devicePixelRatio,
-      scheme: document.documentElement.dataset.colorScheme,
-    }
-  })
+  let readyTimer
+  const viewport = await Promise.race([
+    page.evaluate(async () => {
+      await document.fonts.ready
+      // A native resize or theme change can precede the compositor's next frame.
+      // Wait through layout and paint before requesting the retained bitmap.
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      return {
+        width: innerWidth,
+        height: innerHeight,
+        scale: devicePixelRatio,
+        scheme: document.documentElement.dataset.colorScheme,
+      }
+    }),
+    new Promise((_, reject) => {
+      readyTimer = setTimeout(() => reject(Error("Hidden capture viewport did not become ready")), 20000)
+    }),
+  ]).finally(() => clearTimeout(readyTimer))
   let timer
   const captured = await Promise.race([
     app.evaluate(({ BrowserWindow }, viewport) => {

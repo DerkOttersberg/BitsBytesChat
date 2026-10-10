@@ -8,6 +8,7 @@ import { useI18n } from "@opencode-ai/ui/context/i18n"
 import { useData } from "../context"
 import { ownsPart } from "./execution-activity"
 import { isImageGenerationTool } from "./tool-presentation"
+import { createImageContent } from "./image-content"
 import "./image-generation-card.css"
 
 export type ImageArtifact = {
@@ -153,46 +154,20 @@ export function ImageGenerationGallery(props: {
 function ImageGenerationCard(props: { row: ImageRow }) {
   const i18n = useI18n()
   const dialog = useDialog()
-  const [store, setStore] = createStore({ visible: false, src: "", loaded: false, failed: false })
+  const [view, setView] = createStore({ visible: false })
+  const store = createImageContent(() => props.row.artifact, () => view.visible)
   let element: HTMLDivElement | undefined
-  let generation = 0
   onMount(() => {
     const observer = new IntersectionObserver(
       (entries) => {
         if (!entries.some((entry) => entry.isIntersecting)) return
-        setStore("visible", true)
+        setView("visible", true)
         observer.disconnect()
       },
       { rootMargin: "200px" },
     )
     observer.observe(element!)
     onCleanup(() => observer.disconnect())
-  })
-  createEffect(() => {
-    const artifact = props.row.artifact
-    if (!store.visible || !artifact) return
-    const token = ++generation
-    let url = ""
-    setStore({ src: "", loaded: false, failed: false })
-    window.dispatchEvent(
-      new CustomEvent("bitsbytes:image-content", {
-        detail: {
-          id: artifact.id,
-          sessionID: artifact.sessionID,
-          revision: artifact.revision,
-          receive: (result: { data: Uint8Array; mime: string } | undefined) => {
-            if (token !== generation) return
-            if (!result?.mime.startsWith("image/")) return setStore("failed", true)
-            url = URL.createObjectURL(new Blob([new Uint8Array(result.data)], { type: result.mime }))
-            setStore("src", url)
-          },
-        },
-      }),
-    )
-    onCleanup(() => {
-      generation++
-      if (url) URL.revokeObjectURL(url)
-    })
   })
   const busy = () =>
     !store.failed &&
@@ -250,8 +225,6 @@ function ImageGenerationCard(props: { row: ImageRow }) {
           <img
             src={store.src}
             alt={props.row.artifact?.filename ?? i18n.t("ui.imageGeneration.alt")}
-            onLoad={() => setStore("loaded", true)}
-            onError={() => setStore("failed", true)}
           />
         </button>
       </Show>
@@ -270,6 +243,9 @@ function ImageGenerationCard(props: { row: ImageRow }) {
         </Show>
       </Show>
       <Show when={store.loaded}>
+        <Show when={store.failed}>
+          <p class="bb-image-load-error" role="status">{i18n.t("ui.imageGeneration.loadFailed")}</p>
+        </Show>
         <div class="bb-image-actions">
           <a
             href={store.src}

@@ -1,5 +1,5 @@
 import { createEffect, For, onCleanup, Show } from "solid-js"
-import { createStore } from "solid-js/store"
+import { createStore, reconcile } from "solid-js/store"
 import { Icon } from "@opencode-ai/ui/icon"
 import { FileTypeIcon, fileType } from "@opencode-ai/ui/file-type-icon"
 import { useI18n } from "@opencode-ai/ui/context/i18n"
@@ -11,7 +11,7 @@ export function ArtifactCards(props: { sessionID: string; messageIDs: string[]; 
   const i18n = useI18n()
   const [store, setStore] = createStore({ items: [] as Item[] })
   const owners = () => [...props.messageIDs, ...props.inputIDs]
-  const receive = (items: Item[]) => setStore("items", items.filter(item => item.sessionID === props.sessionID && (item.turnIDs ?? (item.turnID ? [item.turnID] : [])).some(id => owners().includes(id))).map(item => ({ ...item, revision: item.history?.findLast(version => version.turnID && owners().includes(version.turnID))?.revision ?? item.revision })))
+  const receive = (items: Item[]) => setStore("items", reconcile(items.filter(item => item.sessionID === props.sessionID && (item.turnIDs ?? (item.turnID ? [item.turnID] : [])).some(id => owners().includes(id))).map(item => ({ ...item, revision: item.history?.findLast(version => version.turnID && owners().includes(version.turnID))?.revision ?? item.revision })), { key: "id" }))
   createEffect(() => { props.messageIDs; window.dispatchEvent(new CustomEvent("bitsbytes:artifact-query", { detail: { receive } })) })
   const update = (event: Event) => receive((event as CustomEvent<Item[]>).detail)
   window.addEventListener("bitsbytes:artifact-change", update)

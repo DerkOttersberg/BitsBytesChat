@@ -69,9 +69,22 @@ export function ChatWorkspace(props: {
     busy: false,
   })
   let workspace!: HTMLDivElement
+  let panelTabs!: HTMLDivElement
   const [workspaceWidth, setWorkspaceWidth] = createSignal(0)
   const panelFocused = () => store.focused && !store.collapsed
   const panelLayout = createMemo(() => workspacePanelLayout(workspaceWidth(), store.width, panelFocused()))
+  createEffect(() => {
+    const id = store.active
+    const collapsed = store.collapsed
+    panelLayout().width
+    if (!id || collapsed) return
+    queueMicrotask(() => {
+      if (!panelTabs?.isConnected || store.collapsed || store.active !== id) return
+      Array.from(panelTabs.children)
+        .find((tab) => tab.getAttribute("data-bb-panel-tab") === id)
+        ?.scrollIntoView({ block: "nearest", inline: "nearest" })
+    })
+  })
   onMount(() => {
     const update = () => setWorkspaceWidth(workspace.getBoundingClientRect().width)
     const observer = new ResizeObserver(update)
@@ -137,12 +150,19 @@ export function ChatWorkspace(props: {
     remove(tab.id)
   }
   const remove = (id: string) => {
+    const restoreFocus = document.activeElement?.closest("[data-bb-panel-tab]")?.getAttribute("data-bb-panel-tab") === id
     const index = store.tabs.findIndex((tab) => tab.id === id)
     const tabs = store.tabs.filter((tab) => tab.id !== id)
     setStore({
       tabs,
       active: store.active === id ? (tabs[Math.min(index, tabs.length - 1)]?.id ?? "") : store.active,
       ...(!tabs.length ? { active: "", collapsed: true, focused: false, menu: false } : {}),
+    })
+    if (restoreFocus) queueMicrotask(() => {
+      const target = !store.collapsed && panelTabs?.isConnected
+        ? panelTabs.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')
+        : workspace.querySelector<HTMLButtonElement>('[data-bb-panel-toggle]')
+      target?.focus({ preventScroll: true })
     })
   }
   let savedKey = ""
@@ -702,11 +722,12 @@ export function ChatWorkspace(props: {
             />
           </Show>
           <div class="bb-panel-header">
-            <div class="bb-panel-tabs" role="tablist">
+            <div class="bb-panel-tabs" role="tablist" ref={panelTabs}>
               <For each={store.tabs}>
                 {(tab) => (
-                  <div classList={{ active: tab.id === store.active }}>
+                  <div class="bb-panel-tab" role="presentation" data-bb-panel-tab={tab.id} classList={{ active: tab.id === store.active }}>
                     <button
+                      type="button"
                       role="tab"
                       aria-label={tab.title}
                       aria-selected={tab.id === store.active}
@@ -724,10 +745,15 @@ export function ChatWorkspace(props: {
                       </Show>
                     </button>
                     <button
+                      type="button"
                       class="bb-panel-tab-close"
                       aria-label={language.t("bitsbytes.close")}
+                      aria-description={tab.title}
                       title={language.t("bitsbytes.close")}
-                      onClick={() => close(tab)}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        close(tab)
+                      }}
                     >
                       <Icon name="close-small" />
                     </button>

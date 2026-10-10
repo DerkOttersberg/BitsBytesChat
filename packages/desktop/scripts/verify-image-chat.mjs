@@ -8,6 +8,8 @@ import { constants, setPriority } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { captureHidden } from "./qa-capture.mjs"
 import { verifyComposerLayout } from "./qa-composer-layout.mjs"
+import { verifyImageReplacement, verifyImageStability } from "./qa-image-stability.mjs"
+import { verifyLastPanelClose, verifyPanelTabs } from "./qa-panel-tabs.mjs"
 
 setPriority(process.pid, constants.priority.PRIORITY_BELOW_NORMAL)
 const root = resolve("../..")
@@ -310,7 +312,11 @@ try {
   const artifacts = async () => (await call("artifacts.list")).filter((item) => item.sessionID === chat.id)
   const artifactState = async (id) => (await artifacts()).find((item) => item.id === id)
   await page.locator(".bb-org-sidebar").waitFor({ timeout: 120000 })
-  assert.equal(await page.getByText("DEV", { exact: true }).count(), 0, "packaged candidate uses the production channel")
+  assert.equal(
+    await page.getByText("DEV", { exact: true }).count(),
+    0,
+    "packaged candidate uses the production channel",
+  )
   report.productionChannel = true
   await api("/api/organization/migrate", "POST", { projects: [{ directory }], defaultDirectory: directory })
   await call("images.configure", { provider: "openai", key: "fixture-image-key", model: "gpt-image-2.5-flare" })
@@ -360,22 +366,42 @@ try {
     )
   const snapshot = async (label) => {
     const path = join(results, `${reportName}-${label}.png`)
-    const regions = await page.evaluate(() => Object.fromEntries([
-      ["chat", ".bb-workspace-chat"], ["panelHeader", ".bb-panel-header"], ["panel", ".bb-workspace-panel"], ["documentToolbar", ".bb-document-toolbar"], ["fileCard", ".bb-workspace-chat .bb-artifact-card"],
-    ].flatMap(([name, selector]) => {
-      const element = [...document.querySelectorAll(selector)].find(element => element.getBoundingClientRect().width && element.getBoundingClientRect().height)
-      if (!element) return []
-      const rect = element.getBoundingClientRect()
-      return [[name, { x: rect.x, y: rect.y, width: rect.width, height: rect.height }]]
-    })))
+    const regions = await page.evaluate(() =>
+      Object.fromEntries(
+        [
+          ["chat", ".bb-workspace-chat"],
+          ["panelHeader", ".bb-panel-header"],
+          ["panel", ".bb-workspace-panel"],
+          ["documentToolbar", ".bb-document-toolbar"],
+          ["fileCard", ".bb-workspace-chat .bb-artifact-card"],
+        ].flatMap(([name, selector]) => {
+          const element = [...document.querySelectorAll(selector)].find(
+            (element) => element.getBoundingClientRect().width && element.getBoundingClientRect().height,
+          )
+          if (!element) return []
+          const rect = element.getBoundingClientRect()
+          return [[name, { x: rect.x, y: rect.y, width: rect.width, height: rect.height }]]
+        }),
+      ),
+    )
     const documentTurn = await page.evaluate(() => {
-      const card = [...document.querySelectorAll(".bb-workspace-chat .bb-artifact-card")].findLast(element => element.getBoundingClientRect().height)
+      const card = [...document.querySelectorAll(".bb-workspace-chat .bb-artifact-card")].findLast(
+        (element) => element.getBoundingClientRect().height,
+      )
       const id = card?.closest("[data-message-id]")?.getAttribute("data-message-id")
       if (!id) return
-      const rects = [...document.querySelectorAll(".bb-workspace-chat [data-message-id]")].filter(element => element.getAttribute("data-message-id") === id).map(element => element.getBoundingClientRect()).filter(rect => rect.height)
-      const left = Math.max(0, Math.min(...rects.map(rect => rect.left)))
-      const top = Math.max(0, Math.min(...rects.map(rect => rect.top)))
-      return { x: left, y: top, width: Math.max(...rects.map(rect => rect.right)) - left, height: Math.min(innerHeight, Math.max(...rects.map(rect => rect.bottom))) - top }
+      const rects = [...document.querySelectorAll(".bb-workspace-chat [data-message-id]")]
+        .filter((element) => element.getAttribute("data-message-id") === id)
+        .map((element) => element.getBoundingClientRect())
+        .filter((rect) => rect.height)
+      const left = Math.max(0, Math.min(...rects.map((rect) => rect.left)))
+      const top = Math.max(0, Math.min(...rects.map((rect) => rect.top)))
+      return {
+        x: left,
+        y: top,
+        width: Math.max(...rects.map((rect) => rect.right)) - left,
+        height: Math.min(innerHeight, Math.max(...rects.map((rect) => rect.bottom))) - top,
+      }
     })
     if (documentTurn) regions.documentTurn = documentTurn
     report.screenshots.push({ label, path, regions, ...(await captureHidden(app, page, path)) })
@@ -421,6 +447,27 @@ try {
   assert.equal(jobs.length, 1)
   assert.ok(jobs[0].inputID && jobs[0].callID)
   const original = jobs[0].artifact
+  if (process.env.BB_QA_RENDERING) {
+    report.imageStability = await verifyImageStability(page, chat.id, process.env.BB_QA_RENDERING === "baseline")
+    check(
+      process.env.BB_QA_RENDERING === "baseline"
+        ? "Recorded image metadata refresh and cursor baseline"
+        : "Repeated metadata refresh preserves the loaded PNG, URL and cursor types",
+    )
+    if (process.env.BB_QA_RENDERING === "baseline") {
+      report.baselineOnly = true
+      throw Object.assign(Error("Rendering baseline recorded"), { baselineComplete: true })
+    }
+    report.imageReplacement = await verifyImageReplacement(page, chat.id, images.red, images.blue)
+    check(
+      "Image replacements decode before swapping; failures retain the PNG, stale replies are ignored and old URLs are released",
+    )
+    await poll(
+      () => cards().last().getAttribute("data-loaded"),
+      (value) => value === "true",
+      "original image restored",
+    )
+  }
   const downloadPath = join(profile, "downloaded-image.png")
   await app.evaluate(({ BrowserWindow }, path) => {
     globalThis.qaDownload = undefined
@@ -574,22 +621,38 @@ try {
       await panel.waitFor()
       await panel.getByRole("button", { name: "Save copy", exact: true }).waitFor()
       assert.equal(await card.locator("small").textContent(), kind === "document" ? "Word" : "Excel")
-      assert.equal(await card.locator("[data-component=file-type-icon]").getAttribute("data-file-type"), kind === "document" ? "word" : "spreadsheet")
+      assert.equal(
+        await card.locator("[data-component=file-type-icon]").getAttribute("data-file-type"),
+        kind === "document" ? "word" : "spreadsheet",
+      )
       assert.equal(await card.locator(".bb-artifact-open").textContent(), "Open")
       assert.equal(await card.getByText(/Revision \d+/).count(), 0)
       await card.hover()
-      await poll(() => card.evaluate(element => {
-        const actions = element.closest('[data-slot="session-turn-assistant-content"]')?.querySelector('[data-slot="text-part-copy-wrapper"]')
-        if (!actions) return false
-        const style = getComputedStyle(actions)
-        return style.opacity === "1" && style.pointerEvents === "auto"
-      }), Boolean, "response actions remain reachable across the file card")
-      const geometry = await card.evaluate(element => {
+      await poll(
+        () =>
+          card.evaluate((element) => {
+            const actions = element
+              .closest('[data-slot="session-turn-assistant-content"]')
+              ?.querySelector('[data-slot="text-part-copy-wrapper"]')
+            if (!actions) return false
+            const style = getComputedStyle(actions)
+            return style.opacity === "1" && style.pointerEvents === "auto"
+          }),
+        Boolean,
+        "response actions remain reachable across the file card",
+      )
+      const geometry = await card.evaluate((element) => {
         const content = element.closest('[data-slot="session-turn-assistant-content"]')
         const body = content?.querySelector('[data-slot="text-part-body"]')?.getBoundingClientRect()
         const actions = content?.querySelector('[data-slot="text-part-copy-wrapper"]')?.getBoundingClientRect()
         const card = element.getBoundingClientRect()
-        return { gap: body && card.top - body.bottom, actionsBelow: actions && actions.top >= card.bottom, width: card.width, height: card.height, contentWidth: content?.getBoundingClientRect().width }
+        return {
+          gap: body && card.top - body.bottom,
+          actionsBelow: actions && actions.top >= card.bottom,
+          width: card.width,
+          height: card.height,
+          contentWidth: content?.getBoundingClientRect().width,
+        }
       })
       assert.ok(geometry.gap !== undefined && geometry.gap >= 0 && geometry.gap <= 20, JSON.stringify(geometry))
       assert.equal(geometry.actionsBelow, true, JSON.stringify(geometry))
@@ -695,7 +758,7 @@ try {
       await page.emulateMedia({ colorScheme: "light" })
       await page.waitForFunction(() => document.documentElement.dataset.colorScheme === "light")
       const card = main().locator(".bb-artifact-card").filter({ hasText: preview.filename }).last()
-      const fits = await card.evaluate(element => {
+      const fits = await card.evaluate((element) => {
         const rect = element.getBoundingClientRect()
         const content = element.closest('[data-slot="session-turn-assistant-content"]').getBoundingClientRect()
         const info = element.querySelector(".bb-artifact-file-info").getBoundingClientRect()
@@ -725,8 +788,39 @@ try {
       `The ${kind} source and visible preview contain the correct contents; revision 2 preserves its artifact identity`,
     )
   }
-  check("File cards show distinct type icons and labels without revision noise; response actions follow the card, and compact Office actions retain labels, tooltips and revision history")
-  check("Narrow split-view composer controls keep their own pointer targets and text bounds without overlap at 100/125%")
+  check(
+    "File cards show distinct type icons and labels without revision noise; response actions follow the card, and compact Office actions retain labels, tooltips and revision history",
+  )
+  check(
+    "Narrow split-view composer controls keep their own pointer targets and text bounds without overlap at 100/125%",
+  )
+  if (process.env.BB_QA_RENDERING) {
+    report.artifactStability = await page.evaluate(async sessionID => {
+      const main = document.querySelector(`.bb-workspace-chat[data-bb-chat="${sessionID}"]`)
+      const cards = [...main.querySelectorAll('.bb-artifact-card')]
+      const target = cards.at(-1)
+      target.focus()
+      const items = await window.api.bitsbytes.call("artifacts.list")
+      for (let index = 0; index < 8; index++) {
+        window.dispatchEvent(new CustomEvent("bitsbytes:artifact-change", { detail: structuredClone(items) }))
+        await new Promise(resolve => setTimeout(resolve, 30))
+      }
+      return { cards: cards.length, preserved: cards.every(card => card.isConnected), focusPreserved: document.activeElement === target }
+    }, chat.id)
+    assert.equal(report.artifactStability.preserved, true)
+    assert.equal(report.artifactStability.focusPreserved, true)
+    check("Repeated artifact metadata preserves file-card DOM and keyboard focus")
+    const path = join(directory, "A deliberately long reference filename for the panel tab.json")
+    await writeFile(path, '{"purpose":"Local tab hover, close and narrow layout verification"}\n')
+    const item = await call("artifact.publish", { path, sessionID: chat.id })
+    report.panelTabs = await verifyPanelTabs(app, page, item, snapshot)
+    check(
+      "Panel close controls stay inside their tab, reveal on hover/focus, fade titles and close inactive/active tabs without switching the wrong content",
+    )
+    check(
+      "Narrow, dark, 125% and reduced-motion panel tabs remain scrollable with reachable controls and correct focus restoration",
+    )
+  }
   await page.getByRole("button", { name: "Open panel", exact: true }).last().click()
   await page.getByRole("menuitem", { name: "Side chat", exact: true }).click()
   const side = page.locator(".bb-embedded-chat:visible")
@@ -735,17 +829,29 @@ try {
   assert.ok(childID && childID !== chat.id)
   assert.equal((await call("images.list", { sessionID: childID })).length, 0)
   const sideEditor = side.locator("[contenteditable=true]").first()
+  if (process.env.BB_QA_RENDERING) {
+    report.sideCursor = {
+      chat: await side.evaluate((element) => getComputedStyle(element).cursor),
+      editor: await sideEditor.evaluate((element) => getComputedStyle(element).cursor),
+    }
+    assert.equal(report.sideCursor.chat, "default")
+    assert.equal(report.sideCursor.editor, "text")
+  }
   await sideEditor.fill("Reply with exactly: Side chat ready.")
   await sideEditor.press("Enter")
   await side.getByText("Side chat ready.", { exact: true }).waitFor()
   assert.equal(imageRequests.length, 4)
   await snapshot("side-chat")
-  await page
+  const sideTab = page
     .locator(".bb-panel-tabs > div")
     .filter({ has: page.getByRole("tab", { name: "Side chat", exact: true }) })
-    .locator(".bb-panel-tab-close")
-    .click()
+  await sideTab.hover()
+  await sideTab.locator(".bb-panel-tab-close").click()
   await side.waitFor({ state: "detached" })
+  if (process.env.BB_QA_RENDERING) {
+    report.lastPanelClose = await verifyLastPanelClose(page)
+    check("Closing the last panel tab collapses the panel and returns keyboard focus to the chat toggle")
+  }
   await open(other)
   assert.equal(await page.locator(".bb-document-panel:visible").count(), 0)
   await open(chat)
@@ -758,14 +864,18 @@ try {
   report.prompts = prompts
   report.artifacts = await artifacts()
 } catch (error) {
-  report.failure = error.stack || String(error)
-  if (page) {
-    report.failureUI = await page
-      .evaluate(() => ({ route: location.pathname, text: document.body.innerText.slice(-8500) }))
-      .catch(() => undefined)
-    await captureHidden(app, page, join(results, `${reportName}-failure.png`)).catch(() => undefined)
+  if (error.baselineComplete) {
+    report.baselineComplete = true
+  } else {
+    report.failure = error.stack || String(error)
+    if (page) {
+      report.failureUI = await page
+        .evaluate(() => ({ route: location.pathname, text: document.body.innerText.slice(-8500) }))
+        .catch(() => undefined)
+      await captureHidden(app, page, join(results, `${reportName}-failure.png`)).catch(() => undefined)
+    }
+    process.exitCode = 1
   }
-  process.exitCode = 1
 } finally {
   for (const release of pendingImages) release()
   await app?.close()

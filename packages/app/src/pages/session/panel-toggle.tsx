@@ -7,6 +7,7 @@ export function PanelToggle(props: { expanded: boolean; onToggle: () => void }) 
   return (
     <IconButtonV2
       type="button"
+      data-bb-panel-toggle
       variant="ghost-muted"
       size="large"
       icon={<Icon name="sidebar-right" />}
