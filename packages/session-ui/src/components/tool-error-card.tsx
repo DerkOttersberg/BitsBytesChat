@@ -65,7 +65,7 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
       question: "ui.tool.questions",
     }
     const key = map[split.tool]
-    if (!key) return split.tool
+    if (!key) return i18n.t("ui.tool.generic")
     if (!key.includes(".")) return key
     return i18n.t(key)
   })
@@ -79,11 +79,11 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
 
   const subtitle = createMemo(() => {
     if (split.subtitle) return split.subtitle
-    const parts = tail().split(": ")
-    if (parts.length <= 1) return i18n.t("ui.toolErrorCard.failed")
-    const head = (parts[0] ?? "").trim()
-    if (!head) return i18n.t("ui.toolErrorCard.failed")
-    return head[0] ? head[0].toUpperCase() + head.slice(1) : i18n.t("ui.toolErrorCard.failed")
+    return i18n.t(
+      split.tool === "webfetch" && /\b(404|410)\b/.test(cleaned())
+        ? "ui.toolErrorCard.pageUnavailable"
+        : "ui.toolErrorCard.unsuccessful",
+    )
   })
 
   const body = createMemo(() => {
@@ -101,13 +101,13 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
   }
 
   return (
-    <Card {...rest} data-kind="tool-error-card" data-open={open() ? "true" : "false"} variant="error">
+    <Card {...rest} data-kind="tool-error-card" data-open={open() ? "true" : "false"}>
       <Collapsible class="tool-collapsible" data-open={open() ? "true" : "false"} open={open()} onOpenChange={setOpen}>
         <Collapsible.Trigger>
           <div data-component="tool-trigger">
             <div data-slot="basic-tool-tool-trigger-content">
               <span data-slot="basic-tool-tool-indicator" data-component="tool-error-card-icon">
-                <Icon name="circle-ban-sign" size="small" style={{ "stroke-width": 1.5 }} />
+                <Icon name="warning" size="small" style={{ "stroke-width": 1.5 }} />
               </span>
               <div data-slot="basic-tool-tool-info">
                 <div data-slot="basic-tool-tool-info-structured">

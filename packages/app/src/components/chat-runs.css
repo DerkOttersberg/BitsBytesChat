@@ -17,3 +17,38 @@
 [data-timeline-row=AssistantPart][data-previous-assistant=true][data-assistant-part-type=tool]{padding-top:4px}
 @media(max-width:420px){.bb-artifact-card{gap:8px;padding:10px}.bb-artifact-open{padding:4px}.bb-artifact-file-icon{width:34px;height:34px}}
 @container(max-width:320px){.bb-artifact-open-label{display:none}.bb-artifact-open{padding:4px}.bb-artifact-file-icon{width:34px;height:34px}.bb-artifact-file-icon [data-component=file-type-icon]{width:20px;height:20px}}
+
+.bb-completed-work {
+  padding-top: 16px;
+  padding-bottom: 8px;
+}
+.bb-work-disclosure {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  max-width: 100%;
+  min-height: 28px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-weak);
+  border-bottom: 1px solid var(--border-weak-base);
+  width: 100%;
+  text-align: left;
+  padding-bottom: 8px;
+}
+.bb-work-disclosure:hover {
+  color: var(--text-strong);
+}
+.bb-work-disclosure:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.bb-work-duration {
+  font-variant-numeric: tabular-nums;
+}
+.bb-work-notice {
+  margin-inline-start: auto;
+  font-size: 12px;
+}

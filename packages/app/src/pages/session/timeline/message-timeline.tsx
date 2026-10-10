@@ -251,6 +251,7 @@ export function MessageTimeline(props: {
   actions?: UserActions
   scroll: { overflow: boolean; bottom: boolean; jump: boolean }
   onResumeScroll: () => void
+  onPauseScroll: () => void
   setScrollRef: (el: HTMLDivElement | undefined) => void
   onScheduleScrollState: (el: HTMLDivElement) => void
   onAutoScrollHandleScroll: () => void
@@ -342,6 +343,7 @@ export function MessageTimeline(props: {
     return language.t("command.session.new")
   })
   const showHeader = createMemo(() => !!(titleValue() || parentID()))
+  const [toolOpen, setToolOpen] = createStore<Record<string, boolean | undefined>>(cached?.toolOpen ?? {})
   const projection = createTimelineProjection({
     messages: sessionMessages,
     userMessages: () => props.userMessages,
@@ -350,6 +352,7 @@ export function MessageTimeline(props: {
     status: sessionStatus,
     showReasoningSummaries: settings.general.showReasoningSummaries,
     inlineComments: settings.general.newLayoutDesigns,
+    expandedWork: () => toolOpen,
   })
   const activeMessageID = projection.activeMessageID
   const assistantMessagesByParent = projection.assistantMessagesByParent
@@ -420,7 +423,6 @@ export function MessageTimeline(props: {
     prependAnchorFrame = requestAnimationFrame(apply)
   }
 
-  const [toolOpen, setToolOpen] = createStore<Record<string, boolean | undefined>>(cached?.toolOpen ?? {})
   const [renderOverscan, setRenderOverscan] = createSignal(initialMeasurements?.length || coldBottomMount ? 6 : 20)
   let resizePinnedIndexes: number[] = []
   let resizePinFrame: number | undefined
@@ -1209,7 +1211,11 @@ export function MessageTimeline(props: {
                   <ArtifactCards
                     sessionID={sessionID()!}
                     inputIDs={[assistantPartRow().userMessageID]}
-                    tools={(assistantMessagesByParent().get(assistantPartRow().userMessageID) ?? emptyAssistantMessages).flatMap(message => getMsgParts(message.id).filter((part): part is ToolPart => part.type === "tool"))}
+                    tools={(
+                      assistantMessagesByParent().get(assistantPartRow().userMessageID) ?? emptyAssistantMessages
+                    ).flatMap((message) =>
+                      getMsgParts(message.id).filter((part): part is ToolPart => part.type === "tool"),
+                    )}
                     messageIDs={(
                       assistantMessagesByParent().get(assistantPartRow().userMessageID) ?? emptyAssistantMessages
                     ).map((message) => message.id)}
@@ -1229,6 +1235,50 @@ export function MessageTimeline(props: {
                 reasoningHeading={thinkingRow().reasoningHeading}
                 showReasoningSummaries={settings.general.showReasoningSummaries()}
               />
+            </div>
+          </TimelineRowFrame>
+        )
+      }
+      case "WorkSummary": {
+        const work = row as Accessor<TimelineRowByTag<"WorkSummary">>
+        const duration = () => {
+          const elapsed = work().elapsedMs
+          if (elapsed === undefined) return
+          const seconds = Math.max(1, Math.round(elapsed / 1000))
+          return seconds < 60
+            ? language.t("ui.message.duration.seconds", { count: seconds })
+            : language.t("ui.message.duration.minutesSeconds", {
+                minutes: Math.floor(seconds / 60),
+                seconds: seconds % 60,
+              })
+        }
+        return (
+          <TimelineRowFrame row={work}>
+            <div class="w-full px-4 md:px-5 bb-completed-work" data-component="completed-work">
+              <button
+                type="button"
+                class="bb-work-disclosure"
+                aria-expanded={work().expanded}
+                title={language.t("ui.activity.count", { count: work().count })}
+                onClick={() => {
+                  props.onPauseScroll()
+                  props.onMarkScrollGesture()
+                  setToolOpen(`work:${work().userMessageID}`, !work().expanded)
+                  requestAnimationFrame(() => {
+                    props.onPauseScroll()
+                    onSizeChange?.()
+                  })
+                }}
+              >
+                <span>{language.t(work().expanded ? "ui.sessionTurn.work.hide" : "ui.sessionTurn.work.show")}</span>
+                <Show when={duration()}>{(value) => <span class="bb-work-duration">{value()}</span>}</Show>
+                <Icon name={work().expanded ? "chevron-down" : "chevron-right"} size="small" />
+                <Show when={work().failures}>
+                  <span class="bb-work-notice">
+                    {language.plural("ui.sessionTurn.work.unsuccessful", work().failures)}
+                  </span>
+                </Show>
+              </button>
             </div>
           </TimelineRowFrame>
         )

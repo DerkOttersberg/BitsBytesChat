@@ -2135,6 +2135,7 @@ export default function Page(props: { embedded?: boolean } = {}) {
                   actions={actions}
                   scroll={ui.scroll}
                   onResumeScroll={resumeScroll}
+                  onPauseScroll={autoScroll.pause}
                   setScrollRef={setScrollRef}
                   onScheduleScrollState={scheduleScrollState}
                   onAutoScrollHandleScroll={autoScroll.handleScroll}

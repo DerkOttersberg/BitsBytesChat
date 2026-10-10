@@ -28,6 +28,7 @@ export type TimelineRowMap = {
   }
   Thinking: { userMessageID: string; reasoningHeading?: string }
   Retry: { userMessageID: string }
+  WorkSummary: { userMessageID: string; elapsedMs?: number; count: number; failures: number; expanded: boolean }
   DiffSummary: { userMessageID: string; diffs: SummaryDiff[] }
   Error: { userMessageID: string; text: string }
 }

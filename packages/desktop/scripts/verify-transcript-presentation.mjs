@@ -20,7 +20,8 @@ const results = join(root, ".tools/qa/results")
 const reportName = process.env.BB_QA_REPORT || "transcript-presentation"
 const capture = process.env.BB_QA_CAPTURE === "1"
 const report = { checks: [], errors: [], geometry: [], screenshots: [], profile, syntheticProvider: true }
-const executablePath = process.env.BB_QA_EXECUTABLE || join(root, ".tools/qa/workspace-refinements-package/win-unpacked/BitsBytesChat.exe")
+const executablePath =
+  process.env.BB_QA_EXECUTABLE || join(root, ".tools/qa/workspace-refinements-package/win-unpacked/BitsBytesChat.exe")
 report.executablePath = executablePath
 if (!process.env.BB_QA_MAIN) {
   report.asarSHA256 = createHash("sha256")
@@ -49,7 +50,7 @@ const fixture = createServer(async (req, res) => {
   const latest = JSON.stringify(input.messages?.[lastUser]?.content ?? "")
   requests.push({
     latest,
-    roleOrder: input.messages?.map(row => row.role),
+    roleOrder: input.messages?.map((row) => row.role),
     tools: input.messages?.flatMap((row) => row.tool_calls?.map((call) => call.function?.name) ?? []) ?? [],
   })
   const matches = (name, tool) => name === tool || name?.endsWith("_" + tool)
@@ -90,7 +91,7 @@ const fixture = createServer(async (req, res) => {
         content: "Approved fixture",
       },
     })
-  requests.at(-1).emitted = calls.map(call => call.name)
+  requests.at(-1).emitted = calls.map((call) => call.name)
   if (calls.some((call) => !call.name)) {
     report.errors.push("Fixture tool was not advertised")
     res.writeHead(500).end("Fixture tool unavailable")
@@ -134,7 +135,7 @@ const fixture = createServer(async (req, res) => {
       content: latest.includes("fixture-long-plan")
         ? `<proposed_plan>\n${longPlan}\n</proposed_plan>`
         : latest.includes("fixture-transcript")
-          ? `Updated the document and verified the result. The diagnostic command returned exit code 3.\n\nReview [fixture-changes.txt](/${fixtureFile.replaceAll("\\", "/")}) and the [local reference](http://127.0.0.1:${fixture.address().port}/source).`
+          ? `Updated the document and verified the result. The diagnostic command returned exit code 3.\n\nReview [fixture-changes.txt](/${fixtureFile.replaceAll("\\", "/")}) and the [local reference](http://127.0.0.1:${fixture.address().port}/source).\n\nSaved at \`${fixtureFile}\`.`
           : "Fictional local operation completed.",
     })
   res.end(
@@ -245,7 +246,13 @@ try {
   const create = async (title) => {
     // Match the desktop composer's per-chat tool policy; the engine's bare API
     // default permits edits before the desktop approval broker sees a request.
-    const session = await api("/session", "POST", { title, permission: [{ permission: "*", pattern: "*", action: "ask" }, { permission: "read", pattern: "*", action: "allow" }] })
+    const session = await api("/session", "POST", {
+      title,
+      permission: [
+        { permission: "*", pattern: "*", action: "ask" },
+        { permission: "read", pattern: "*", action: "allow" },
+      ],
+    })
     await api(`/session/${session.id}/prompt_async`, "POST", {
       noReply: true,
       agent: "build",
@@ -311,6 +318,10 @@ try {
       marker,
     )
     await page.waitForTimeout(500)
+    if (marker !== "fixture-transcript") {
+      const work = main().locator('[data-component="completed-work"] button').last()
+      if ((await work.count()) && (await work.getAttribute("aria-expanded")) === "false") await work.click()
+    }
     return api(`/session/${chat.id}/message`)
   }
   for (const mode of ["full", "ask", "auto", "full", "auto", "ask"]) await select(mode)
@@ -357,6 +368,34 @@ try {
   await page.keyboard.press("Escape")
   await select("full")
   const history = await send("fixture-transcript")
+  const work = main().locator('[data-component="completed-work"] button').last()
+  await work.waitFor()
+  assert.equal(await work.getAttribute("aria-expanded"), "false")
+  assert.equal(await main().locator(".bb-tool-activity").count(), 0)
+  await main()
+    .getByText(/Updated the document and verified the result/)
+    .waitFor()
+  const compactPath = main().locator('code[data-compact-file-reference="true"]').last()
+  await compactPath.waitFor()
+  assert.equal(await compactPath.innerText(), "fixture-changes.txt")
+  assert.equal(await compactPath.getAttribute("title"), fixtureFile)
+  assert.ok(history.flatMap((row) => row.parts).some((part) => part.type === "text" && part.text.includes(fixtureFile)))
+  check(
+    "Absolute file references show a compact filename and icon while the title and original response retain the full path",
+  )
+  await snapshot("completed-collapsed-light")
+  await work.focus()
+  await work.press("Enter")
+  assert.equal(await work.getAttribute("aria-expanded"), "true")
+  await page.waitForTimeout(350)
+  const expandedWorkBounds = await work.boundingBox()
+  const expandedChatBounds = await main().boundingBox()
+  assert.ok(
+    expandedWorkBounds &&
+      expandedWorkBounds.y >= expandedChatBounds.y &&
+      expandedWorkBounds.y + expandedWorkBounds.height < expandedChatBounds.y + expandedChatBounds.height - 140,
+  )
+  check("Completed work defaults collapsed, retains the actual final answer, expands with the keyboard and keeps its header in view")
   const tools = history.flatMap((row) => row.parts).filter((part) => part.type === "tool")
   report.operations = tools.map((part) => ({ tool: part.tool, state: part.state }))
   report.recordedParts = history.flatMap((row) => row.parts).map((part) => ({ type: part.type, id: part.id }))
@@ -490,8 +529,104 @@ try {
     .filter({ has: page.locator('[data-component="tool-error-card-icon"]') })
     .last()
   await failed.waitFor()
-  assert.match(await failed.innerText(), /Read/)
-  check("A real missing-file failure remains visible outside routine activity")
+  await poll(
+    () => failed.innerText(),
+    (value) => /Read/.test(value),
+    "rendered failure label",
+  )
+  const errorCard = main().locator('[data-kind="tool-error-card"]').last()
+  assert.notEqual(await errorCard.getAttribute("data-variant"), "error")
+  assert.equal(await errorCard.evaluate((element) => getComputedStyle(element).borderLeftWidth), "0px")
+  await failed.locator('[data-slot="collapsible-trigger"]').click()
+  await poll(
+    () => failed.innerText(),
+    (value) => /missing-fixture/.test(value),
+    "original missing-file diagnostic",
+  )
+  const errorDetails = await errorCard.locator('[data-slot="tool-error-card-content"]').evaluate((element) => ({
+    height: element.getBoundingClientRect().height,
+    overflow: getComputedStyle(element).overflowY,
+  }))
+  assert.ok(errorDetails.height <= 360)
+  assert.equal(errorDetails.overflow, "auto")
+  check("A real missing-file failure remains available in work details without a task-level red error")
+  // Replay recorded presentation shapes; these are not live web or Windows-control calls.
+  const failureRows = await api(`/session/${chat.id}/message`)
+  const recordedFailure = failureRows
+    .flatMap((row) => row.parts)
+    .findLast((part) => part.type === "tool" && part.state.status === "error")
+  assert.ok(recordedFailure)
+  const replaceRecorded = (part) =>
+    api(`/session/${chat.id}/message/${recordedFailure.messageID}/part/${recordedFailure.id}`, "PATCH", part)
+  await failed.locator('[data-slot="collapsible-trigger"]').click()
+  await replaceRecorded({
+    ...recordedFailure,
+    tool: "webfetch",
+    state: {
+      ...recordedFailure.state,
+      input: { url: "https://example.invalid/recorded-missing-page" },
+      error: "StatusCode: HTTP 404 (recorded presentation fixture)",
+    },
+  })
+  await poll(
+    () => errorCard.innerText(),
+    (value) => /Page unavailable/.test(value),
+    "short recorded 404 status",
+  )
+  assert.doesNotMatch(await errorCard.innerText(), /StatusCode|recorded-missing-page/)
+  await snapshot("recorded-404-collapsed")
+  await failed.locator('[data-slot="collapsible-trigger"]').click()
+  await poll(
+    () => errorCard.innerText(),
+    (value) => /HTTP 404/.test(value),
+    "original recorded 404 diagnostic",
+  )
+  await failed.locator('[data-slot="collapsible-trigger"]').click()
+  check("A recorded webfetch 404 renders a quiet Page unavailable row and preserves its exact diagnostic on expansion")
+  report.recordedPresentationFixtures = [
+    "webfetch HTTP 404",
+    "windows-control PowerShell",
+    "windows-control FileSystem",
+  ]
+  for (const [tool, title] of [
+    ["windows-control_PowerShell", "Ran PowerShell"],
+    ["windows-control_FileSystem", "Worked with files"],
+  ]) {
+    await replaceRecorded({
+      ...recordedFailure,
+      tool,
+      state: {
+        status: "completed",
+        input: {
+          command: "recorded-only-command-body",
+          path: "recorded-only-destination-path",
+          description: "Inspect a copied project",
+        },
+        output: "Recorded fixture; no Windows-control call was executed.",
+        title: tool,
+        metadata: {},
+        time: recordedFailure.state.time,
+      },
+    })
+    const recordedGroup = main().locator(`.bb-tool-activity[data-timeline-part-ids*="${recordedFailure.id}"]`)
+    await recordedGroup.waitFor()
+    const recordedTrigger = recordedGroup.locator(':scope > [data-slot="collapsible-trigger"]')
+    if ((await recordedTrigger.getAttribute("aria-expanded")) !== "true") await recordedTrigger.click()
+    await poll(
+      () => recordedGroup.innerText(),
+      (value) => value.includes(title),
+      "short recorded Windows tool label",
+    )
+    assert.doesNotMatch(
+      await recordedGroup.innerText(),
+      /recorded-only-command-body|recorded-only-destination-path|windows-control_/,
+    )
+  }
+  await snapshot("recorded-windows-tools")
+  check(
+    "Recorded Windows MCP operations join activity groups and expose short action labels without raw command/path clutter",
+  )
+  await replaceRecorded(recordedFailure)
   const orphan = tools.find((part) => part.tool === "read")
   await api(`/session/${chat.id}/message/${orphan.messageID}/part/${orphan.id}`, "PATCH", {
     ...orphan,

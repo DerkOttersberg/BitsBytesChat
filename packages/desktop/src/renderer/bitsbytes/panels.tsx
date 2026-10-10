@@ -10,6 +10,7 @@ import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
 import { TooltipV2 } from "@opencode-ai/ui/v2/tooltip-v2"
 import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
 import { MarkdownPreviewSource, isMarkdownName } from "@opencode-ai/app"
+import { htmlPreviewSandbox, isolatedHTML } from "./html-preview-policy"
 
 export function DocumentPanel(props: { id: string; revision?: number }) {
   const api = window.api.bitsbytes
@@ -64,7 +65,6 @@ export function DocumentPanel(props: { id: string; revision?: number }) {
   })
   const run = (method: string) => api.call(method, { id: props.id, revision: store.revision || undefined, path: store.artifact?.path }).catch(error => setStore("error", bbError(error)))
   const openLabel = () => bbt(store.revision && store.revision !== store.artifact?.revision ? store.artifact?.kind === "document" ? "openCurrentWord" : "openCurrentApp" : store.artifact?.kind === "document" ? "openWord" : "openApp")
-  const isolatedHTML = (text: string) => '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data: blob: https:; font-src data:; connect-src \'none\'; form-action \'none\'; base-uri \'none\';">' + text
   return <div class="bb-document-panel">
     <div class="bb-document-toolbar">
       <div class="bb-document-file-actions">
@@ -81,7 +81,7 @@ export function DocumentPanel(props: { id: string; revision?: number }) {
     <Show when={(store.grid?.columns ?? 0) > 100}><p class="bb-preview-status">{bbt("sheetColumnLimit")}</p></Show>
     <Show when={store.grid?.shortened}><p class="bb-preview-status">{bbt("sheetCellLimit")}</p></Show>
     <Show when={store.artifact?.kind === "html" || store.artifact?.kind === "code"}>
-      <Show when={store.artifact?.kind === "code" && isMarkdownName(store.artifact?.filename ?? "")} fallback={<Show when={store.artifact?.kind === "html" && store.mode === "preview"} fallback={<pre class="bb-artifact-source">{store.text}</pre>}><Show when={store.text} keyed>{text => { const url = URL.createObjectURL(new Blob([isolatedHTML(text)], { type: "text/html" })); onCleanup(() => URL.revokeObjectURL(url)); return <iframe class="bb-html-preview" title={bbt("htmlPreview")} sandbox="allow-scripts" src={url} /> }}</Show></Show>}>
+      <Show when={store.artifact?.kind === "code" && isMarkdownName(store.artifact?.filename ?? "")} fallback={<Show when={store.artifact?.kind === "html" && store.mode === "preview"} fallback={<pre class="bb-artifact-source">{store.text}</pre>}><Show when={store.text} keyed>{text => { const url = URL.createObjectURL(new Blob([isolatedHTML(text)], { type: "text/html" })); onCleanup(() => URL.revokeObjectURL(url)); return <iframe class="bb-html-preview" title={bbt("htmlPreview")} sandbox={htmlPreviewSandbox} src={url} /> }}</Show></Show>}>
         <MarkdownPreviewSource identity={props.id} text={store.text} path={store.artifact?.path} sessionID={store.artifact?.sessionID} artifactID={props.id} revision={store.resourceRevision} resources={store.resources} source={() => <pre class="bb-artifact-source">{store.text}</pre>} />
       </Show>
     </Show>

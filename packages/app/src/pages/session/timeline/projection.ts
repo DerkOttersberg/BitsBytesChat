@@ -3,6 +3,7 @@ import type { AssistantMessage, Message, Part, SessionStatus, UserMessage } from
 import { createMemo, type Accessor } from "solid-js"
 import { reuseTimelineRows } from "./row-reconciliation"
 import { Timeline, TimelineRow } from "./rows"
+import { completedWork } from "./completed-work"
 
 export { reuseTimelineRows } from "./row-reconciliation"
 
@@ -14,6 +15,7 @@ export function createTimelineProjection(input: {
   status: Accessor<SessionStatus>
   showReasoningSummaries: Accessor<boolean>
   inlineComments: Accessor<boolean>
+  expandedWork?: Accessor<Record<string, boolean | undefined>>
 }) {
   const messageByID = createMemo(() => new Map(input.messages().map((message) => [message.id, message] as const)))
   const assistantMessagesByParent = createMemo(() => {
@@ -42,7 +44,19 @@ export function createTimelineProjection(input: {
   )
   const activeMessageID = createMemo(() => projection().activeMessageID)
   const rows = createMemo((previous: TimelineRow.TimelineRow[] | undefined) =>
-    reuseTimelineRows(previous, projection().rows),
+    reuseTimelineRows(
+      previous,
+      input.expandedWork
+        ? completedWork({
+            rows: projection().rows,
+            messages: messageByID(),
+            parts: input.parts,
+            status: input.status().type,
+            activeMessageID: activeMessageID(),
+            expanded: input.expandedWork(),
+          })
+        : projection().rows,
+    ),
   )
   const rowByKey = createMemo(() => new Map(rows().map((row) => [TimelineRow.key(row), row] as const)))
   const messageRowIndex = createMemo(() => {

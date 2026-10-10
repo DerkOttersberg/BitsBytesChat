@@ -16,6 +16,8 @@ export function isImageGenerationTool(part: ToolPart) {
 
 /** Only local tools with known semantics receive product labels. */
 export function toolPresentationKey(tool: string) {
+  if (/^windows-control[_.]PowerShell$/i.test(tool)) return "ui.tool.powershell"
+  if (/^windows-control[_.]FileSystem$/i.test(tool)) return "ui.tool.filesystem"
   const name = tool.startsWith("bitsbytes-local_") ? tool.slice("bitsbytes-local_".length) : tool
   const keys: Record<string, string> = {
     create_artifact: "ui.tool.artifact.create",

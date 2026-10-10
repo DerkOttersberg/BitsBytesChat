@@ -24,6 +24,15 @@ const tool = (
 })
 
 describe("activity presentation", () => {
+  test("known Windows MCP calls join compact command and file activity", () => {
+    expect(activityCategory(tool("windows-control_PowerShell"))).toBe(4)
+    expect(activityCategory(tool("windows-control_FileSystem"))).toBe(16)
+    expect(activitySummary([tool("windows-control_FileSystem")]).key).toBe("ui.activity.summary.files.0")
+    expect(activitySummary([tool("windows-control_FileSystem"), tool("shell"), tool("websearch")]).key).toBe(
+      "ui.activity.summary.files.12",
+    )
+    expect(activityCategory(tool("untrusted_PowerShell"))).toBe(0)
+  })
   test("both engine tool vocabularies share concise truthful summaries", () => {
     expect(activitySummary([tool("read"), tool("edit"), tool("shell")])).toEqual({
       key: "ui.activity.summary.7",

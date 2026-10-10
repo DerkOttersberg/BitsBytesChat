@@ -307,25 +307,6 @@ export function BasicTool(props: BasicToolProps) {
   )
 }
 
-function label(input: Record<string, unknown> | undefined) {
-  const keys = ["description", "query", "url", "filePath", "path", "pattern", "name"]
-  return keys.map((key) => input?.[key]).find((value): value is string => typeof value === "string" && value.length > 0)
-}
-
-function args(input: Record<string, unknown> | undefined) {
-  if (!input) return []
-  const skip = new Set(["description", "query", "url", "filePath", "path", "pattern", "name"])
-  return Object.entries(input)
-    .filter(([key]) => !skip.has(key))
-    .flatMap(([key, value]) => {
-      if (typeof value === "string") return [`${key}=${value}`]
-      if (typeof value === "number") return [`${key}=${value}`]
-      if (typeof value === "boolean") return [`${key}=${value}`]
-      return []
-    })
-    .slice(0, 3)
-}
-
 export function GenericTool(props: {
   tool: string
   status?: string
@@ -344,11 +325,8 @@ export function GenericTool(props: {
       icon="mcp"
       status={props.status}
       trigger={{
-        title: toolPresentationKey(props.tool)
-          ? i18n.t(toolPresentationKey(props.tool)!)
-          : i18n.t("ui.basicTool.called", { tool: props.tool }),
-        subtitle: label(props.input),
-        args: toolPresentationKey(props.tool) ? undefined : args(props.input),
+        title: toolPresentationKey(props.tool) ? i18n.t(toolPresentationKey(props.tool)!) : i18n.t("ui.tool.generic"),
+        subtitle: typeof props.input?.description === "string" ? props.input.description : undefined,
       }}
       hideDetails={props.hideDetails}
       defaultOpen={props.defaultOpen}

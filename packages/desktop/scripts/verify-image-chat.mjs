@@ -7,6 +7,7 @@ import { createRequire } from "node:module"
 import { constants, setPriority } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { captureHidden } from "./qa-capture.mjs"
+import { verifyComposerLayout } from "./qa-composer-layout.mjs"
 
 setPriority(process.pid, constants.priority.PRIORITY_BELOW_NORMAL)
 const root = resolve("../..")
@@ -683,6 +684,8 @@ try {
       await page.emulateMedia({ colorScheme: "dark" })
       await page.waitForFunction(() => document.documentElement.dataset.colorScheme === "dark")
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1.25))
+      await page.waitForTimeout(250)
+      await verifyComposerLayout(main())
       await snapshot("document-dark-125")
       await app.evaluate(({ BrowserWindow }) => {
         const window = BrowserWindow.getAllWindows()[0]
@@ -699,6 +702,7 @@ try {
         return rect.width <= content.width && info.width >= 60 && element.scrollWidth <= element.clientWidth
       })
       assert.equal(fits, true)
+      await verifyComposerLayout(main())
       await snapshot("document-narrow")
       await app.evaluate(({ BrowserWindow }, bounds) => BrowserWindow.getAllWindows()[0].setBounds(bounds), bounds)
     }
@@ -722,6 +726,7 @@ try {
     )
   }
   check("File cards show distinct type icons and labels without revision noise; response actions follow the card, and compact Office actions retain labels, tooltips and revision history")
+  check("Narrow split-view composer controls keep their own pointer targets and text bounds without overlap at 100/125%")
   await page.getByRole("button", { name: "Open panel", exact: true }).last().click()
   await page.getByRole("menuitem", { name: "Side chat", exact: true }).click()
   const side = page.locator(".bb-embedded-chat:visible")

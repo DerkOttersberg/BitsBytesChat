@@ -1,4 +1,8 @@
 export const activityEn = {
+  "ui.activity.summary.files.0": "Worked with files",
+  "ui.activity.summary.files.4": "Worked with files, ran commands",
+  "ui.activity.summary.files.8": "Worked with files, searched the web",
+  "ui.activity.summary.files.12": "Worked with files, ran commands, searched the web",
   "ui.activity.summary.0": "Tool activity",
   "ui.activity.summary.1": "Explored files",
   "ui.activity.summary.2": "Edited files",

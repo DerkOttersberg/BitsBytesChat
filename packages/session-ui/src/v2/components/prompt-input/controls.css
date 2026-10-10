@@ -1,0 +1,17 @@
+[data-component="prompt-input-v2"] [data-slot="prompt-right-controls"] > :not([data-slot="prompt-model-controls"]),
+[data-component="prompt-input-v2"] [data-slot="prompt-model-controls"] > :not(:first-child) {
+  flex-shrink: 0;
+}
+
+[data-component="prompt-input-v2"] [data-slot="prompt-model-controls"] > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+[data-component="prompt-input-v2"]
+  [data-slot="prompt-model-controls"]
+  > :first-child
+  :is([data-component="tooltip-v2-trigger"], button) {
+  min-width: 0;
+  max-width: 100%;
+}

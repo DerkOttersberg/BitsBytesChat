@@ -33,6 +33,7 @@ import { shouldResetCodeTokens, type RenderedCodeState } from "./markdown-code-s
 import { getCachedMarkdown, sanitizeMarkdown, touchCachedMarkdown, type MarkdownCacheEntry } from "./markdown-cache"
 import { inlineCodeKind } from "./markdown-inline-code-kind"
 import { referenceKind } from "./reference-kind"
+import { compactFileReference } from "./compact-file-reference"
 
 type RenderedBlock =
   | (MarkdownCacheEntry & { key: string; mode: Exclude<Block["mode"], "code"> })
@@ -277,11 +278,24 @@ function markInlineCode(root: HTMLDivElement) {
 }
 
 function decorate(root: HTMLDivElement, labels: CopyLabels) {
+  for (const code of root.querySelectorAll<HTMLElement>(":not(pre) > code")) {
+    if (code.closest("a")) continue
+    const reference = compactFileReference(code.textContent ?? "")
+    if (!reference) continue
+    code.dataset.compactFileReference = "true"
+    code.title = reference.path
+    code.setAttribute("aria-label", reference.path)
+    code.textContent = reference.filename
+  }
   for (const link of root.querySelectorAll<HTMLAnchorElement>("a[href]")) {
     const kind = referenceKind(link.getAttribute("href") ?? "")
     if (!kind) continue
     link.dataset.referenceKind = kind
-    if (kind === "file") link.title = link.getAttribute("href") ?? ""
+    if (kind === "file") {
+      link.title = link.getAttribute("href") ?? ""
+      const reference = compactFileReference(link.textContent ?? "")
+      if (reference) link.textContent = reference.filename
+    }
   }
   const blocks = Array.from(root.querySelectorAll("pre"))
   for (const block of blocks) {

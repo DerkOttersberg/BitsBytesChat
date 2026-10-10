@@ -23,6 +23,7 @@ import type {
 } from "./types"
 import type { PromptInputV2Interaction, PromptInputV2SelectControl } from "./interaction"
 import "./attachments.css"
+import "./controls.css"
 
 export type {
   PromptInputV2Attachment,

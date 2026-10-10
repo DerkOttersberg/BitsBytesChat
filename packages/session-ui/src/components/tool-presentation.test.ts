@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import type { ToolPart } from "@opencode-ai/sdk/v2"
-import { isImageGenerationTool } from "./tool-presentation"
+import { isImageGenerationTool, toolPresentationKey } from "./tool-presentation"
 
 const part = (names: string[]): ToolPart => ({
   id: "prt_fixture",
@@ -15,6 +15,11 @@ const part = (names: string[]): ToolPart => ({
     time: { start: 1 },
     metadata: { toolCalls: names.map((tool) => ({ tool, status: "running" })) },
   },
+})
+test("Windows MCP tools have short known labels; unknown tools do not invent semantics", () => {
+  expect(toolPresentationKey("windows-control_PowerShell")).toBe("ui.tool.powershell")
+  expect(toolPresentationKey("windows-control_FileSystem")).toBe("ui.tool.filesystem")
+  expect(toolPresentationKey("custom_delete_all")).toBeUndefined()
 })
 
 test("image-only Code Mode activity is represented by the image card", () => {
