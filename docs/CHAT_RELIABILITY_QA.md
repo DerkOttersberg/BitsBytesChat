@@ -50,12 +50,14 @@ Other accepted checks:
 
 - 331 Bun desktop tests, 12 Node mobile HTTPS tests, one Node SQLite draft check.
 - 103 core permission/session-runner tests; 128 OpenCode permission/Code Mode tests; 41 message tests.
-- 44 app tests; 12 session UI tests; 12 Python document tests; 15 Python audio tests.
+- 44 app tests; 12 session UI tests; two schema diagnostic tests; 12 Python document tests; 15 Python audio tests.
 - Four Office Save copy checks and three actual JPEG/WebP/immutable-artifact pipeline checks.
-- Six package typechecks, production build, MCP syntax and whitespace checks.
+- Seven package typechecks, production build, MCP syntax and whitespace checks.
 - Package hashes match all 1,803 compiled files and 39 runtime files; the tested ASAR matches the installer package.
 
-Total: **672 JavaScript/TypeScript tests and 27 Python tests passed**. Thirty-four optional desktop tests were skipped in the broad run. Some decoder/artifact behavior from that skipped set is separately exercised by the explicit pipeline and UI checks; no claim is made that every skipped case ran.
+Total: **674 JavaScript/TypeScript tests and 27 Python tests passed**. Thirty-four optional desktop tests were skipped in the broad run. Some decoder/artifact behavior from that skipped set is separately exercised by the explicit pipeline and UI checks; no claim is made that every skipped case ran.
+
+The push hook also caught an unbranded session-ID fixture; it now uses the schema's constructor, and its two tests and package typecheck pass. The full inherited monorepo hook remains blocked by the previously documented enterprise declaration symlink, materialized as plain text on Windows (TS1128). The push uses that documented per-command hook bypass. Relevant app checks pass; this is not a claim that the full monorepo typecheck passes.
 
 The initial broad Bun run failed Node-specific mobile hooks and lacked `node:sqlite`. Those checks pass under Node. The first Python audio run used the artifact interpreter, which lacks `httpx`; all 15 audio tests pass under the recording interpreter. Other unsuccessful harness attempts used a stale locator label/scope and a strict Buffer-versus-Uint8Array assertion. Their reports remain in `.tools/qa/results`. UI QA also caught the missing approval Stop control, which was a real product defect and was repaired before the accepted runs.
 
