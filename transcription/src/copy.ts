@@ -1,0 +1,46 @@
+// All product copy, including recoverable errors, has a single source of truth.
+export const copy = {
+  app: "BitsBytes Transcription", brand: "bits & bytes", subtitle: "Transcription",
+  recordings: "Recordings", settings: "Settings", record: "New recording", stop: "Finish recording",
+  import: "Import audio", emptyTitle: "No recordings", emptyBody: "Record or import audio.",
+  recordHint: "Audio is saved on this computer every second.", recording: "Recording", saved: "Saved", transcribing: "Transcribing", complete: "Transcribed", interrupted: "Recovered", error: "Needs attention",
+  transcript: "Transcript", copy: "Copy transcript", copied: "Copied", transcribe: "Transcribe", retry: "Resume transcription", cancel: "Stop transcription",
+  listen: "Listen to recording", pause: "Pause recording",
+  dismiss: "Save and close recorder",
+  noTranscript: "No transcript yet.", savedHint: "Your audio is saved. Transcribe whenever you're ready.",
+  recoveredHint: "This recording was interrupted. Saved audio is available. Resume when you're ready.",
+  processingHint: "Audio is saved. Completed parts are kept as transcription progresses.",
+  recordingHint: "Listening. Keep this computer awake.", export: "Save audio copy", folder: "Open recordings folder", remove: "Delete recording",
+  removeTitle: "Delete this recording?", removeBody: "The saved audio and transcript will be permanently deleted.", keep: "Keep recording", delete: "Delete",
+  model: "Model", language: "Language", languageHint: "Automatic, or a code such as nl or en.",
+  microphone: "Microphone", defaultMic: "System default", key: "OpenRouter API key", keySaved: "Key saved — leave empty to keep it", keyPlaceholder: "sk-or-…",
+  settingsTitle: "Settings", settingsHint: "For new recordings.",
+  privacy: "Transcription sends audio to OpenRouter and uses your credits.",
+  save: "Save settings", done: "Done", storage: "Saved recordings", local: "Saved locally", saving: "Saving audio…", savedSettings: "Settings saved",
+  closeTitle: "Finish recording and close?", closeBody: "Your recording will be saved. You can transcribe it the next time you open the app.", closeFinish: "Save and close", closeKeep: "Keep recording",
+  quitTitle: "Stop transcription and close?", quitBody: "Your audio and completed transcript parts will be kept. An in-flight request may already have been charged. Resume is an explicit retry.", quit: "Stop and close", stay: "Stay open",
+  exportTitle: "Save audio copy", importTitle: "Import audio", audioFiles: "Audio files", audioFile: "Audio", allFiles: "All files",
+  fatalTitle: "The app could not open", fatalBody: "Your saved recordings have not been deleted. Check that your recordings folder is available, then open the app again.",
+  errors: {
+    storage: "Audio could not be saved. Check free disk space and folder access. Recording has stopped; previously saved audio is retained.",
+    invalid: "That action could not be completed. Reopen the recording and try again.",
+    active: "Finish the current recording first.", busy: "Wait for the current audio task to finish, or stop transcription.",
+    key: "Save an OpenRouter API key in Settings before transcribing.", encryption: "Windows could not unlock the API key. Save your key again in Settings.",
+    settings: "Enter a model ID (provider/model) and a two-letter language code, or leave language empty.",
+    microphone: "The microphone could not be opened. Check Windows microphone permission and the selected device.",
+    disconnected: "The microphone disconnected. Audio recorded before the interruption is saved.",
+    backlog: "Audio could not be saved fast enough. Recording stopped to protect the audio already saved.",
+    empty: "This recording has no saved audio yet.",
+    prepare: "The audio could not be prepared. The original audio is retained. Try importing another supported audio file.",
+    unauthorized: "OpenRouter rejected the API key. Update it in Settings.", credits: "OpenRouter credits are exhausted. Add credits, then resume transcription.",
+    quota: "OpenRouter is busy or rate limited. Wait a moment, then resume transcription.",
+    model: "OpenRouter rejected these audio settings. Create a new recording with a supported transcription model.",
+    uncertain: "The request was interrupted. Audio and completed parts are saved. OpenRouter may have processed or charged the current part. Resume explicitly retries it.",
+    response: "OpenRouter returned an invalid response. Audio and completed parts are saved. Resume retries the unfinished part.",
+    provider: "OpenRouter could not transcribe this part. Audio and completed parts are saved. Try Resume later.",
+    recovered: "Audio recovered. Resume transcription when ready.",
+    playback: "Audio playback is unavailable. Use Save audio copy to listen in another app."
+  }
+} as const
+export type ErrorCode = keyof typeof copy.errors
+export class AppError extends Error { constructor(public code: ErrorCode) { super(code) } }

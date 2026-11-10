@@ -1,0 +1,49 @@
+{
+  "name": "bitsbytes-transcription",
+  "productName": "BitsBytes Transcription",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A small, durable recorder and transcription app",
+  "author": "Derk Ottersberg",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "build": "node scripts/build.mjs",
+    "start": "electron .",
+    "package:win": "electron-builder --win nsis --x64 --publish never",
+    "test:desktop": "tsx test/desktop.ts && tsx test/native-recovery.ts"
+  },
+  "dependencies": { "ffmpeg-static": "5.3.0" },
+  "devDependencies": {
+    "@playwright/test": "1.59.1",
+    "@types/node": "24.12.2",
+    "electron": "42.3.3",
+    "electron-builder": "26.15.2",
+    "esbuild": "0.25.12",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  },
+  "build": {
+    "appId": "nl.bitsbytes.transcription",
+    "productName": "BitsBytes Transcription",
+    "artifactName": "BitsBytes-Transcription-${version}-win-${arch}.${ext}",
+    "directories": { "output": "release", "buildResources": "assets" },
+    "files": ["dist/**/*", "assets/**/*", "THIRD-PARTY.md", "LICENSE"],
+    "asarUnpack": ["node_modules/ffmpeg-static/ffmpeg.exe"],
+    "npmRebuild": false,
+    "win": { "target": "nsis", "icon": "assets/icon.ico", "signAndEditExecutable": true },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "createDesktopShortcut": true,
+      "shortcutName": "BitsBytes Transcription",
+      "runAfterFinish": false
+    },
+    "publish": null
+  }
+}

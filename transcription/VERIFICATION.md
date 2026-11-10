@@ -1,0 +1,47 @@
+# Transcription 1.0.0 verification
+
+Validated on Windows 11 x64 on 10 November 2026, using Node 24.16.0,
+Electron 42.3.3 and the bundled FFmpeg 6.1.1 binary.
+
+## Automated checks
+
+- TypeScript strict type checking passed.
+- Ten persistence/transcription tests passed. They exercise acknowledged audio
+  idempotency, altered/gapped writes, stale/corrupted manifests, final partial
+  seconds, independent transcript commits, copied imports, real MP3 encoding,
+  real five-minute segmentation of a 301-second import, provider failures,
+  explicit cancellation, completed-part reuse and confirmed deletion storage.
+- Desktop checks passed against the source build and packaged Windows executable:
+  recording, final flush, WAV playback, missing-key error, force-killing/reopening
+  the actual main process, clipboard, encrypted settings, second-instance focus,
+  saving on Close, repeated reopening and a 780-pixel window.
+- A separate native observer launches the same compiled application without a
+  browser debugger, kills its actual renderer process, and verifies a replacement
+  renderer, the same main process, recovered duration/state and a playable WAV.
+  This observer uses Electron's development preload; the packaged executable is
+  covered by the desktop lifecycle checks above.
+- Installer archive inspection found 197 entries and no chat engine, mobile,
+  Python worker, sidecar or document preview payload. Both fonts, all three masks,
+  upstream CSS/JavaScript and licenses are present.
+- All five Cream and Ink font/texture checksums match upstream assets.json at
+  commit da4036afb1736878413720391d36f4d6ba5bfa65. The vendor files are unmodified.
+- Screenshots were inspected for empty, settings, saved, recovered, transcript,
+  active waveform and narrow-window states. The waveform uses microphone samples;
+  there is no progress/filling meter. Stop and Close both save the recording.
+
+## Practical limits
+
+Tests use generated audio and injected provider responses. No paid OpenRouter
+account or live speech-recognition accuracy is claimed. Requests have bounded
+timeouts, retain audio on errors, and never retry automatically. An uncertain
+in-flight request may already have been processed or charged by the provider.
+
+The installer is unsigned. Capture survives ordinary app interruptions through
+acknowledged one-second disk commits; an abrupt kill can lose the current second
+and any queued uncommitted samples. Hardware/storage failure remains outside that
+guarantee. Windows sleep suspends capture. WAV export uses standard RIFF and is
+bounded at 4 GiB; original PCM chunks remain retained beyond that boundary.
+Five-minute transcription parts do not maintain speaker identity across parts.
+
+The separate app identity is nl.bitsbytes.transcription. Its installer and data
+directory do not replace the original BitsBytesChat installation or recordings.

@@ -1,0 +1,43 @@
+name: Transcription Windows
+on:
+  push:
+    branches: [transcription-only]
+    paths: ["transcription/**", ".github/workflows/transcription.yml", "Build Windows.ps1"]
+  pull_request:
+    paths: ["transcription/**", ".github/workflows/transcription.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: transcription
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: transcription/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: ./scripts/ensure-electron.ps1
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm run test:desktop
+      - run: npm run package:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - run: npm run test:desktop
+        env:
+          BITSBYTES_TEST_EXECUTABLE: ${{ github.workspace }}\transcription\release\win-unpacked\BitsBytes Transcription.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BitsBytes-Transcription-Windows
+          path: |
+            transcription/release/*.exe
+            transcription/test-results/*.png
+          if-no-files-found: error
