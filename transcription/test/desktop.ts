@@ -23,8 +23,24 @@ async function launch() {
   return { electron, page }
 }
 let { electron, page } = await launch()
+async function startNew() {
+  const before = await page.locator(".recording-item").count()
+  await page.getByRole("button", { name: "New recording", exact: true }).click()
+  await expect(page.locator(".ready-clock")).toHaveText("00:00")
+  await expect(page.locator(".dictation-bar")).toHaveCount(0)
+  await expect(page.locator(".recording-item")).toHaveCount(before)
+  await page.screenshot({ path: path.join(captures, "09-ready.png") })
+  await page.getByRole("button", { name: "Start recording", exact: true }).click()
+  await expect(page.locator(".status.recording")).toBeVisible()
+  const reset = await page.locator("canvas.waveform").evaluate((canvas: HTMLCanvasElement) => {
+    const data = canvas.getContext("2d")!.getImageData(0, 0, Math.round(canvas.width * .3), Math.round(canvas.height * .2)).data
+    return data.every((value, index) => index % 4 !== 3 || value === 0)
+  })
+  if (!reset) throw new Error("waveform carried audio from the previous recording")
+}
 await page.screenshot({ path: path.join(captures, "01-empty.png") })
 await expect(page.getByText("No recordings", { exact: true })).toBeVisible()
+await expect(page.locator(".brand, .brand-name, .brand-subtitle")).toHaveCount(0)
 await expect(page.locator("main > .ci-decoration")).toHaveCount(1)
 await expect(page.locator("body")).toHaveCSS("font-synthesis", "none")
 await page.getByRole("button", { name: "Settings", exact: true }).click()
@@ -32,7 +48,7 @@ await page.locator("#language").fill("nl")
 await page.getByRole("button", { name: "Save settings", exact: true }).click()
 await expect(page.locator("#toast")).toHaveText("Settings saved")
 await page.screenshot({ path: path.join(captures, "02-settings.png") })
-await page.getByRole("button", { name: "New recording", exact: true }).click()
+await startNew()
 await expect(page.locator(".status.recording")).toBeVisible({ timeout: 15000 })
 await expect(page.locator("meter, .ci-progress")).toHaveCount(0)
 await expect(page.locator(".dictation-bar canvas")).toBeVisible()
@@ -50,7 +66,7 @@ await page.getByRole("button", { name: "Resume transcription", exact: true }).cl
 await expect(page.locator("#toast")).toContainText("Save an OpenRouter API key")
 await page.screenshot({ path: path.join(captures, "03-saved.png") })
 // Force-kill our owned process while capture is active; reopen must recover the PCM.
-await page.getByRole("button", { name: "New recording", exact: true }).click()
+await startNew()
 await expect(page.locator(".status.recording")).toBeVisible()
 await expect.poll(async () => { const reply = await page.evaluate(() => window.api.snapshot()); return reply.ok ? reply.value.recordings[0]?.duration : 0 }).toBeGreaterThanOrEqual(2)
 const mainPid = await electron.evaluate(() => process.pid)
@@ -79,7 +95,7 @@ await expect(page.locator("#toast")).toHaveText("Settings saved")
 const settingsSource = await readFile(path.join(root, "data", "settings.json"), "utf8")
 if (settingsSource.includes("synthetic-test-key-do-not-use")) throw new Error("plaintext credential")
 // Close during capture: inject only the native dialog answer, exercise real flush/shutdown.
-await page.getByRole("button", { name: "New recording", exact: true }).click()
+await startNew()
 await expect(page.locator(".status.recording")).toBeVisible()
 await expect.poll(async () => { const reply = await page.evaluate(() => window.api.snapshot()); return reply.ok ? reply.value.recordings[0]?.duration : 0 }).toBeGreaterThanOrEqual(1)
 // A second launch focuses the current owner rather than starting another recorder.

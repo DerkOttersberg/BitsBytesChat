@@ -15,10 +15,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, .transcript-tex
 .ci .subtle:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 4px; }
 .icon { display: inline-flex; width: 18px; height: 18px; flex-shrink: 0; }
 .icon svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-aside { display: flex; flex-direction: column; padding: 30px 16px 12px; min-height: 0; }
-.brand { padding: 0 11px 29px; }
-.brand-name { font-size: 29px; font-weight: 700; letter-spacing: -.7px; }
-.brand-subtitle { font-size: 13px; color: var(--ci-muted); margin-top: 3px; }
+aside { display: flex; flex-direction: column; padding: 20px 16px 12px; min-height: 0; }
 .new-record-actions { display: flex; gap: 6px; }
 .ci .new-record-actions > .primary { flex: 1; min-width: 0; padding: 10px; font-size: 16px; }
 .ci .speaker-toggle { flex: 0 0 44px; width: 44px; height: 44px; padding: 0; }
@@ -52,7 +49,13 @@ main { min-width: 0; min-height: 0; display: flex; flex-direction: column; overf
 .status.complete .dot { background: var(--ci-mint); }
 .status.transcribing .dot, .dot.transcribing { background: var(--ci-gold); animation: pulse 1.7s infinite; }
 .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-bottom: 22px; border-bottom: 1px solid #17151225; }
-.toolbar > .subtle { margin-left: auto; font-size: 14px; }
+.cost-summary { margin-left: auto; color: #746d61; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.transcription-progress { display: flex; align-items: center; gap: 10px; margin-top: 20px; min-height: 32px; padding: 8px 12px; background: var(--ci-oat); font-size: 14px; }
+.spinner { width: 13px; height: 13px; border: 2px solid #17151225; border-top-color: var(--ci-ink); border-radius: 50%; animation: spin .9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.ready-screen { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px; padding-bottom: 60px; }
+.ready-clock { font-size: 64px; color: #8b857c; font-variant-numeric: tabular-nums; font-weight: 400; }
+.ready-screen .cost-summary { margin-left: 0; }
 .ci .toolbar .secondary { --ci-fill-rgb: 238,233,222; --ci-edge-color: #a99a7f; }
 .notice { font-size: 14px; line-height: 1.5; background: var(--ci-oat); border-left: 3px solid var(--ci-gold); padding: 12px 15px; margin-top: 20px; }
 .transcript { padding: 28px 0; flex: 1; }
@@ -60,6 +63,7 @@ main { min-width: 0; min-height: 0; display: flex; flex-direction: column; overf
 .transcript-placeholder { font-size: 16px; color: var(--ci-muted); }
 .recording-footer { display: flex; justify-content: flex-end; align-items: center; padding-top: 7px; border-top: 1px solid #17151220; }
 .ci .recording-footer button { width: 44px; height: 44px; padding: 0; }
+.ci .recording-footer .save-audio { width: auto; padding: 0 12px; font-size: 14px; }
 .ci .danger:hover:not(:disabled) { color: var(--ci-danger); }
 .empty { margin: auto; text-align: center; max-width: 405px; padding-bottom: 24px; }
 .empty-wave { display: flex; gap: 5px; align-items: center; justify-content: center; height: 82px; margin-bottom: 28px; }
@@ -79,9 +83,9 @@ main { min-width: 0; min-height: 0; display: flex; flex-direction: column; overf
 .ci .privacy { font-size: 13px; color: #6b655c; line-height: 1.5; margin: 26px 0 20px; }
 .storage { max-width: 540px; margin-top: 25px; padding-top: 14px; border-top: 1px solid #17151225; }
 .ci .storage button { padding-left: 0; font-size: 14px; }
-.playback { padding-top: 18px; }
+.playback { min-width: 0; }
 .ci .playback button { font-size: 14px; padding-left: 0; }
-.playback audio { width: 100%; height: 36px; max-width: 540px; }
+.playback audio { width: 230px; height: 36px; max-width: 100%; }
 .dictation-bar { position: fixed; z-index: 4; left: calc(50% + var(--sidebar-width) / 2); bottom: 28px; transform: translateX(-50%); display: flex; align-items: center; gap: 3px; height: 46px; padding: 1px 5px 1px 11px; background: #282623; color: var(--ci-cream); border: 1px solid #47433d; box-shadow: 0 5px 20px #17151225; }
 .waveform { display: block; width: 116px; height: 28px; margin-right: 5px; }
 .ci .dictation-bar button { width: 40px; height: 42px; padding: 0; cursor: pointer; background: transparent; color: #c2bcb1; }

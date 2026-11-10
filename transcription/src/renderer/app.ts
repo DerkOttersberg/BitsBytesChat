@@ -7,7 +7,7 @@ import { speakerName, supportsSpeakers } from "../speakers.js"
 const root = document.querySelector<HTMLDivElement>("#app")!
 let snapshot: Snapshot
 let selected: string | undefined
-let view: "recordings" | "settings" = "recordings"
+let view: "recordings" | "settings" | "ready" = "recordings"
 let starting = false
 let refreshing = false
 let refreshAgain = false
@@ -23,6 +23,8 @@ const recorder = new Recorder(peak => waveform.update(peak), seconds => {
   if (detail) detail.textContent = `${duration(seconds)} · ${copy.recording}`
   const status = document.querySelector(".status.recording .status-text")
   if (status) status.textContent = `${copy.recording} · ${duration(seconds)}`
+  const cost = document.querySelector<HTMLElement>(`.cost-summary[data-recording-id="${row.id}"]`)
+  if (cost) { const info = costInfo(row); cost.textContent = info.text; cost.title = info.title }
 }, showError)
 
 const icons = {
@@ -83,6 +85,27 @@ function renderDictation() {
   bar.append(canvas, stop, close); root.append(bar); waveform.attach(canvas)
 }
 function duration(seconds: number) { const value = Math.floor(seconds); return `${Math.floor(value / 60).toString().padStart(2, "0")}:${(value % 60).toString().padStart(2, "0")}` }
+function money(value: number) {
+  return value > 0 && value < .0001 ? "<$0.0001" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(value)
+}
+function costInfo(row?: Recording) {
+  if (row?.costUSD !== undefined) return { text: `${row.status === "complete" && row.costComplete ? money(row.costUSD) : copy.costSoFar.replace("{amount}", money(row.costUSD))} USD`, title: copy.costReported }
+  const rate = snapshot.rates[row?.preferences.model ?? snapshot.settings.model]
+  if (rate && row?.status !== "complete") return { text: row && row.duration > 0 ? `≈ ${money(row.duration * rate.perSecond)} USD` : `≈ ${money(rate.perSecond * 60)}/min`, title: copy.costEstimate }
+  return { text: row ? copy.costUnavailable : copy.costAfter, title: copy.costReported }
+}
+function costBadge(row?: Recording) {
+  const info = costInfo(row)
+  const node = el("span", "cost-summary", info.text); node.title = info.title; node.setAttribute("aria-label", `${copy.cost}: ${info.text}`)
+  if (row) node.dataset.recordingId = row.id
+  return node
+}
+async function startRecording() {
+  document.querySelector<HTMLDivElement>("#toast")!.className = ""
+  waveform.reset(); starting = true; render()
+  try { selected = await recorder.start(snapshot.settings.microphone); view = "recordings" }
+  finally { starting = false; await refresh() }
+}
 function toast(text: string, error = false) {
   const node = document.querySelector<HTMLDivElement>("#toast")!
   node.textContent = text; node.className = error ? "visible error" : "visible"
@@ -96,7 +119,7 @@ async function refresh() {
     do {
       refreshAgain = false
       snapshot = unwrap(await window.api.snapshot())
-      if (!selected || !snapshot.recordings.some(row => row.id === selected)) selected = snapshot.activeId || snapshot.recordings[0]?.id
+      if (view !== "ready" && (!selected || !snapshot.recordings.some(row => row.id === selected))) selected = snapshot.activeId || snapshot.recordings[0]?.id
       // Never replace a settings draft while capture progress updates arrive.
       if (view !== "settings" || !settingsDirty) render()
       else renderSidebar()
@@ -108,11 +131,9 @@ function renderSidebar() {
   if (existing) window.CreamInk.unmount(existing)
   const aside = el("aside")
   aside.dataset.ciSurface = "header"
-  const brand = el("div", "brand"); brand.append(el("div", "brand-name", copy.brand), el("div", "brand-subtitle", copy.subtitle)); aside.append(brand)
-  const record = button(copy.record, async () => {
+  const record = button(copy.record, () => {
     document.querySelector<HTMLDivElement>("#toast")!.className = ""
-    starting = true; view = "recordings"; render()
-    try { selected = await recorder.start(snapshot.settings.microphone) } finally { starting = false; await refresh() }
+    selected = undefined; view = "ready"; settingsDirty = false; waveform.reset(); render()
   }, "primary", "plus")
   record.disabled = starting || !!snapshot.busyId || !!snapshot.activeId
   const actions = el("div", "new-record-actions")
@@ -153,6 +174,14 @@ function render() {
   main.dataset.ciSurface = "paper"
   renderDictation()
   if (view === "settings") { renderSettings(main); window.CreamInk.mount(main); return }
+  if (view === "ready") {
+    const header = el("header", "recording-header"); header.dataset.ciSurface = "header"
+    header.append(el("h1", "", copy.record), el("span", "status ready", copy.ready))
+    const ready = el("section", "ready-screen")
+    const start = button(copy.start, startRecording, "primary", "mic"); start.disabled = starting || !!snapshot.activeId || !!snapshot.busyId
+    ready.append(el("div", "ready-clock", "00:00"), start, costBadge())
+    main.append(header, ready); window.CreamInk.mount(main); return
+  }
   const row = snapshot.recordings.find(value => value.id === selected)
   if (!row) {
     const empty = el("div", "empty"); const illustration = el("div", "empty-wave")
@@ -175,12 +204,6 @@ function render() {
   const copyButton = button(copy.copy, async () => { unwrap(await window.api.copy(row.id)); toast(copy.copied) }, "secondary", "copy")
   copyButton.disabled = !row.transcript
   if (row.transcript) toolbar.append(copyButton)
-  if (row.status !== "recording") {
-    const exportButton = button(copy.export, async () => { unwrap(await window.api.exportAudio(row.id)) }, "subtle", "import")
-    exportButton.disabled = !!snapshot.activeId || !!snapshot.busyId
-    toolbar.append(exportButton)
-  }
-  if (toolbar.childElementCount) main.append(toolbar)
   if (row.status !== "recording" && row.duration > 0) {
     const playback = el("div", "playback")
     const play = button(copy.listen, async () => {
@@ -195,7 +218,15 @@ function render() {
     }, "subtle", "audio")
     play.disabled = !!snapshot.activeId
     if (playerId === row.id && player) playback.append(player); else playback.append(play)
-    main.append(playback)
+    toolbar.prepend(playback)
+  }
+  toolbar.append(costBadge(row)); main.append(toolbar)
+  if (row.status === "transcribing" && row.progress) {
+    const processing = el("div", "transcription-progress")
+    processing.setAttribute("role", "status"); processing.setAttribute("aria-live", "polite")
+    const label = row.progress.stage === "preparing" ? copy.preparing : row.progress.stage === "saving" ? copy.savingTranscript : copy.transcribingPart.replace("{current}", String(Math.min(row.progress.completed + 1, row.progress.total ?? 1))).replace("{total}", String(row.progress.total ?? 1))
+    const spinner = el("span", "spinner"); spinner.setAttribute("aria-hidden", "true")
+    processing.append(spinner, el("span", "", label)); main.append(processing)
   }
   if (row.error && row.error in copy.errors) main.append(el("div", "notice", copy.errors[row.error as keyof typeof copy.errors]))
   const body = el("section", "transcript")
@@ -213,9 +244,11 @@ function render() {
   }
   main.append(body)
   const footer = el("footer", "recording-footer")
+  const save = button(copy.export, async () => { unwrap(await window.api.exportAudio(row.id)) }, "subtle save-audio")
+  save.disabled = !!snapshot.activeId || !!snapshot.busyId
   const remove = iconButton(copy.remove, async () => { unwrap(await window.api.remove(row.id)); await refresh() }, "subtle danger", "trash")
   remove.disabled = !!snapshot.activeId || !!snapshot.busyId
-  footer.append(remove); if (row.status !== "recording") main.append(footer)
+  footer.append(save, remove); if (row.status !== "recording") main.append(footer)
   window.CreamInk.mount(main)
 }
 function renderSettings(main: HTMLElement) {
@@ -258,7 +291,7 @@ function renderSettings(main: HTMLElement) {
     event.preventDefault(); submit.disabled = true
     const data = new FormData(form)
     void window.api.saveSettings({ key: String(data.get("key")), model: String(data.get("model")), language: String(data.get("language")), microphone: String(data.get("microphone")), speakers: separate }).then(reply => {
-      unwrap(reply); settingsDirty = false; toast(copy.savedSettings); return refresh()
+      unwrap(reply); settingsDirty = false; if (view === "settings") toast(copy.savedSettings); return refresh()
     }).catch(showError).finally(() => { submit.disabled = false })
   })
   main.append(form)

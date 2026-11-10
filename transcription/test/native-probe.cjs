@@ -9,11 +9,17 @@ app.on("web-contents-created", (_event, contents) => {
     const report = { loads: index, mainPid: process.pid, rendererPid: contents.getOSProcessId() }
     try {
       const state = await contents.executeJavaScript(`new Promise((resolve,reject)=>{
+        let started=false
         const timeout=setTimeout(()=>reject(new Error('UI did not recover')),10000)
         const interval=setInterval(async()=>{
           if(!document.querySelector('aside'))return
-          if(${index}===1)document.querySelector('.new-record-actions > button').click()
+          if(${index}===1&&!started){
+            document.querySelector('.new-record-actions > button').click()
+            document.querySelector('.ready-screen .primary').click()
+            started=true
+          }
           const reply=await window.api.snapshot()
+          if(${index}===1&&(!reply.ok||!reply.value.activeId||reply.value.activeId==='starting'))return
           clearInterval(interval);clearTimeout(timeout);resolve(reply)
         },40)
       })`)

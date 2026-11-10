@@ -69,14 +69,17 @@ test("real FFmpeg preparation saves MP3; valid responses commit before completio
     const body = JSON.parse(String(options?.body))
     assert.equal(body.language, "nl"); assert.equal(body.input_audio.format, "mp3")
     assert.ok(Buffer.from(body.input_audio.data, "base64").length > 1000)
-    return Response.json({ text: "This is the saved transcript." })
+    return Response.json({ text: "This is the saved transcript.", usage: { cost: .0012 } })
   }
-  const transcriber = new Transcriber(library, () => {}, request)
+  const stages: (string | undefined)[] = []
+  const transcriber = new Transcriber(library, () => { stages.push(row.progress?.stage) }, request)
   await transcriber.transcribe(row.id, "test-only")
   assert.equal(row.status, "complete"); assert.equal(requests, 1)
+  assert.ok(stages.includes("preparing") && stages.includes("transcribing") && stages.includes("saving"))
+  assert.equal(row.progress, undefined); assert.equal(row.costUSD, .0012)
   assert.equal(await readFile(path.join(library.directory(row.id), "transcript.txt"), "utf8"), "This is the saved transcript.")
   assert.ok((await readFile(path.join(library.directory(row.id), "audio.mp3"))).length > 1000)
-  await transcriber.transcribe(row.id, "test-only"); assert.equal(requests, 1)
+  await transcriber.transcribe(row.id, "test-only"); assert.equal(requests, 1); assert.equal(row.costUSD, .0012)
 })
 test("resume retries only unfinished parts after provider failure and restart", async t => {
   const library = await setup(t); const row = await library.create(preferences); row.status = "saved"

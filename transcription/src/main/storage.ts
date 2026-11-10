@@ -47,18 +47,21 @@ export class Library {
       const imported = (await readdir(directory)).find(file => /^original\.[a-z0-9]+$/.test(file))
       if (imported) row.source = imported
       if (row.source === "importing") { row.status = "error"; row.error = "prepare" }
-      row.transcript = ""; row.completedParts = 0; row.turns = []
+      row.transcript = ""; row.completedParts = 0; row.turns = []; delete row.progress; delete row.costUSD; row.costComplete = true
       // Per-part transcript files are the commit record. Never trust an outdated manifest count.
       for (let index = 0; ; index++) {
-        const part = await readJSON<{ text: string; turns?: SpeakerTurn[]; preferences?: Preferences }>(path.join(directory, `part-${String(index).padStart(6, "0")}.json`))
+        const part = await readJSON<{ text: string; turns?: SpeakerTurn[]; preferences?: Preferences; costUSD?: number }>(path.join(directory, `part-${String(index).padStart(6, "0")}.json`))
         if (!part || typeof part.text !== "string") break
         row.transcript += (row.completedParts ? "\n\n" : "") + part.text
         row.completedParts++
+        if (typeof part.costUSD === "number" && Number.isFinite(part.costUSD) && part.costUSD >= 0) row.costUSD = (row.costUSD ?? 0) + part.costUSD
+        else row.costComplete = false
         if (Array.isArray(part.turns)) {
           row.turns.push(...part.turns)
           if (part.preferences && typeof part.preferences.model === "string") row.preferences = { ...part.preferences, speakers: true }
         }
       }
+      if (!row.completedParts) row.costComplete = false
       const chunks = (await readdir(directory)).filter(file => /^\d{8}\.pcm$/.test(file)).sort()
       let bytes = 0
       for (const [index, file] of chunks.entries()) {
@@ -108,11 +111,14 @@ export class Library {
     row.duration += data.length / 2 / row.rate
     return row.duration
   }
-  async savePart(id: string, index: number, text: string, turns?: SpeakerTurn[]) {
+  async savePart(id: string, index: number, text: string, turns?: SpeakerTurn[], costUSD?: number) {
     const row = this.get(id)
     if (index !== row.completedParts) throw new AppError("invalid")
-    await atomicWrite(path.join(this.directory(id), `part-${String(index).padStart(6, "0")}.json`), JSON.stringify({ text, ...(turns ? { turns, preferences: row.preferences } : {}) }))
+    const cost = typeof costUSD === "number" && Number.isFinite(costUSD) && costUSD >= 0 ? costUSD : undefined
+    await atomicWrite(path.join(this.directory(id), `part-${String(index).padStart(6, "0")}.json`), JSON.stringify({ text, ...(turns ? { turns, preferences: row.preferences } : {}), ...(cost !== undefined ? { costUSD: cost } : {}) }))
     row.transcript += (row.completedParts ? "\n\n" : "") + text
+    row.costComplete = (row.completedParts === 0 || row.costComplete === true) && cost !== undefined
+    if (cost !== undefined) row.costUSD = (row.costUSD ?? 0) + cost
     row.completedParts++
     if (turns) row.turns = [...(row.turns ?? []), ...turns]
     await atomicWrite(path.join(this.directory(id), "transcript.txt"), row.transcript)

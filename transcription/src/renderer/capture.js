@@ -4,6 +4,8 @@ class DurableCapture extends AudioWorkletProcessor {
     this.samples = new Int16Array(sampleRate)
     this.used = 0
     this.stopped = false
+    this.energy = 0
+    this.count = 0
     this.port.onmessage = event => {
       if (event.data === "stop") {
         this.stopped = true
@@ -22,14 +24,17 @@ class DurableCapture extends AudioWorkletProcessor {
     if (this.stopped) return false
     const input = inputs[0]?.[0]
     if (!input) return true
-    let peak = 0
     for (const value of input) {
       const sample = Math.max(-1, Math.min(1, value))
-      peak = Math.max(peak, Math.abs(sample))
+      this.energy += sample * sample
+      this.count++
       this.samples[this.used++] = Math.round(sample * (sample < 0 ? 32768 : 32767))
       if (this.used === this.samples.length) this.flush()
     }
-    if (currentFrame % 1024 === 0) this.port.postMessage({ peak })
+    if (this.count >= 1024) {
+      this.port.postMessage({ peak: Math.sqrt(this.energy / this.count) })
+      this.energy = 0; this.count = 0
+    }
     return true
   }
 }

@@ -61,11 +61,13 @@ export class Transcriber {
     this.controller = new AbortController()
     const signal = this.controller.signal
     row.status = "transcribing"; row.error = ""
+    row.progress = { stage: "preparing", completed: row.completedParts }
     await this.library.save(row); this.changed()
     try {
       if (row.preferences.speakers && !supportsSpeakers(row.preferences.model)) throw new AppError("speakerModel")
       const prepared = await this.prepare(id, signal)
       for (let index = row.completedParts; index < prepared.parts.length; index++) {
+        row.progress = { stage: "transcribing", completed: index, total: prepared.parts.length }; this.changed()
         if (signal.aborted) throw new AppError("uncertain")
         const file = path.join(this.library.directory(id), prepared.parts[index])
         if ((await stat(file)).size > 24_000_000) throw new AppError(row.preferences.speakers ? "speakerLimit" : "prepare")
@@ -99,7 +101,10 @@ export class Transcriber {
         if (!result || typeof result !== "object" || !("text" in result) || typeof result.text !== "string") throw new AppError("response")
         // Commit valid responses even if Close arrives after the response. Never discard paid work.
         const turns = row.preferences.speakers ? parseSpeakers(result as Record<string, unknown>, prepared.duration) : undefined
-        await this.library.savePart(id, index, turns ? speakerTranscript(turns) : result.text.trim(), turns)
+        const usage = "usage" in result && result.usage && typeof result.usage === "object" ? result.usage as Record<string, unknown> : undefined
+        const cost = usage && (typeof usage.cost === "number" || typeof usage.cost === "string") && String(usage.cost).trim() ? Number(usage.cost) : undefined
+        row.progress = { stage: "saving", completed: index, total: prepared.parts.length }; this.changed()
+        await this.library.savePart(id, index, turns ? speakerTranscript(turns) : result.text.trim(), turns, cost)
         this.changed()
       }
       row.status = "complete"; row.error = ""
@@ -107,6 +112,7 @@ export class Transcriber {
       row.status = "error"; row.error = error instanceof AppError ? error.code : "storage"
     } finally {
       this.controller = undefined
+      delete row.progress
       await this.library.save(row); this.changed()
     }
   }

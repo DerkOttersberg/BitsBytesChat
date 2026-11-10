@@ -2,8 +2,9 @@
 export class Waveform {
   private samples = Array<number>(26).fill(0)
   private canvas?: HTMLCanvasElement
+  reset() { this.samples.fill(0); this.draw() }
   update(peak: number) {
-    this.samples.push(Math.min(1, Math.sqrt(Math.max(0, peak)) * 1.8))
+    this.samples.push(Number.isFinite(peak) ? Math.min(1, Math.sqrt(Math.max(0, peak - 0.006) / 0.18)) : 0)
     this.samples.shift()
     this.draw()
   }

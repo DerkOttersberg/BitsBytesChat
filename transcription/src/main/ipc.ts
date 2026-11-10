@@ -7,6 +7,7 @@ import type { Preferences, Recording, Settings, Snapshot } from "../shared.js"
 import { atomicWrite, Library, readJSON } from "./storage.js"
 import { Transcriber } from "./transcriber.js"
 import { supportsSpeakers } from "../speakers.js"
+import { Pricing } from "./pricing.js"
 
 type StoredSettings = Preferences & { encryptedKey?: string }
 const defaults: StoredSettings = { model: "elevenlabs/scribe-v2", language: "", microphone: "", speakers: false }
@@ -14,6 +15,7 @@ const defaults: StoredSettings = { model: "elevenlabs/scribe-v2", language: "", 
 export class Application {
   library: Library
   transcriber: Transcriber
+  pricing: Pricing
   activeId?: string
   busyId?: string
   willClose = false
@@ -25,21 +27,24 @@ export class Application {
   private appending: Promise<unknown> = Promise.resolve()
   private fileTask = false
   audioFiles = new Map<string, string>()
-  constructor(public root: string, private window: BrowserWindow, private version: string, request: typeof fetch = fetch) {
+  constructor(public root: string, private window: BrowserWindow, private version: string, request: typeof fetch = fetch, catalog: typeof fetch = fetch) {
     this.library = new Library(root)
     this.transcriber = new Transcriber(this.library, () => this.changed(), request)
+    this.pricing = new Pricing(root, catalog)
   }
   async initialize() {
     await mkdir(this.root, { recursive: true })
     const settings = await readJSON<StoredSettings>(path.join(this.root, "settings.json")) ?? await readJSON<StoredSettings>(path.join(this.root, "settings.backup.json"))
     if (settings && typeof settings.model === "string" && typeof settings.language === "string" && typeof settings.microphone === "string") this.settings = { ...settings, speakers: settings.speakers === true && supportsSpeakers(settings.model) }
     await this.library.initialize()
+    await this.pricing.initialize()
+    void this.pricing.refresh().then(() => this.changed()).catch(() => undefined)
   }
   changed() {
     if (!this.window.isDestroyed() && !this.window.webContents.isDestroyed() && !this.window.webContents.isCrashed()) this.window.webContents.send("changed")
   }
   snapshot(): Snapshot {
-    return { recordings: [...this.library.records.values()].sort((a, b) => b.created.localeCompare(a.created)).map(row => ({ ...row })), settings: { model: this.settings.model, language: this.settings.language, microphone: this.settings.microphone, speakers: this.settings.speakers, hasKey: !!this.settings.encryptedKey, storagePath: path.join(this.root, "recordings") }, activeId: this.activeId, busyId: this.busyId, version: this.version }
+    return { recordings: [...this.library.records.values()].sort((a, b) => b.created.localeCompare(a.created)).map(row => ({ ...row })), settings: { model: this.settings.model, language: this.settings.language, microphone: this.settings.microphone, speakers: this.settings.speakers, hasKey: !!this.settings.encryptedKey, storagePath: path.join(this.root, "recordings") }, activeId: this.activeId, busyId: this.busyId, version: this.version, rates: this.pricing.rates }
   }
   private idle() {
     if (this.activeId) throw new AppError("active")

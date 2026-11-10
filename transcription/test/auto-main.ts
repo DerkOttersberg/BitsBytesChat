@@ -18,16 +18,18 @@ app.whenReady().then(async () => {
     const history = JSON.parse(await readFile(path.join(root, "requests.json"), "utf8").catch(() => "[]")) as unknown[]
     history.push({ saved, model: payload.model, response_format: payload.response_format, diarize: payload.provider?.options?.elevenlabs?.diarize === true })
     await writeFile(path.join(root, "requests.json"), JSON.stringify(history))
+    await new Promise(resolve => setTimeout(resolve, 1000))
     return Response.json(payload.provider?.options?.elevenlabs?.diarize ? {
       text: "Hello there. Hi. Again.", words: [
         { word: "Hello", start: 0, end: .2, speaker: 0 },
         { word: "there.", start: .2, end: .5, speaker: 0 },
         { word: "Hi.", start: .6, end: 1, speaker: 1 },
         { word: "Again.", start: 1.1, end: 1.5, speaker: 0 }
-      ]
-    } : { text: "Automatically transcribed after the audio was saved." })
+      ], usage: { cost: 0.0012 }
+    } : { text: "Automatically transcribed after the audio was saved.", usage: { cost: 0.0007 } })
   }
-  const service = new Application(root, window, "1.1.0", request)
+  const catalog: typeof fetch = async () => Response.json({ data: [{ id: "elevenlabs/scribe-v2", pricing: { prompt: "0.0000611111111111" } }, { id: "elevenlabs/scribe-v2-medical", pricing: { prompt: "0.0000611111111111" } }] })
+  const service = new Application(root, window, "1.2.0", request, catalog)
   await service.initialize(); service.register()
   await window.loadFile(path.resolve("dist/renderer/index.html"))
 })

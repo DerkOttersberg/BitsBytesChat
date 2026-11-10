@@ -1,4 +1,4 @@
-# Transcription 1.1.0 verification
+# Transcription 1.2.0 verification
 
 Validated on Windows 11 x64 on 10 November 2026, using Node 24.16.0,
 Electron 42.3.3 and the bundled FFmpeg 6.1.1 binary.
@@ -6,11 +6,14 @@ Electron 42.3.3 and the bundled FFmpeg 6.1.1 binary.
 ## Automated checks
 
 - TypeScript strict type checking passed.
-- Fifteen persistence/transcription tests passed. They exercise acknowledged audio
+- Eighteen persistence/transcription/pricing tests passed. They exercise acknowledged audio
   idempotency, altered/gapped writes, stale/corrupted manifests, final partial
   seconds, independent transcript commits, copied imports, real MP3 encoding,
   real five-minute segmentation of a 301-second import, provider failures,
   explicit cancellation, completed-part reuse and confirmed deletion storage.
+- Cost tests cover committed per-part usage, reconstruction without double-counting,
+  unknown historical fees, reported zero, cached live Scribe rates and rejection of
+  token/hour models as per-second estimates. Preparation/request/save progress is checked.
 - Speaker tests cover word/segment parsing, punctuation, unknown speakers, rejected
   invalid timestamps/missing labels, a single 301-second diarization request,
   speaker identity beyond five minutes, response persistence, no reupload on
@@ -24,6 +27,9 @@ Electron 42.3.3 and the bundled FFmpeg 6.1.1 binary.
   recording, final flush, WAV playback, missing-key error, force-killing/reopening
   the actual main process, clipboard, encrypted settings, second-instance focus,
   saving on Close, repeated reopening and a 780-pixel window.
+- New recording is verified to show 00:00 without creating a recording or opening
+  the capture UI. Start is explicit. Successive sessions verify a cleared waveform
+  canvas before new microphone history fills it. Branding removal is checked.
 - The NSIS installer was silently installed into an isolated test directory. The
   installed executable passed the same desktop lifecycle checks, and the test
   installation was successfully uninstalled afterwards.
@@ -32,13 +38,13 @@ Electron 42.3.3 and the bundled FFmpeg 6.1.1 binary.
   renderer, the same main process, recovered duration/state and a playable WAV.
   This observer uses Electron's development preload; the packaged executable is
   covered by the desktop lifecycle checks above.
-- Installer archive inspection found 197 entries and no chat engine, mobile,
+- Installer archive inspection found no chat engine, mobile,
   Python worker, sidecar or document preview payload. Both fonts, all three masks,
   upstream CSS/JavaScript and licenses are present.
 - All five Cream and Ink font/texture checksums match upstream assets.json at
   commit da4036afb1736878413720391d36f4d6ba5bfa65. The vendor files are unmodified.
 - Screenshots were inspected for empty, settings, saved, recovered, transcript,
-  active waveform and narrow-window states. The waveform uses microphone samples;
+  ready screen, busy/cost display, active waveform and narrow-window states. The waveform uses microphone samples;
   there is no progress/filling meter. Stop and Close both save the recording.
 
 ## Practical limits
@@ -62,3 +68,8 @@ has not run remotely. The checks above were performed locally on Windows.
 
 The separate app identity is nl.bitsbytes.transcription. Its installer and data
 directory do not replace the original BitsBytesChat installation or recordings.
+
+The distribution target is Windows 10/11 x64, with Windows 11 x64 validated locally.
+No clean Windows 10/ARM/microphone-driver matrix has been run, so universal PC
+compatibility is not claimed. Runtime/capture/FFmpeg/fonts are bundled. OpenRouter
+connectivity, credentials, credits and Windows microphone permission are required.

@@ -16,8 +16,11 @@ export class Recorder {
   private finishing?: Promise<void>
   private failure?: string
   private flushed?: () => void
+  private generation = 0
   constructor(private level: (peak: number) => void, private changed: (duration?: number) => void, private failed: (error: unknown) => void) {}
   async start(microphone: string) {
+    const generation = ++this.generation
+    this.level(0)
     this.sequence = 0; this.pending = 0; this.failure = undefined; this.finishing = undefined; this.queue = Promise.resolve()
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: { ...(microphone ? { deviceId: { exact: microphone } } : {}), channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
@@ -28,6 +31,7 @@ export class Recorder {
       const row = unwrap(await window.api.start())
       this.id = row.id
       this.worklet.port.onmessage = event => {
+        if (generation !== this.generation) return
         if (event.data.stopped) { this.flushed?.(); return }
         if (typeof event.data.peak === "number") { this.level(event.data.peak); return }
         if (!(event.data.pcm instanceof ArrayBuffer) || this.failure) return
