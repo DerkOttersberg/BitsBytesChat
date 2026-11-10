@@ -6,9 +6,10 @@ const api: API = {
   finish: (id, error) => ipcRenderer.invoke("finish", id, error), transcribe: id => ipcRenderer.invoke("transcribe", id),
   cancel: () => ipcRenderer.invoke("cancel"), importAudio: () => ipcRenderer.invoke("importAudio"),
   saveSettings: input => ipcRenderer.invoke("saveSettings", input), copy: id => ipcRenderer.invoke("copy", id),
+  setSpeakers: enabled => ipcRenderer.invoke("setSpeakers", enabled),
   exportAudio: id => ipcRenderer.invoke("exportAudio", id), folder: () => ipcRenderer.invoke("folder"), remove: id => ipcRenderer.invoke("remove", id),
   audio: id => ipcRenderer.invoke("audio", id),
   onChange: callback => { const listener = () => callback(); ipcRenderer.on("changed", listener); return () => ipcRenderer.removeListener("changed", listener) },
-  onClose: callback => { ipcRenderer.on("prepare-close", () => { void callback().finally(() => ipcRenderer.send("close-ready")) }) }
+  onClose: callback => { ipcRenderer.on("prepare-close", (_event, error?: string) => { void callback(error).finally(() => ipcRenderer.send("close-ready")) }) }
 }
 contextBridge.exposeInMainWorld("api", api)

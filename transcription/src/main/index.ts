@@ -53,6 +53,7 @@ else {
           const recording = !!service.activeId
           const answer = await dialog.showMessageBox(window, { type: "question", title: recording ? copy.closeTitle : copy.quitTitle, message: recording ? copy.closeTitle : copy.quitTitle, detail: recording ? copy.closeBody : copy.quitBody, buttons: recording ? [copy.closeKeep, copy.closeFinish] : [copy.stay, copy.quit], defaultId: 0, cancelId: 0, noLink: true })
           if (answer.response !== 1) { closing = false; return }
+          service.willClose = true
           if (service.activeId) {
             // The renderer flushes its sub-second tail before acknowledging the close.
             const acknowledged = new Promise<void>(resolve => {
@@ -70,7 +71,7 @@ else {
         }
         await service.shutdown()
         allowClose = true; window.destroy(); app.quit()
-      })().catch(() => { closing = false; dialog.showErrorBox(copy.app, copy.errors.storage) })
+      })().catch(() => { closing = false; if (service) service.willClose = false; dialog.showErrorBox(copy.app, copy.errors.storage) })
     })
     window.webContents.on("render-process-gone", () => {
       void (async () => {
@@ -78,7 +79,7 @@ else {
         if (!closing && window && !window.isDestroyed()) window.webContents.reload()
       })().catch(() => { if (window && !window.isDestroyed()) window.webContents.reload() })
     })
-    powerMonitor.on("suspend", () => { window?.webContents.send("prepare-close") })
+    powerMonitor.on("suspend", () => { window?.webContents.send("prepare-close", "recovered") })
     app.on("before-quit", event => { if (!allowClose && window && !window.isDestroyed()) { event.preventDefault(); window.close() } })
     app.on("window-all-closed", () => app.quit())
     await window.loadFile(path.join(base, "../renderer/index.html"))

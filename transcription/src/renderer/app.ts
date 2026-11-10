@@ -2,6 +2,7 @@ import { copy, AppError } from "../copy.js"
 import type { Recording, Snapshot } from "../shared.js"
 import { Recorder, unwrap } from "./recorder.js"
 import { Waveform } from "./waveform.js"
+import { speakerName, supportsSpeakers } from "../speakers.js"
 
 const root = document.querySelector<HTMLDivElement>("#app")!
 let snapshot: Snapshot
@@ -34,7 +35,8 @@ const icons = {
   folder: '<svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v12H3z"/></svg>',
   trash: '<svg viewBox="0 0 24 24"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7"/></svg>',
   stop: '<svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1" fill="currentColor" stroke="none"/></svg>',
-  close: '<svg viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg>'
+  close: '<svg viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg>',
+  speakers: '<svg viewBox="0 0 24 24"><circle cx="9" cy="7" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 4a3 3 0 0 1 0 6m2 4a5 5 0 0 1 3 4v3"/></svg>'
 }
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text?: string) {
   const node = document.createElement(tag); node.className = className
@@ -58,6 +60,12 @@ function button(text: string, action: () => unknown, className = "", symbol?: ke
 function iconButton(label: string, action: () => unknown, className: string, symbol: keyof typeof icons) {
   const node = button("", action, className, symbol)
   node.setAttribute("aria-label", label); node.title = label
+  return node
+}
+function speakerSwitch(enabled: boolean, disabled: boolean, action: () => unknown) {
+  const node = iconButton(copy.speakers, action, `speaker-toggle ${enabled ? "primary" : "secondary"}`, "speakers")
+  node.setAttribute("role", "switch"); node.setAttribute("aria-checked", String(enabled)); node.disabled = disabled
+  node.title = disabled ? copy.speakerModelHint : enabled ? copy.speakersOn : copy.speakersOff
   return node
 }
 function renderDictation() {
@@ -107,7 +115,13 @@ function renderSidebar() {
     try { selected = await recorder.start(snapshot.settings.microphone) } finally { starting = false; await refresh() }
   }, "primary", "plus")
   record.disabled = starting || !!snapshot.busyId || !!snapshot.activeId
-  aside.append(record)
+  const actions = el("div", "new-record-actions")
+  const active = snapshot.recordings.find(row => row.id === snapshot.activeId)
+  const enabled = active?.preferences.speakers ?? snapshot.settings.speakers
+  const supported = supportsSpeakers(active?.preferences.model ?? snapshot.settings.model)
+  const speakers = speakerSwitch(enabled, !supported || !!snapshot.activeId || !!snapshot.busyId || starting, async () => { unwrap(await window.api.setSpeakers(!enabled)); await refresh() })
+  if (supported) speakers.title = enabled ? copy.speakersOn : copy.speakersOff
+  actions.append(record, speakers); aside.append(actions)
   const imported = button(copy.import, async () => { const id = unwrap(await window.api.importAudio()); if (id) selected = id; view = "recordings"; await refresh() }, "subtle import", "import")
   imported.disabled = !!snapshot.activeId || !!snapshot.busyId || starting
   aside.append(imported, el("div", "list-label", copy.recordings))
@@ -187,7 +201,17 @@ function render() {
   const body = el("section", "transcript")
   body.setAttribute("aria-label", copy.transcript)
   const text = el("div", row.transcript ? "transcript-text" : "transcript-placeholder", row.transcript || copy.noTranscript)
-  text.tabIndex = 0; if (row.status !== "recording") body.append(text); main.append(body)
+  if (row.status !== "recording" && row.turns?.length) {
+    for (const turn of row.turns) {
+      const block = el("div", "speaker-turn")
+      const caption = el("div", "speaker-caption")
+      caption.append(el("strong", "speaker-label", speakerName(turn.speaker)), el("span", "speaker-time", duration(turn.start)))
+      block.append(caption, el("p", "speaker-text", turn.text)); body.append(block)
+    }
+  } else {
+    text.tabIndex = 0; if (row.status !== "recording") body.append(text)
+  }
+  main.append(body)
   const footer = el("footer", "recording-footer")
   const remove = iconButton(copy.remove, async () => { unwrap(await window.api.remove(row.id)); await refresh() }, "subtle danger", "trash")
   remove.disabled = !!snapshot.activeId || !!snapshot.busyId
@@ -204,7 +228,7 @@ function renderSettings(main: HTMLElement) {
     wrapper.append(caption, input); if (hint) wrapper.append(el("p", "hint", hint)); form.append(wrapper); return input
   }
   const key = field(copy.key, "key", "", undefined, "password"); key.placeholder = snapshot.settings.hasKey ? copy.keySaved : copy.keyPlaceholder
-  field(copy.model, "model", snapshot.settings.model)
+  const model = field(copy.model, "model", snapshot.settings.model)
   const language = field(copy.language, "language", snapshot.settings.language)
   language.placeholder = copy.languageHint
   const microphoneField = el("div", "field"); const label = el("label", "", copy.microphone); label.htmlFor = "microphone"
@@ -212,12 +236,28 @@ function renderSettings(main: HTMLElement) {
   const option = el("option", "", copy.defaultMic); option.value = ""; select.append(option)
   if (snapshot.settings.microphone) { const saved = el("option", "", copy.microphone); saved.value = snapshot.settings.microphone; select.append(saved); select.value = saved.value }
   microphoneField.append(label, select); form.append(microphoneField)
+  const speakerField = el("div", "speaker-field")
+  let separate = snapshot.settings.speakers
+  const toggle = speakerSwitch(separate, !supportsSpeakers(model.value.trim()), () => {
+    separate = !separate; settingsDirty = true; updateToggle()
+  })
+  const updateToggle = () => {
+    const supported = supportsSpeakers(model.value.trim())
+    if (!supported) separate = false
+    toggle.disabled = !supported
+    toggle.setAttribute("aria-checked", String(separate))
+    toggle.dataset.ciSurface = separate ? "primary" : "control"
+    toggle.title = supported ? separate ? copy.speakersOn : copy.speakersOff : copy.speakerModelHint
+    window.CreamInk.mount(toggle)
+  }
+  model.addEventListener("input", updateToggle)
+  speakerField.append(toggle, el("span", "", copy.speakers)); form.append(speakerField)
   form.append(el("p", "privacy", copy.privacy))
   const submit = el("button", "ci-button primary", copy.save); submit.dataset.ciSurface = "primary"; submit.type = "submit"; form.append(submit)
   form.addEventListener("submit", event => {
     event.preventDefault(); submit.disabled = true
     const data = new FormData(form)
-    void window.api.saveSettings({ key: String(data.get("key")), model: String(data.get("model")), language: String(data.get("language")), microphone: String(data.get("microphone")) }).then(reply => {
+    void window.api.saveSettings({ key: String(data.get("key")), model: String(data.get("model")), language: String(data.get("language")), microphone: String(data.get("microphone")), speakers: separate }).then(reply => {
       unwrap(reply); settingsDirty = false; toast(copy.savedSettings); return refresh()
     }).catch(showError).finally(() => { submit.disabled = false })
   })
@@ -237,7 +277,7 @@ async function microphones() {
   select.value = value
 }
 window.api.onChange(() => { void refresh() })
-window.api.onClose(() => recorder.finish())
+window.api.onClose(error => recorder.finish(error))
 window.addEventListener("keydown", event => {
   if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.code === "KeyC" && selected) { event.preventDefault(); void window.api.copy(selected).then(reply => { unwrap(reply); toast(copy.copied) }).catch(showError) }
 })

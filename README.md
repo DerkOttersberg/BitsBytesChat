@@ -6,7 +6,7 @@ transcripts, a Copy transcript button, and Settings. It runs no chat engine,
 agents, document tools, mobile server, terminal, or Python installation.
 
 Download the Windows x64 installer from the
-[transcription release](https://github.com/DerkOttersberg/BitsBytesChat/releases/tag/transcription-v1.0.0).
+[transcription release](https://github.com/DerkOttersberg/BitsBytesChat/releases/tag/transcription-v1.1.0).
 It installs as **BitsBytes Transcription**, alongside the original BitsBytesChat.
 The installer is unsigned.
 
@@ -15,12 +15,17 @@ The installer is unsigned.
 1. Open Settings. Save an OpenRouter API key, a transcription model, and optionally
    a language (`nl`, `en`, or blank for automatic detection) and microphone.
    The default model is `elevenlabs/scribe-v2`.
-2. Choose New recording, then Finish recording. You can also import an audio file.
-3. Choose Transcribe. Read, listen, and copy the saved transcript.
+2. Use the people-icon toggle beside New recording to enable speaker separation.
+   It is also available in Settings and supports Scribe v2 and Scribe v2 Medical.
+3. Choose New recording, then Finish recording. Transcription starts automatically
+   after audio is saved. Importing audio also starts transcription after copying.
+4. Read, listen, and copy the saved transcript, including speaker labels when enabled.
 
-Audio stays local until you explicitly choose Transcribe or Resume transcription.
+Audio stays local during recording. Finish, the recorder's close button, and
+completed imports automatically upload it for transcription. Closing the entire
+app saves without starting a new upload. Interrupted work requires explicit Resume.
 OpenRouter transcription uses OpenRouter credits. Settings apply to new recordings;
-existing recordings retain their model and language. The API key is protected
+existing recordings retain their model, language and speaker-separation choice. The API key is protected
 with Windows DPAPI and is never sent to the renderer or stored in plaintext.
 
 ## Recovery and storage
@@ -37,13 +42,22 @@ with Windows DPAPI and is never sent to the renderer or stored in plaintext.
   need not remain in Downloads or on an attached drive after import completes.
 - Audio is retained after success, errors, cancellation, and closing. Finish saves
   a playable WAV automatically; transcription also retains an MP3.
-- Long audio is compressed and transcribed in five-minute parts. Every completed
+- With speaker separation off, audio is transcribed in five-minute parts. Every completed
   part is committed separately. Resume skips completed parts, including a crash
   between saving the final response and saving the completion status.
+- Speaker separation uploads one compressed mono MP3 for the whole recording,
+  preserving one speaker namespace across the conversation. It requests Scribe's
+  word timestamps and diarization, saves structured speaker turns, and copies
+  Speaker 1 / Speaker 2 labels into text. These labels distinguish speakers within
+  one recording; they do not identify real people or link identities across recordings.
+  Uploads are limited to 24 MB (roughly 100 minutes at 32 kbps); larger audio is
+  retained with an actionable error. A completed speaker response is never resubmitted
+  on Resume or restart. Unsupported/missing labels are not shown as successful separation.
 - An interrupted request may already have been processed and charged. Resume
   explicitly retries the unfinished part. There are no automatic upload retries.
 - Closing during capture asks to save and close, flushes the renderer, and waits
-  for disk writes. A renderer crash preserves audio acknowledged by main.
+  for disk writes, without starting transcription during app shutdown. A renderer
+  crash preserves audio acknowledged by main.
 - Uninstalling or upgrading does not delete recordings. Deletion is an explicit,
   confirmed action. Copy transcript also supports Ctrl+Shift+C.
 
@@ -60,9 +74,10 @@ retained for reference and excluded from this installer's payload.
 - `src/preload.ts`: narrow bridge into a sandboxed, isolated renderer.
 - `src/renderer`: native DOM interface and AudioWorklet capture, no UI framework.
 - `src/copy.ts`: centralized product copy and recoverable error messages.
+- `src/speakers.ts`: supported-model checks, speaker turn parsing and copied labels.
 
 The recording strip uses an actual microphone waveform with stop and close
-controls. Both controls finish and save the recording. Cream and Ink's local fonts,
+controls. Both controls finish, save and start transcription. Cream and Ink's local fonts,
 textures, decoration layers and interaction helper are preserved as a pinned
 vendor snapshot with its asset checksums and notices; no remote assets load.
 
@@ -84,7 +99,7 @@ opens the unpacked build, or the development app. The included Windows workflow
 runs the same checks and tests the packaged executable when GitHub Actions is
 enabled; Actions is currently disabled in this repository. Local tests use generated audio and isolated data.
 Provider contract tests use injected responses, not a paid account; live provider
-accuracy is not asserted. Five-minute boundaries can split sentences and do not
-maintain global speaker identity. Disk/hardware failure cannot be prevented.
+accuracy is not asserted. With speaker separation off, five-minute boundaries can
+split sentences. Disk/hardware failure cannot be prevented.
 
 See [verification](transcription/VERIFICATION.md). The original app remains on `main`.

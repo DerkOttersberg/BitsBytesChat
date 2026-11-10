@@ -19,7 +19,17 @@ aside { display: flex; flex-direction: column; padding: 30px 16px 12px; min-heig
 .brand { padding: 0 11px 29px; }
 .brand-name { font-size: 29px; font-weight: 700; letter-spacing: -.7px; }
 .brand-subtitle { font-size: 13px; color: var(--ci-muted); margin-top: 3px; }
-aside > .primary { width: 100%; justify-content: flex-start; padding-left: 15px; }
+.new-record-actions { display: flex; gap: 6px; }
+.ci .new-record-actions > .primary { flex: 1; min-width: 0; padding: 10px; font-size: 16px; }
+.ci .speaker-toggle { flex: 0 0 44px; width: 44px; height: 44px; padding: 0; }
+.ci .new-record-actions > .speaker-toggle { flex: 0 0 44px; --ci-edge-color: #fff9eb; }
+.speaker-toggle .icon { width: 22px; height: 22px; }
+.speaker-field { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; font-size: 14px; }
+.speaker-turn { margin-bottom: 27px; }
+.speaker-caption { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; }
+.speaker-label { font-size: 14px; }
+.speaker-time { color: var(--ci-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.ci .speaker-text { font-size: 18px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ci aside > .import { justify-content: flex-start; margin-top: 5px; padding-left: 15px; color: var(--ci-cream); }
 .list-label { padding: 28px 12px 10px; font-size: 12px; color: var(--ci-muted); }
 .recordings-list { flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; }

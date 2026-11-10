@@ -12,7 +12,7 @@ app.on("web-contents-created", (_event, contents) => {
         const timeout=setTimeout(()=>reject(new Error('UI did not recover')),10000)
         const interval=setInterval(async()=>{
           if(!document.querySelector('aside'))return
-          if(${index}===1)document.querySelector('aside .primary').click()
+          if(${index}===1)document.querySelector('.new-record-actions > button').click()
           const reply=await window.api.snapshot()
           clearInterval(interval);clearTimeout(timeout);resolve(reply)
         },40)

@@ -6,42 +6,62 @@ import { AppError, copy } from "../copy.js"
 import type { Preferences, Recording, Settings, Snapshot } from "../shared.js"
 import { atomicWrite, Library, readJSON } from "./storage.js"
 import { Transcriber } from "./transcriber.js"
+import { supportsSpeakers } from "../speakers.js"
 
 type StoredSettings = Preferences & { encryptedKey?: string }
-const defaults: StoredSettings = { model: "elevenlabs/scribe-v2", language: "", microphone: "" }
+const defaults: StoredSettings = { model: "elevenlabs/scribe-v2", language: "", microphone: "", speakers: false }
 
 export class Application {
   library: Library
   transcriber: Transcriber
   activeId?: string
   busyId?: string
+  willClose = false
   private settings = { ...defaults }
+  private settingsWrites: Promise<void> = Promise.resolve()
   private task?: Promise<void>
   private starting?: Promise<Recording>
+  private finishing?: Promise<void>
   private appending: Promise<unknown> = Promise.resolve()
   private fileTask = false
   audioFiles = new Map<string, string>()
-  constructor(public root: string, private window: BrowserWindow, private version: string) {
+  constructor(public root: string, private window: BrowserWindow, private version: string, request: typeof fetch = fetch) {
     this.library = new Library(root)
-    this.transcriber = new Transcriber(this.library, () => this.changed())
+    this.transcriber = new Transcriber(this.library, () => this.changed(), request)
   }
   async initialize() {
     await mkdir(this.root, { recursive: true })
     const settings = await readJSON<StoredSettings>(path.join(this.root, "settings.json")) ?? await readJSON<StoredSettings>(path.join(this.root, "settings.backup.json"))
-    if (settings && typeof settings.model === "string" && typeof settings.language === "string" && typeof settings.microphone === "string") this.settings = settings
+    if (settings && typeof settings.model === "string" && typeof settings.language === "string" && typeof settings.microphone === "string") this.settings = { ...settings, speakers: settings.speakers === true && supportsSpeakers(settings.model) }
     await this.library.initialize()
   }
   changed() {
     if (!this.window.isDestroyed() && !this.window.webContents.isDestroyed() && !this.window.webContents.isCrashed()) this.window.webContents.send("changed")
   }
   snapshot(): Snapshot {
-    return { recordings: [...this.library.records.values()].sort((a, b) => b.created.localeCompare(a.created)).map(row => ({ ...row })), settings: { model: this.settings.model, language: this.settings.language, microphone: this.settings.microphone, hasKey: !!this.settings.encryptedKey, storagePath: path.join(this.root, "recordings") }, activeId: this.activeId, busyId: this.busyId, version: this.version }
+    return { recordings: [...this.library.records.values()].sort((a, b) => b.created.localeCompare(a.created)).map(row => ({ ...row })), settings: { model: this.settings.model, language: this.settings.language, microphone: this.settings.microphone, speakers: this.settings.speakers, hasKey: !!this.settings.encryptedKey, storagePath: path.join(this.root, "recordings") }, activeId: this.activeId, busyId: this.busyId, version: this.version }
   }
   private idle() {
     if (this.activeId) throw new AppError("active")
     if (this.busyId || this.fileTask) throw new AppError("busy")
   }
-  async finish(id: string, error?: string) {
+  private updateSettings(update: (current: StoredSettings) => StoredSettings) {
+    const operation = this.settingsWrites.catch(() => undefined).then(async () => {
+      const next = update(this.settings)
+      await atomicWrite(path.join(this.root, "settings.backup.json"), JSON.stringify(this.settings))
+      await atomicWrite(path.join(this.root, "settings.json"), JSON.stringify(next))
+      this.settings = next; this.changed()
+    })
+    this.settingsWrites = operation
+    return operation
+  }
+  finish(id: string, error?: string): Promise<void> {
+    if (this.finishing) return this.finishing
+    const pending = this.finishRecording(id, error)
+    this.finishing = pending
+    return pending.finally(() => { if (this.finishing === pending) this.finishing = undefined })
+  }
+  private async finishRecording(id: string, error?: string) {
     if (this.activeId !== id) throw new AppError("invalid")
     await this.appending.catch(() => undefined)
     const row = this.library.get(id)
@@ -55,8 +75,31 @@ export class Application {
       await this.library.save(row).catch(() => undefined)
       throw new AppError("storage")
     } finally { this.activeId = undefined; this.changed() }
+    if (!error && !this.willClose) await this.autoTranscribe(id)
+  }
+  private beginTranscription(id: string) {
+    this.idle()
+    const row = this.library.get(id)
+    if (row.status === "complete") return
+    if (!this.settings.encryptedKey) throw new AppError("key")
+    let key: string
+    try { key = safeStorage.decryptString(Buffer.from(this.settings.encryptedKey, "base64")) } catch { throw new AppError("encryption") }
+    this.busyId = id
+    this.task = this.transcriber.transcribe(id, key).catch(() => {
+      row.status = "error"; row.error = "storage"
+    }).finally(() => { this.busyId = undefined; this.changed() })
+    this.changed()
+  }
+  private async autoTranscribe(id: string) {
+    try { await this.settingsWrites; this.beginTranscription(id) }
+    catch (error) {
+      const row = this.library.get(id)
+      row.status = "error"; row.error = error instanceof AppError ? error.code : "storage"
+      await this.library.save(row); this.changed()
+    }
   }
   async shutdown() {
+    await this.settingsWrites.catch(() => undefined)
     await this.starting?.catch(() => undefined)
     if (this.activeId) await this.finish(this.activeId, "recovered")
     this.transcriber.cancel()
@@ -76,6 +119,7 @@ export class Application {
       // Claim the recorder synchronously before the first disk await.
       this.activeId = "starting"
       try {
+        await this.settingsWrites.catch(() => undefined)
         this.starting = this.library.create(this.settings)
         const row = await this.starting
         this.activeId = row.id; this.changed(); return row
@@ -92,24 +136,20 @@ export class Application {
     handle("saveSettings", async (input: Preferences & { key: string }) => {
       if (!input || typeof input.model !== "string" || !/^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:/-]{0,180}$/i.test(input.model.trim()) || typeof input.language !== "string" || !/^([a-z]{2})?$/.test(input.language.trim()) || typeof input.microphone !== "string" || input.microphone.length > 1024 || typeof input.key !== "string" || input.key.length > 4096) throw new AppError("settings")
       if (input.key.trim() && !safeStorage.isEncryptionAvailable()) throw new AppError("encryption")
-      const next = { model: input.model.trim(), language: input.language.trim(), microphone: input.microphone, encryptedKey: input.key.trim() ? safeStorage.encryptString(input.key.trim()).toString("base64") : this.settings.encryptedKey }
-      await atomicWrite(path.join(this.root, "settings.backup.json"), JSON.stringify(this.settings))
-      await atomicWrite(path.join(this.root, "settings.json"), JSON.stringify(next))
-      this.settings = next; this.changed()
+      if (typeof input.speakers !== "boolean") throw new AppError("settings")
+      if (input.speakers && !supportsSpeakers(input.model.trim())) throw new AppError("speakerModel")
+      const encryptedKey = input.key.trim() ? safeStorage.encryptString(input.key.trim()).toString("base64") : undefined
+      await this.updateSettings(current => ({ model: input.model.trim(), language: input.language.trim(), microphone: input.microphone, speakers: input.speakers, encryptedKey: encryptedKey ?? current.encryptedKey }))
     })
-    handle("transcribe", async (id: string) => {
+    handle("setSpeakers", async (enabled: boolean) => {
       this.idle()
-      const row = this.library.get(id)
-      if (row.status === "complete") return
-      if (!this.settings.encryptedKey) throw new AppError("key")
-      let key: string
-      try { key = safeStorage.decryptString(Buffer.from(this.settings.encryptedKey, "base64")) } catch { throw new AppError("encryption") }
-      this.busyId = id
-      this.task = this.transcriber.transcribe(id, key).catch(() => {
-        row.status = "error"; row.error = "storage"
-      }).finally(() => { this.busyId = undefined; this.changed() })
-      this.changed()
+      if (typeof enabled !== "boolean") throw new AppError("invalid")
+      await this.updateSettings(current => {
+        if (enabled && !supportsSpeakers(current.model)) throw new AppError("speakerModel")
+        return { ...current, speakers: enabled }
+      })
     })
+    handle("transcribe", async (id: string) => { await this.settingsWrites; this.beginTranscription(id) })
     handle("cancel", () => { this.transcriber.cancel() })
     handle("copy", (id: string) => { clipboard.writeText(this.library.get(id).transcript) })
     handle("audio", async (id: string) => {
@@ -129,7 +169,8 @@ export class Application {
         const row = await this.library.create(this.settings, "importing")
         try { await this.library.copyImport(row.id, result.filePaths[0]) }
         catch { row.status = "error"; row.error = "storage"; await this.library.save(row); throw new AppError("storage") }
-        row.title = path.basename(result.filePaths[0]); await this.library.save(row); this.changed(); return row.id
+        row.title = path.basename(result.filePaths[0]); await this.library.save(row)
+        this.fileTask = false; await this.autoTranscribe(row.id); this.changed(); return row.id
       } finally { this.fileTask = false }
     })
     handle("exportAudio", async (id: string) => {

@@ -3,7 +3,7 @@ import { createReadStream, createWriteStream } from "node:fs"
 import { copyFile, mkdir, open, readFile, readdir, rename, rm, stat } from "node:fs/promises"
 import path from "node:path"
 import { pipeline } from "node:stream/promises"
-import type { Preferences, Recording } from "../shared.js"
+import type { Preferences, Recording, SpeakerTurn } from "../shared.js"
 import { AppError } from "../copy.js"
 
 export async function atomicWrite(file: string, data: string | Buffer) {
@@ -41,18 +41,23 @@ export class Library {
         id: folder.name, title: new Date((await stat(directory)).birthtimeMs).toLocaleString("en-GB"),
         created: (await stat(directory)).birthtime.toISOString(), rate: 16000, duration: 0,
         status: "interrupted", error: "recovered", transcript: "", completedParts: 0,
-        preferences: { model: "elevenlabs/scribe-v2", language: "", microphone: "" }
+        preferences: { model: "elevenlabs/scribe-v2", language: "", microphone: "", speakers: false }
       }
+      row.preferences.speakers = row.preferences.speakers === true
       const imported = (await readdir(directory)).find(file => /^original\.[a-z0-9]+$/.test(file))
       if (imported) row.source = imported
       if (row.source === "importing") { row.status = "error"; row.error = "prepare" }
-      row.transcript = ""; row.completedParts = 0
+      row.transcript = ""; row.completedParts = 0; row.turns = []
       // Per-part transcript files are the commit record. Never trust an outdated manifest count.
       for (let index = 0; ; index++) {
-        const part = await readJSON<{ text: string }>(path.join(directory, `part-${String(index).padStart(6, "0")}.json`))
+        const part = await readJSON<{ text: string; turns?: SpeakerTurn[]; preferences?: Preferences }>(path.join(directory, `part-${String(index).padStart(6, "0")}.json`))
         if (!part || typeof part.text !== "string") break
         row.transcript += (row.completedParts ? "\n\n" : "") + part.text
         row.completedParts++
+        if (Array.isArray(part.turns)) {
+          row.turns.push(...part.turns)
+          if (part.preferences && typeof part.preferences.model === "string") row.preferences = { ...part.preferences, speakers: true }
+        }
       }
       const chunks = (await readdir(directory)).filter(file => /^\d{8}\.pcm$/.test(file)).sort()
       let bytes = 0
@@ -73,7 +78,7 @@ export class Library {
     const row: Recording = {
       id: randomUUID(), title: new Date().toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }),
       created: new Date().toISOString(), rate: 16000, duration: 0, status: source ? "saved" : "recording",
-      error: "", transcript: "", completedParts: 0, preferences: { model: preferences.model, language: preferences.language, microphone: preferences.microphone }, ...(source ? { source } : {})
+      error: "", transcript: "", completedParts: 0, preferences: { model: preferences.model, language: preferences.language, microphone: preferences.microphone, speakers: preferences.speakers === true }, ...(source ? { source } : {})
     }
     await mkdir(this.directory(row.id), { recursive: true })
     await this.save(row)
@@ -103,12 +108,13 @@ export class Library {
     row.duration += data.length / 2 / row.rate
     return row.duration
   }
-  async savePart(id: string, index: number, text: string) {
+  async savePart(id: string, index: number, text: string, turns?: SpeakerTurn[]) {
     const row = this.get(id)
     if (index !== row.completedParts) throw new AppError("invalid")
-    await atomicWrite(path.join(this.directory(id), `part-${String(index).padStart(6, "0")}.json`), JSON.stringify({ text }))
+    await atomicWrite(path.join(this.directory(id), `part-${String(index).padStart(6, "0")}.json`), JSON.stringify({ text, ...(turns ? { turns, preferences: row.preferences } : {}) }))
     row.transcript += (row.completedParts ? "\n\n" : "") + text
     row.completedParts++
+    if (turns) row.turns = [...(row.turns ?? []), ...turns]
     await atomicWrite(path.join(this.directory(id), "transcript.txt"), row.transcript)
     await this.save(row)
   }

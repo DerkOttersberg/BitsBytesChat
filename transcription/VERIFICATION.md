@@ -1,4 +1,4 @@
-# Transcription 1.0.0 verification
+# Transcription 1.1.0 verification
 
 Validated on Windows 11 x64 on 10 November 2026, using Node 24.16.0,
 Electron 42.3.3 and the bundled FFmpeg 6.1.1 binary.
@@ -6,11 +6,20 @@ Electron 42.3.3 and the bundled FFmpeg 6.1.1 binary.
 ## Automated checks
 
 - TypeScript strict type checking passed.
-- Ten persistence/transcription tests passed. They exercise acknowledged audio
+- Fifteen persistence/transcription tests passed. They exercise acknowledged audio
   idempotency, altered/gapped writes, stale/corrupted manifests, final partial
   seconds, independent transcript commits, copied imports, real MP3 encoding,
   real five-minute segmentation of a 301-second import, provider failures,
   explicit cancellation, completed-part reuse and confirmed deletion storage.
+- Speaker tests cover word/segment parsing, punctuation, unknown speakers, rejected
+  invalid timestamps/missing labels, a single 301-second diarization request,
+  speaker identity beyond five minutes, response persistence, no reupload on
+  restart and refusal of oversized speaker audio before any upload.
+- A desktop provider fixture exercises the production application service and UI
+  with an injected provider response: icon toggle on/off, frozen recording choice,
+  automatic speaker/plain transcription after Finish/close, copied speaker labels,
+  automatic imports, audio saved before requests, unsupported-model toggle state,
+  and restart without another upload.
 - Desktop checks passed against the source build and packaged Windows executable:
   recording, final flush, WAV playback, missing-key error, force-killing/reopening
   the actual main process, clipboard, encrypted settings, second-instance focus,
@@ -44,7 +53,9 @@ acknowledged one-second disk commits; an abrupt kill can lose the current second
 and any queued uncommitted samples. Hardware/storage failure remains outside that
 guarantee. Windows sleep suspends capture. WAV export uses standard RIFF and is
 bounded at 4 GiB; original PCM chunks remain retained beyond that boundary.
-Five-minute transcription parts do not maintain speaker identity across parts.
+Speaker separation uses one whole-recording request, bounded at 24 MB; speaker
+identity is scoped to that recording. The provider can still time out on long
+audio, with the MP3 retained for explicit retry. Plain mode uses five-minute parts.
 
 GitHub Actions is disabled in this repository, so the included Windows workflow
 has not run remotely. The checks above were performed locally on Windows.

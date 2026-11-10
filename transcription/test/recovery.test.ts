@@ -6,7 +6,7 @@ import test from "node:test"
 import { Library, atomicWrite } from "../src/main/storage.js"
 import { Transcriber } from "../src/main/transcriber.js"
 
-const preferences = { model: "elevenlabs/scribe-v2", language: "nl", microphone: "" }
+const preferences = { model: "elevenlabs/scribe-v2", language: "nl", microphone: "", speakers: false }
 async function setup(t: test.TestContext) {
   const root = await mkdtemp(path.join(os.tmpdir(), "bb-transcription-test-"))
   t.after(async () => { await rm(root, { recursive: true, force: true }) })
