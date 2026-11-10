@@ -31,8 +31,11 @@ Electron 42.3.3 and the bundled FFmpeg 6.1.1 binary.
   the capture UI. Start is explicit. Successive sessions verify a cleared waveform
   canvas before new microphone history fills it. Branding removal is checked.
 - The NSIS installer was silently installed into an isolated test directory. The
-  installed executable passed the same desktop lifecycle checks, and the test
-  installation was successfully uninstalled afterwards.
+  installed executable passed the same desktop lifecycle checks, and its bundled
+  FFmpeg binary processed generated audio successfully. The uninstall command
+  returned success, but residual test files remained in this managed development
+  environment. Automatic approval review blocked deleting those leftovers.
+  A clean-PC uninstall test is not claimed.
 - A separate native observer launches the same compiled application without a
   browser debugger, kills its actual renderer process, and verifies a replacement
   renderer, the same main process, recovered duration/state and a playable WAV.
