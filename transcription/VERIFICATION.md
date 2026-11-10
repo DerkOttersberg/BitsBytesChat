@@ -15,6 +15,9 @@ Electron 42.3.3 and the bundled FFmpeg 6.1.1 binary.
   recording, final flush, WAV playback, missing-key error, force-killing/reopening
   the actual main process, clipboard, encrypted settings, second-instance focus,
   saving on Close, repeated reopening and a 780-pixel window.
+- The NSIS installer was silently installed into an isolated test directory. The
+  installed executable passed the same desktop lifecycle checks, and the test
+  installation was successfully uninstalled afterwards.
 - A separate native observer launches the same compiled application without a
   browser debugger, kills its actual renderer process, and verifies a replacement
   renderer, the same main process, recovered duration/state and a playable WAV.
@@ -42,6 +45,9 @@ and any queued uncommitted samples. Hardware/storage failure remains outside tha
 guarantee. Windows sleep suspends capture. WAV export uses standard RIFF and is
 bounded at 4 GiB; original PCM chunks remain retained beyond that boundary.
 Five-minute transcription parts do not maintain speaker identity across parts.
+
+GitHub Actions is disabled in this repository, so the included Windows workflow
+has not run remotely. The checks above were performed locally on Windows.
 
 The separate app identity is nl.bitsbytes.transcription. Its installer and data
 directory do not replace the original BitsBytesChat installation or recordings.

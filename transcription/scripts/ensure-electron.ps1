@@ -1,7 +1,10 @@
 $ErrorActionPreference = 'Stop'
 $packageRoot = Split-Path $PSScriptRoot
 $electronRoot = Join-Path $packageRoot 'node_modules\electron'
-if (Test-Path -LiteralPath (Join-Path $electronRoot 'dist\electron.exe')) { exit 0 }
+if (Test-Path -LiteralPath (Join-Path $electronRoot 'dist\electron.exe')) {
+  Set-Content -LiteralPath (Join-Path $electronRoot 'path.txt') -Value 'electron.exe' -NoNewline
+  exit 0
+}
 Push-Location $packageRoot
 try {
   # Use the checksum-verified official archive, with Windows ZIP extraction.

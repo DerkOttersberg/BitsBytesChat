@@ -80,8 +80,9 @@ npm run package:win
 ```
 
 The installer is created in `transcription/release`. `Start Transcription.cmd`
-opens the unpacked build, or the development app. Windows CI runs the same checks
-and tests the packaged executable. Tests use generated audio and isolated data.
+opens the unpacked build, or the development app. The included Windows workflow
+runs the same checks and tests the packaged executable when GitHub Actions is
+enabled; Actions is currently disabled in this repository. Local tests use generated audio and isolated data.
 Provider contract tests use injected responses, not a paid account; live provider
 accuracy is not asserted. Five-minute boundaries can split sentences and do not
 maintain global speaker identity. Disk/hardware failure cannot be prevented.
