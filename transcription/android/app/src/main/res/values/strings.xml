@@ -1,0 +1,48 @@
+<resources>
+    <string name="app_name">BitsBytes Transcription</string>
+    <string name="recordings">Recordings</string><string name="new_recording">New recording</string>
+    <string name="record_tab">Record</string>
+    <string name="start">Start recording</string><string name="finish">Finish recording</string>
+    <string name="settings">Settings</string><string name="save">Save settings</string>
+    <string name="import_audio">Import audio</string><string name="save_audio">Save audio</string>
+    <string name="copy">Copy transcript</string><string name="copied">Copied</string>
+    <string name="listen">Listen</string><string name="pause">Pause</string><string name="delete">Delete recording</string>
+    <string name="confirm_delete">Delete the saved audio and transcript?</string><string name="keep">Keep</string>
+    <string name="resume">Resume transcription</string><string name="cancel">Stop transcription</string>
+    <string name="key">OpenRouter API key</string><string name="key_saved">Key saved — leave empty to keep it</string>
+    <string name="model">Model</string><string name="language">Language</string>
+    <string name="language_hint">Automatic, or a code such as nl or en</string>
+    <string name="speakers">Separate speakers</string><string name="speaker_short">Speakers</string><string name="speaker">Speaker %1$d</string>
+    <string name="unknown_speaker">Unknown speaker</string><string name="speaker_model">Speaker separation requires Scribe v2 or Scribe v2 Medical.</string>
+    <string name="privacy">Finish sends audio to OpenRouter and uses your credits.</string>
+    <string name="storage_note">Recordings stay on this device. Export audio before uninstalling; Android removes private app data on uninstall.</string>
+    <string name="recording">Recording</string><string name="saved">Saved</string><string name="complete">Transcribed</string>
+    <string name="interrupted">Recovered</string><string name="error">Needs attention</string>
+    <string name="ready">Ready</string><string name="empty">No recordings</string><string name="no_transcript">No transcript yet.</string>
+    <string name="preparing">Preparing audio…</string><string name="importing">Importing audio…</string>
+    <string name="transcribing">Transcribing %1$d / %2$d</string><string name="saving">Saving transcript…</string>
+    <string name="cost_unknown">Cost not reported</string><string name="cost_after">Cost shown after transcription</string>
+    <string name="reported_cost">Reported %1$s USD</string>
+    <string name="recording_channel">Recording and transcription</string><string name="recording_notification">Recording — audio saved every second</string>
+    <string name="working_notification">Transcription in progress — audio is saved</string>
+    <string name="microphone_error">The microphone could not be opened. Check Android microphone permission and whether another app is using it.</string>
+    <string name="permission_denied">Microphone permission is needed only when you press Start.</string>
+    <string name="busy_error">Finish the current recording or transcription first.</string>
+    <string name="missing_key">Audio saved. Add an OpenRouter API key in Settings, then resume transcription.</string>
+    <string name="encryption_error">Android could not unlock the API key. Save it again in Settings.</string>
+    <string name="storage_error">The file could not be saved. Check free storage. Previously saved audio is retained.</string>
+    <string name="settings_error">Enter a provider/model ID and a two-letter language code, or leave language empty.</string>
+    <string name="recovered_error">Recovered after an interruption. Saved audio and transcript parts are available. Resume explicitly retries unfinished work.</string>
+    <string name="network_error">The request was interrupted. Audio is saved. The current request may already have been processed or charged; Resume explicitly retries it.</string>
+    <string name="provider_error">The provider could not transcribe this audio. Saved audio and completed parts are retained.</string>
+    <string name="key_error">OpenRouter rejected the API key. Update it in Settings.</string>
+    <string name="credits_error">OpenRouter credits are exhausted. Add credits, then resume.</string>
+    <string name="quota_error">OpenRouter is busy or rate limited. Wait a moment, then resume.</string>
+    <string name="response_error">The provider returned an invalid transcript. Audio and completed parts are retained.</string>
+    <string name="speaker_response_error">The provider returned no usable speaker labels. Your audio is saved.</string>
+    <string name="size_error">Speaker separation is limited to 24 MB of compressed audio. Export or import shorter sections; your original audio is saved.</string>
+    <string name="audio_error">This audio could not be prepared. The original file is retained.</string>
+    <string name="empty_error">No audio was captured. Check the microphone and try again.</string>
+    <string name="playback_error">This audio could not be played. Save an audio copy to listen in another app.</string>
+    <string name="back">Back</string>
+</resources>

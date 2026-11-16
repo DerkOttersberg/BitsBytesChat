@@ -1,0 +1,12 @@
+Roboto Condensed, Regular and Bold, version 2.137 (2017)
+Copyright 2011 Google Inc. All Rights Reserved.
+Designed by Christian Robertson.
+Roboto Condensed is a trademark of Google.
+Licensed under the Apache License, Version 2.0. See Roboto-Apache-2.0.txt.
+
+Regular: copied from the locally installed Roblox font, without modification.
+Bold: copied without modification from Google's font repository:
+https://raw.githubusercontent.com/google/fonts/7b64519fb0fd8b03b563b32ff55d2362db2c90bf/apache/robotocondensed/RobotoCondensed-Bold.ttf
+
+The Bold file has the same upstream version as the installed Regular file.
+It is not a byte-for-byte verified export of Roblox's remotely hosted Bold font.

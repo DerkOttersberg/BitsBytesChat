@@ -1,0 +1,35 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'nl.bitsbytes.transcription'
+    compileSdk 36
+    defaultConfig {
+        applicationId 'nl.bitsbytes.transcription'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '1.0.0'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+    }
+    signingConfigs {
+        release {
+            if (System.getenv('BITSBYTES_ANDROID_KEYSTORE')) {
+                storeFile file(System.getenv('BITSBYTES_ANDROID_KEYSTORE'))
+                storePassword file(System.getenv('BITSBYTES_ANDROID_PASSWORD_FILE')).text.trim()
+                keyAlias 'bitsbytes'
+                keyPassword storePassword
+            }
+        }
+    }
+    buildTypes {
+        release { signingConfig signingConfigs.release; minifyEnabled false }
+        debug { applicationIdSuffix '.debug'; versionNameSuffix '-debug' }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    lint { abortOnError true; checkReleaseBuilds true }
+}
+dependencies {
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test:rules:1.6.1'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+    androidTestImplementation 'androidx.test.uiautomator:uiautomator:2.3.0'
+}

@@ -1,0 +1,67 @@
+{
+  "exported": "2026-10-20",
+  "scope": "Reusable UI surfaces only. No weapon, item, map, character, or game button icons.",
+  "assets": [
+    {
+      "file": "assets/textures/dots.png",
+      "roblox_asset_id": "99105283184696",
+      "sha256": "5211505d61acc69e30fd6e3d25400f138ce13ccdc98e3434a46f7a79a8bda14e",
+      "origin": "Existing local UI surface texture",
+      "usage": "32 x 32 repeated alpha mask; tint and fade in code"
+    },
+    {
+      "file": "assets/textures/dash-h.png",
+      "roblox_asset_id": "90618110064724",
+      "sha256": "78c37585b7df2b199be9dc8d8d69679b40cf17a45192081a8189c91b68610039",
+      "origin": "Existing local UI surface texture",
+      "usage": "Horizontal border alpha mask; tile at 8 x 2"
+    },
+    {
+      "file": "assets/textures/dash-v.png",
+      "roblox_asset_id": "136811747272848",
+      "sha256": "2c1d3d35c879111ec4bb2e6ed4ea7ff8363e329e3c064c28d5e36b86de56cd00",
+      "origin": "Existing local UI surface texture",
+      "usage": "Vertical border alpha mask; tile at 2 x 8"
+    },
+    {
+      "file": "assets/fonts/RobotoCondensed-Regular.ttf",
+      "sha256": "f05ab6c1eade444bbf4e3e00710756e95c2a1d09a10425967149802219c0c0cb",
+      "metadata": {
+        "0": "Copyright 2011 Google Inc. All Rights Reserved.",
+        "1": "Roboto Condensed",
+        "2": "Regular",
+        "3": "Roboto Condensed",
+        "4": "Roboto Condensed",
+        "5": "Version 2.137; 2017",
+        "6": "RobotoCondensed-Regular",
+        "7": "Roboto Condensed is a trademark of Google.",
+        "9": "Google",
+        "11": "Google.com",
+        "12": "Christian Robertson",
+        "13": "Licensed under the Apache License, Version 2.0",
+        "14": "http://www.apache.org/licenses/LICENSE-2.0"
+      },
+      "origin": "Installed Roblox font, local copy"
+    },
+    {
+      "file": "assets/fonts/RobotoCondensed-Bold.ttf",
+      "sha256": "03b4e8042b9af4bf3349428fa734ed583f2d5d83287e1f42cf4d514c909146ef",
+      "metadata": {
+        "0": "Copyright 2011 Google Inc. All Rights Reserved.",
+        "1": "Roboto Condensed",
+        "2": "Bold",
+        "3": "Roboto Condensed Bold",
+        "4": "Roboto Condensed Bold",
+        "5": "Version 2.137; 2017",
+        "6": "RobotoCondensed-Bold",
+        "7": "Roboto Condensed is a trademark of Google.",
+        "9": "Google",
+        "11": "Google.com",
+        "12": "Christian Robertson",
+        "13": "Licensed under the Apache License, Version 2.0",
+        "14": "http://www.apache.org/licenses/LICENSE-2.0"
+      },
+      "origin": "https://raw.githubusercontent.com/google/fonts/7b64519fb0fd8b03b563b32ff55d2362db2c90bf/apache/robotocondensed/RobotoCondensed-Bold.ttf"
+    }
+  ]
+}

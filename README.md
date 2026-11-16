@@ -1,6 +1,6 @@
 # BitsBytes Transcription
 
-The `transcription-only` branch is a small Windows recorder and transcription app
+The `transcription-only` branch contains small Windows and Android recorder/transcription apps
 using [Cream and Ink UI](https://git.derkdev.nl/derk/cream-ink-ui). The installed app contains recordings,
 transcripts, a Copy transcript button, and Settings. It runs no chat engine,
 agents, document tools, mobile server, terminal, or Python installation.
@@ -9,6 +9,13 @@ Download the Windows x64 installer from the
 [transcription release](https://github.com/DerkOttersberg/BitsBytesChat/releases/tag/transcription-v1.2.0).
 It installs as **BitsBytes Transcription**, alongside the original BitsBytesChat.
 The installer is unsigned.
+
+The standalone **Android 8.0+** APK is in the
+[Android release](https://github.com/DerkOttersberg/BitsBytesChat/releases/tag/transcription-android-v1.0.0).
+It records in the background, transcribes automatically after Finish, and uses
+Android Keystore for credentials. See [Android usage, storage, and building](transcription/android/README.md).
+Android removes private recordings when the app is uninstalled; export audio first.
+The Windows-specific details below do not describe Android installation/storage.
 
 ## Use
 
