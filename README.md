@@ -1,137 +1,45 @@
 # BitsBytes Transcription
 
-The `transcription-only` branch contains small Windows and Android recorder/transcription apps
-using [Cream and Ink UI](https://git.derkdev.nl/derk/cream-ink-ui). The installed app contains recordings,
-transcripts, a Copy transcript button, and Settings. It runs no chat engine,
-agents, document tools, mobile server, terminal, or Python installation.
+A minimal Windows and Android app for recording, transcription, playback, and copying text. Built with [Cream and Ink UI](https://git.derkdev.nl/derk/cream-ink-ui). No chat window, desktop server installation, Python, Node.js, FFmpeg setup, or Google Play Services is required on the destination device; the apps bundle their runtime dependencies.
 
-Download the Windows x64 installer from the
-[transcription release](https://github.com/DerkOttersberg/BitsBytesChat/releases/tag/transcription-v1.2.0).
-It installs as **BitsBytes Transcription**, alongside the original BitsBytesChat.
-The installer is unsigned.
+Download the Windows installer and signed Android APK together from the [1.3.0 release](https://github.com/DerkOttersberg/BitsBytes-Transcription/releases/tag/transcription-v1.3.0). Windows 10/11 x64 and Android 8.0+ are the supported targets. Windows is unsigned; Android updates retain the existing signing certificate and application ID.
 
-The standalone **Android 8.0+** APK is in the
-[Android release](https://github.com/DerkOttersberg/BitsBytesChat/releases/tag/transcription-android-v1.0.0).
-It records in the background, transcribes automatically after Finish, and uses
-Android Keystore for credentials. See [Android usage, storage, and building](transcription/android/README.md).
-Android removes private recordings when the app is uninstalled; export audio first.
-The Windows-specific details below do not describe Android installation/storage.
+## Phone → PC clipboard
 
-## Use
+1. Install both apps. In the Windows app choose **Link phone** (also available from its system tray menu).
+2. In Android open **Settings → Link PC → Scan PC code**. Scan the Windows QR code and confirm the computer.
+3. Record and transcribe on the phone, then tap **Send to PC**. The Windows window can stay closed in the tray.
+4. **Copied to PC clipboard** means Windows saved the full transcript and verified the clipboard contents. Paste anywhere on that PC.
 
-1. Open Settings. Save an OpenRouter API key, a transcription model, and optionally
-   a language (`nl`, `en`, or blank for automatic detection) and microphone.
-   The default model is `elevenlabs/scribe-v2`.
-2. Use the people-icon toggle beside New recording to enable speaker separation.
-   It is also available in Settings and supports Scribe v2 and Scribe v2 Medical.
-3. Choose New recording, then Start recording on the 00:00 ready screen. New recording
-   does not open the microphone. Finish recording starts transcription automatically
-   after audio is saved. Importing audio also starts transcription after copying.
-4. Read, listen, and copy the saved transcript, including speaker labels when enabled.
+Both devices need to be able to reach each other on the same local network. Windows may ask to allow the app on private networks. Guest Wi-Fi/client isolation, VPN policy, sleeping PCs, firewalls, or different networks can prevent a direct connection. This is not a hosted internet relay. A queued send stays saved until the PC can be reached; delivery outside the shared network waits. Local address changes are handled by cached endpoints, DNS-SD, and UDP rediscovery without replacing the trusted PC identity.
 
-Audio stays local during recording. Finish, the recorder's close button, and
-completed imports automatically upload it for transcription. Closing the entire
-app saves without starting a new upload. Interrupted work requires explicit Resume.
-OpenRouter transcription uses OpenRouter credits. Settings apply to new recordings;
-existing recordings retain their model, language and speaker-separation choice. The API key is protected
-with Windows DPAPI and is never sent to the renderer or stored in plaintext.
+The phone keeps a durable outbox. Windows saves an incoming transcript before copying it and acknowledges only after clipboard verification. Lost responses are retried with the same delivery ID; an already acknowledged retry does not overwrite a newer clipboard value. An explicit new Send copies again. Text is transferred as UTF-8 with a SHA-256 digest, with a **4 MiB UTF-8 limit** per transcript, well beyond normal hour-long conversations. Text is never silently truncated. The Windows recording library keeps the received text; audio, API keys, and settings remain on their original device.
 
-The sidebar starts with the recording controls. Listen and Copy are in the top
-toolbar; the text-only Save audio action sits beside Delete at the bottom.
-Each Start clears the waveform history and displays live microphone RMS levels.
-Transcription shows preparation, request part and save stages. Reported USD costs
-are committed with transcript parts and survive reopening. Scribe estimates use
-the live OpenRouter per-second rate, cached for one day; unsupported pricing units
-and missing historical costs are shown as unavailable rather than guessed.
+Windows starts in the background at user sign-in by default. Closing its window hides it to the tray and keeps recording, transcription, and phone delivery running. Use the tray to open it, link a phone, change Start with Windows, or Quit. Quit during an active audio task saves work before closing. Windows shutdown can still interrupt the current uncommitted audio fraction; opening the app recovers saved data.
 
-## Installation and supported PCs
+## Recording and settings
 
-The finish page offers Start app and Add a desktop shortcut, both checked by
-default. Uncheck either option before Finish to decline it. A Start menu entry is
-also installed. Silent installation creates the default shortcut without launching
-the app. Updating and uninstalling preserve recordings.
+Save an OpenRouter API key with credits in Settings. Pick a transcription model from the live OpenRouter catalog and choose a language from the list (Automatic is the default). Both apps cache model choices and include a bundled fallback. Language support depends on the selected provider/model. Scribe v2 is the default; the people-icon switch enables speaker separation for Scribe v2 and Scribe v2 Medical. Speaker labels distinguish voices within a recording; they do not identify real people.
 
-This installer targets **Windows 10/11 x64**. Electron, FFmpeg, fonts and capture
-code are bundled; Node.js, Python and a GPU are not required on the destination PC.
-Recording requires a working microphone and Windows microphone permission.
-Transcription requires internet access to OpenRouter, an API key and credits.
-Windows 11 x64 is the tested platform; Windows 10 and ARM emulation have not been
-independently validated. This is not a Windows 7/8, 32-bit, macOS or Linux installer.
-Unsigned-app warnings and managed-PC security policies can still block execution.
+New recording opens at 00:00 without opening the microphone. Press Start. On Android, the small square pause button pauses and resumes the same recording; Finish remains a separate button. Pause commits the partial audio chunk, stops microphone capture, and excludes the pause from the recording duration. Recovered unfinished Android captures can be resumed as recordings before transcription.
 
-## Recovery and storage
+Finish automatically saves and transcribes. Import copies the source locally before transcription. Audio stays local during capture, then goes over HTTPS to OpenRouter and the selected provider. Completed transcript parts and provider-reported USD costs are retained. Missing costs remain marked as unknown. Speaker separation uses one compressed recording to preserve a single speaker namespace; plain transcription uses five-minute parts. A request interrupted before its response was committed may already have been charged; Resume is an explicit retry.
 
-- Recordings live in `%LOCALAPPDATA%\BitsBytesTranscription\recordings`.
-- Capture commits 16 kHz mono PCM to disk every second, with a flushed file and
-  atomic rename before acknowledging the write. A normal Finish also saves the
-  final fraction of a second. Abrupt termination can lose the current uncommitted
-  second and audio still waiting for disk. Keep the computer awake while recording.
-- Startup reconstructs duration and transcript progress from actual audio and
-  committed part files, including recovery when both manifests are damaged.
-  Interrupted work is visible; opening the app never retries an upload.
-- Imports are copied into the app's own recording directory. The original file
-  need not remain in Downloads or on an attached drive after import completes.
-- Audio is retained after success, errors, cancellation, and closing. Finish saves
-  a playable WAV automatically; transcription also retains an MP3.
-- With speaker separation off, audio is transcribed in five-minute parts. Every completed
-  part is committed separately. Resume skips completed parts, including a crash
-  between saving the final response and saving the completion status.
-- Speaker separation uploads one compressed mono MP3 for the whole recording,
-  preserving one speaker namespace across the conversation. It requests Scribe's
-  word timestamps and diarization, saves structured speaker turns, and copies
-  Speaker 1 / Speaker 2 labels into text. These labels distinguish speakers within
-  one recording; they do not identify real people or link identities across recordings.
-  Uploads are limited to 24 MB (roughly 100 minutes at 32 kbps); larger audio is
-  retained with an actionable error. A completed speaker response is never resubmitted
-  on Resume or restart. Unsupported/missing labels are not shown as successful separation.
-- An interrupted request may already have been processed and charged. Resume
-  explicitly retries the unfinished part. There are no automatic upload retries.
-- Closing during capture asks to save and close, flushes the renderer, and waits
-  for disk writes, without starting transcription during app shutdown. A renderer
-  crash preserves audio acknowledged by main.
-- Uninstalling or upgrading does not delete recordings. Deletion is an explicit,
-  confirmed action. Copy transcript also supports Ctrl+Shift+C.
+## Storage and recovery
 
-## Architecture and development
+- Windows data: `%LOCALAPPDATA%\BitsBytesTranscription`. Updating/uninstalling preserves this folder. The per-PC TLS identity and paired phones survive normal updates.
+- Android data is private to the app. **Export audio before uninstalling, clearing data, or replacing the phone.** Android removes private app data and its Keystore key on uninstall.
+- Capture saves 16 kHz mono PCM in synced atomic files every second. Finish/Pause also commit the final partial second. A force stop or power loss can lose the current uncommitted fraction and pending disk writes.
+- Startup reconstructs audio duration and transcript progress from committed files, even if manifests are damaged. Opening an interrupted recording does not automatically upload audio.
+- Finished Windows captures retain WAV and compressed MP3; Android uses native AAC/M4A and WAV. Original imports are retained. No destination-device codec setup is needed for recording; imported formats depend on the bundled Windows decoder or Android's installed codecs.
+- The API key uses Windows DPAPI / Android Keystore. Phone pairing uses pinned TLS and per-phone credentials; no API credential is shared between devices.
+- Phone sends remain durable through app/process restarts. Android's system scheduler retries pending work; force stop and battery restrictions can defer retries until the app is opened. Pausing a recording releases its wake lock while retaining foreground notification controls.
+- Long phone transcripts are displayed in sections so the UI remains responsive. Copy and Send use the complete saved transcript, not the displayed section. Android's system clipboard can impose a smaller limit than PC transfer; Send to PC avoids that clipboard transaction.
 
-All production code for this flavor is in [`transcription`](transcription).
-It builds independently of the inherited OpenCode monorepo. Earlier source is
-retained for reference and excluded from this installer's payload.
+## Source and building
 
-- `src/main/storage.ts`: durable audio, manifests, transcript commits and recovery.
-- `src/main/transcriber.ts`: bundled FFmpeg process and bounded OpenRouter requests.
-- `src/main/ipc.ts`: validated IPC and application state; API keys remain in main.
-- `src/main/pricing.ts`: cached catalog estimates with explicit pricing units.
-- `src/main/index.ts`: single-instance/window/shutdown lifecycle and audio protocol.
-- `src/preload.ts`: narrow bridge into a sandboxed, isolated renderer.
-- `src/renderer`: native DOM interface and AudioWorklet capture, no UI framework.
-- `src/copy.ts`: centralized product copy and recoverable error messages.
-- `src/speakers.ts`: supported-model checks, speaker turn parsing and copied labels.
+The default branch is `transcription-only`. The former `main` is preserved as `legacy-chat-main`; the active branch has no `main` branch. The application lives in `transcription/`, with the native Android app in `transcription/android/`. Historical chat sources are not packaged into either app.
 
-The recording strip uses an actual microphone waveform with stop and close
-controls. Both controls finish, save and start transcription. Cream and Ink's local fonts,
-textures, decoration layers and interaction helper are preserved as a pinned
-vendor snapshot with its asset checksums and notices; no remote assets load.
+For Windows development, install Node.js, then run `Build Windows.ps1`, or from `transcription/` run `npm ci`, `bun typecheck`, `npm test`, `npm run build`, `npm run test:desktop`, and `npm run package:win`. Android build/signing instructions are in [the Android README](transcription/android/README.md). These are development requirements, not requirements for installed apps.
 
-Install Node.js 22+ and run `Build Windows.ps1`, or:
-
-```powershell
-cd transcription
-npm ci
-.\scripts\ensure-electron.ps1
-npm run typecheck
-npm test
-npm run build
-npm run test:desktop
-npm run package:win
-```
-
-The installer is created in `transcription/release`. `Start Transcription.cmd`
-opens the unpacked build, or the development app. The included Windows workflow
-runs the same checks and tests the packaged executable when GitHub Actions is
-enabled; Actions is currently disabled in this repository. Local tests use generated audio and isolated data.
-Provider contract tests use injected responses, not a paid account; live provider
-accuracy is not asserted. With speaker separation off, five-minute boundaries can
-split sentences. Disk/hardware failure cannot be prevented.
-
-See [verification](transcription/VERIFICATION.md). The original app remains on `main`.
+See [the link protocol](transcription/LINK_PROTOCOL.md), [Windows verification](transcription/VERIFICATION.md), and [Android verification](transcription/android/VERIFICATION.md). GitHub Actions remains disabled at repository level; releases are built and verified locally rather than enabling the historical monorepo workflows.

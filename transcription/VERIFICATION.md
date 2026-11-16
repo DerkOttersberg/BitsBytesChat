@@ -1,78 +1,68 @@
-# Transcription 1.2.0 verification
+# Transcription 1.3.0 verification
 
-Validated on Windows 11 x64 on 10 November 2026, using Node 24.16.0,
-Electron 42.3.3 and the bundled FFmpeg 6.1.1 binary.
+Validated locally on Windows 11 x64, 16 November 2026. Electron 42.3.3,
+Node 24.16.0, bundled FFmpeg 6.1.1. Distribution target: Windows 10/11 x64.
 
-## Automated checks
+## Checks performed
 
-- TypeScript strict type checking passed.
-- Eighteen persistence/transcription/pricing tests passed. They exercise acknowledged audio
-  idempotency, altered/gapped writes, stale/corrupted manifests, final partial
-  seconds, independent transcript commits, copied imports, real MP3 encoding,
-  real five-minute segmentation of a 301-second import, provider failures,
-  explicit cancellation, completed-part reuse and confirmed deletion storage.
-- Cost tests cover committed per-part usage, reconstruction without double-counting,
-  unknown historical fees, reported zero, cached live Scribe rates and rejection of
-  token/hour models as per-second estimates. Preparation/request/save progress is checked.
-- Speaker tests cover word/segment parsing, punctuation, unknown speakers, rejected
-  invalid timestamps/missing labels, a single 301-second diarization request,
-  speaker identity beyond five minutes, response persistence, no reupload on
-  restart and refusal of oversized speaker audio before any upload.
-- A desktop provider fixture exercises the production application service and UI
-  with an injected provider response: icon toggle on/off, frozen recording choice,
-  automatic speaker/plain transcription after Finish/close, copied speaker labels,
-  automatic imports, audio saved before requests, unsupported-model toggle state,
-  and restart without another upload.
-- Desktop checks passed against the source build and packaged Windows executable:
-  recording, final flush, WAV playback, missing-key error, force-killing/reopening
-  the actual main process, clipboard, encrypted settings, second-instance focus,
-  saving on Close, repeated reopening and a 780-pixel window.
-- New recording is verified to show 00:00 without creating a recording or opening
-  the capture UI. Start is explicit. Successive sessions verify a cleared waveform
-  canvas before new microphone history fills it. Branding removal is checked.
-- The NSIS installer was silently installed into an isolated test directory. The
-  installed executable passed the same desktop lifecycle checks, and its bundled
-  FFmpeg binary processed generated audio successfully. The uninstall command
-  returned success, but residual test files remained in this managed development
-  environment. Automatic approval review blocked deleting those leftovers.
-  A clean-PC uninstall test is not claimed.
-- A separate native observer launches the same compiled application without a
-  browser debugger, kills its actual renderer process, and verifies a replacement
-  renderer, the same main process, recovered duration/state and a playable WAV.
-  This observer uses Electron's development preload; the packaged executable is
-  covered by the desktop lifecycle checks above.
-- Installer archive inspection found no chat engine, mobile,
-  Python worker, sidecar or document preview payload. Both fonts, all three masks,
-  upstream CSS/JavaScript and licenses are present.
-- All five Cream and Ink font/texture checksums match upstream assets.json at
-  commit da4036afb1736878413720391d36f4d6ba5bfa65. The vendor files are unmodified.
-- Screenshots were inspected for empty, settings, saved, recovered, transcript,
-  ready screen, busy/cost display, active waveform and narrow-window states. The waveform uses microphone samples;
-  there is no progress/filling meter. Stop and Close both save the recording.
+- Strict TypeScript checking passed through `bun typecheck`.
+- All 19 storage, transcription, speaker, pricing, and link tests passed.
+  They cover interrupted/corrupt manifests, acknowledged audio, real MP3
+  encoding and 301-second segmentation, independently committed transcript
+  parts, retained audio on errors, explicit retry, and reported/unknown costs.
+- Real HTTPS tests verify QR generation, hashed credentials, phone binding,
+  digest validation, concurrent duplicate sends, retained received transcripts,
+  persisted identity, acknowledgement retry after restart, and revocation.
+- Desktop lifecycle checks passed against development and packaged executables:
+  explicit Start at 00:00, cleared microphone waveform, audio recovery after
+  process termination, native clipboard, encrypted settings, playback, second
+  instance, closing to the tray, and reopening. Explicit Quit saves capture.
+- The native renderer-crash check passed with the receiver still listening,
+  capture retained, and a replacement renderer. This uses the development
+  preload; packaged lifecycle behavior is covered separately.
+- Automatic transcription and speaker UI tests passed with injected provider
+  responses. Provider responses commit before completion; restart skips saved
+  responses instead of uploading again. Model and language selects are exercised.
+- Android 8 and Android 16 sent 1,122,000 UTF-8 bytes to the real Windows
+  clipboard through the actual Send to PC UI. Android 8 used the packaged
+  Windows executable. The whole Unicode content matched SHA-256
+  `99ad1dafe14da1cb204c96aa73b21544685b6418d4da366f6e1f0bb42e1cb5b9`.
+  The PC window stayed hidden. An acknowledged retry preserved a newer
+  clipboard value instead of copying the old text again.
+- Packaged startup registration was verified with a disposable Windows Run
+  value containing the executable path and `--background`, then removed.
+  The test does not alter the user's real startup preference. An actual
+  Windows sign-out/reboot was not performed.
+- The NSIS installer built successfully with default-enabled shortcut/launch
+  choices and sign-in startup registration. The packaged executable passed
+  lifecycle checks. A fresh clean-PC install/uninstall was not repeated for 1.3.0.
+- Runtime dependency audit: zero known vulnerabilities (`npm audit --omit=dev`).
+- Android ready, paused, settings and recording-library screens were inspected;
+  desktop screenshots were inspected. Icons, Cream and Ink assets and licenses
+  are bundled. There is no chat payload or external runtime setup in the installer.
 
-## Practical limits
+## Limits
 
-Tests use generated audio and injected provider responses. No paid OpenRouter
-account or live speech-recognition accuracy is claimed. Requests have bounded
-timeouts, retain audio on errors, and never retry automatically. An uncertain
-in-flight request may already have been processed or charged by the provider.
+This is direct encrypted local-network transfer, not a hosted relay. The devices
+must be mutually reachable. Guest Wi-Fi isolation, firewall/VPN policy, a sleeping
+PC, or different networks may prevent delivery. Address rediscovery is implemented;
+physical multi-router/network-change behavior has not been certified. Android
+background policy can delay queued sends. Reopening the app retries pending work.
 
-The installer is unsigned. Capture survives ordinary app interruptions through
-acknowledged one-second disk commits; an abrupt kill can lose the current second
-and any queued uncommitted samples. Hardware/storage failure remains outside that
-guarantee. Windows sleep suspends capture. WAV export uses standard RIFF and is
-bounded at 4 GiB; original PCM chunks remain retained beyond that boundary.
-Speaker separation uses one whole-recording request, bounded at 24 MB; speaker
-identity is scoped to that recording. The provider can still time out on long
-audio, with the MP3 retained for explicit retry. Plain mode uses five-minute parts.
+Up to 4 MiB of UTF-8 text is accepted without truncation. Sent text is retained in
+the PC recording library; audio and API settings are not synchronized. See
+[LINK_PROTOCOL.md](LINK_PROTOCOL.md) for delivery and crash semantics.
 
-GitHub Actions is disabled in this repository, so the included Windows workflow
-has not run remotely. The checks above were performed locally on Windows.
+The Windows installer remains unsigned; Unknown publisher/SmartScreen warnings
+can appear. No clean Windows 10/ARM or physical microphone/driver matrix was run.
+Live paid OpenRouter transcription and speaker accuracy were not tested: provider
+responses are injected, with real codecs, persistence, UI and network transfer.
+An uncertain interrupted provider request may already have been charged.
 
-The separate app identity is nl.bitsbytes.transcription. Its installer and data
-directory do not replace the original BitsBytesChat installation or recordings.
+Audio is committed every second and on normal Finish. Abrupt termination can
+lose the uncommitted fraction or queued writes; disk/hardware failure remains
+outside that guarantee. Windows sleep suspends capture. WAV export is bounded
+at 4 GiB, with original PCM retained. Plain transcription uses five-minute parts;
+speaker mode uses a single compressed request bounded at 24 MB.
 
-The distribution target is Windows 10/11 x64, with Windows 11 x64 validated locally.
-No clean Windows 10/ARM/microphone-driver matrix has been run, so universal PC
-compatibility is not claimed. Runtime/capture/FFmpeg/fonts are bundled. OpenRouter
-connectivity, credentials, credits and Windows microphone permission are required.
+GitHub Actions remains disabled. Builds and verification above were local.

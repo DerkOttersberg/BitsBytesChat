@@ -1,0 +1,5 @@
+ZXing core 3.5.4
+https://github.com/zxing/zxing/tree/zxing-3.5.4
+Copyright ZXing authors. Distributed under Apache License, Version 2.0.
+The full license is in ZXing-Apache-2.0.txt.
+This APK bundles the QR decoding code and does not require Google Play Services.

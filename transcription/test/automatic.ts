@@ -76,7 +76,7 @@ try {
   assert.deepEqual(history.map((row: { saved: boolean }) => row.saved), [true, true, true])
   assert.deepEqual(history.map((row: { diarize: boolean }) => row.diarize), [true, false, false])
   await page.getByRole("button", { name: "Settings", exact: true }).click()
-  await page.locator("#model").fill("openai/whisper-1")
+  await page.locator("#model").selectOption("openai/whisper-1")
   await expect(page.locator(".speaker-field").getByRole("switch")).toBeDisabled()
   await electron.close()
   ;({ electron, page } = await launch())

@@ -44,7 +44,7 @@ await expect(page.locator(".brand, .brand-name, .brand-subtitle")).toHaveCount(0
 await expect(page.locator("main > .ci-decoration")).toHaveCount(1)
 await expect(page.locator("body")).toHaveCSS("font-synthesis", "none")
 await page.getByRole("button", { name: "Settings", exact: true }).click()
-await page.locator("#language").fill("nl")
+await page.locator("#language").selectOption("nl")
 await page.getByRole("button", { name: "Save settings", exact: true }).click()
 await expect(page.locator("#toast")).toHaveText("Settings saved")
 await page.screenshot({ path: path.join(captures, "02-settings.png") })
@@ -103,10 +103,15 @@ const binary = executablePath || createRequire(import.meta.url)("electron") as s
 const second = spawn(binary, executablePath ? [] : ["."], { env: { ...process.env, BITSBYTES_TEST_DATA: path.join(root, "data") }, stdio: "ignore" })
 await new Promise<void>((resolve, reject) => { second.on("exit", code => code === 0 ? resolve() : reject(new Error("second instance failed"))); second.on("error", reject) })
 if (await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length) !== 1) throw new Error("duplicate window")
+const beforeHide = await page.evaluate(() => window.api.snapshot())
+await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close())
+if (await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible())) throw new Error("window did not hide to tray")
+await expect.poll(async () => { const value = await page.evaluate(() => window.api.snapshot()); return value.ok ? value.value.recordings[0].duration : 0 }).toBeGreaterThan(beforeHide.ok ? beforeHide.value.recordings[0].duration : 0)
+await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].show())
 const closed = electron.waitForEvent("close")
-await electron.evaluate(({ BrowserWindow, dialog }) => {
+await electron.evaluate(({ app, dialog }) => {
   dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false })
-  BrowserWindow.getAllWindows()[0].close()
+  app.quit()
 })
 await closed
 ;({ electron, page } = await launch())

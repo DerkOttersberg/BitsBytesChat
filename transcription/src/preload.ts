@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron"
 import type { API } from "./shared.js"
 const api: API = {
   snapshot: () => ipcRenderer.invoke("snapshot"), start: () => ipcRenderer.invoke("start"),
+  pairing: () => ipcRenderer.invoke("pairing"), revokePhone: id => ipcRenderer.invoke("revokePhone", id), launchAtLogin: enabled => ipcRenderer.invoke("launchAtLogin", enabled),
   append: (id, sequence, pcm) => ipcRenderer.invoke("append", id, sequence, pcm),
   finish: (id, error) => ipcRenderer.invoke("finish", id, error), transcribe: id => ipcRenderer.invoke("transcribe", id),
   cancel: () => ipcRenderer.invoke("cancel"), importAudio: () => ipcRenderer.invoke("importAudio"),
@@ -10,6 +11,7 @@ const api: API = {
   exportAudio: id => ipcRenderer.invoke("exportAudio", id), folder: () => ipcRenderer.invoke("folder"), remove: id => ipcRenderer.invoke("remove", id),
   audio: id => ipcRenderer.invoke("audio", id),
   onChange: callback => { const listener = () => callback(); ipcRenderer.on("changed", listener); return () => ipcRenderer.removeListener("changed", listener) },
+  onShowLink: callback => { ipcRenderer.on("show-link", callback) },
   onClose: callback => { ipcRenderer.on("prepare-close", (_event, error?: string) => { void callback(error).finally(() => ipcRenderer.send("close-ready")) }) }
 }
 contextBridge.exposeInMainWorld("api", api)

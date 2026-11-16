@@ -26,3 +26,14 @@ Function StartTranscription
   ${StdUtils.ExecShellAsUser} $0 "$appExe" "open" ""
 FunctionEnd
 !macroend
+
+!macro customInstall
+  ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "BitsBytesTranscription"
+  ${If} $0 == ""
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "BitsBytesTranscription" '$\"$INSTDIR\${APP_EXECUTABLE_FILENAME}$\" --background'
+  ${EndIf}
+!macroend
+
+!macro customUnInstall
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "BitsBytesTranscription"
+!macroend

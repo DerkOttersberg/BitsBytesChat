@@ -3,14 +3,18 @@ export type Preferences = { model: string; language: string; microphone: string;
 export type SpeakerTurn = { speaker: number; start: number; end: number; text: string }
 export type Progress = { stage: "preparing" | "transcribing" | "saving"; completed: number; total?: number }
 export type Rate = { perSecond: number; updated: string }
-export type Settings = Preferences & { hasKey: boolean; storagePath: string }
+export type Choice = { id: string; name: string }
+export type Settings = Preferences & { hasKey: boolean; storagePath: string; launchAtLogin: boolean }
+export type LinkSnapshot = { enabled: boolean; desktopId: string; name: string; port: number; addresses: string[]; error?: string; peers: { id: string; name: string; lastSeen?: string }[]; received: number }
+export type Pairing = { code: string; qr: string; expires: number }
 export type Recording = {
   id: string; title: string; created: string; rate: number; duration: number;
   status: Status; error: string; transcript: string; completedParts: number;
   preferences: Preferences; source?: string; turns?: SpeakerTurn[];
-  progress?: Progress; costUSD?: number; costComplete?: boolean
+  progress?: Progress; costUSD?: number; costComplete?: boolean; hasAudio?: boolean;
+  origin?: { peerId: string; recordingId: string; deviceName: string }
 }
-export type Snapshot = { recordings: Recording[]; settings: Settings; activeId?: string; busyId?: string; version: string; rates: Record<string, Rate> }
+export type Snapshot = { recordings: Recording[]; settings: Settings; activeId?: string; busyId?: string; version: string; rates: Record<string, Rate>; models: Choice[]; link: LinkSnapshot }
 export type Reply<T> = { ok: true; value: T } | { ok: false; error: string }
 export type API = {
   snapshot(): Promise<Reply<Snapshot>>;
@@ -22,12 +26,16 @@ export type API = {
   importAudio(): Promise<Reply<string | undefined>>;
   saveSettings(settings: Preferences & { key: string }): Promise<Reply<void>>;
   setSpeakers(enabled: boolean): Promise<Reply<void>>;
+  launchAtLogin(enabled: boolean): Promise<Reply<void>>;
+  pairing(): Promise<Reply<Pairing>>;
+  revokePhone(id: string): Promise<Reply<void>>;
   copy(id: string): Promise<Reply<void>>;
   exportAudio(id: string): Promise<Reply<void>>;
   audio(id: string): Promise<Reply<string>>;
   folder(): Promise<Reply<void>>;
   remove(id: string): Promise<Reply<void>>;
   onChange(callback: () => void): () => void;
+  onShowLink(callback: () => void): void;
   onClose(callback: (error?: string) => Promise<void>): void;
 }
 declare global { interface Window {

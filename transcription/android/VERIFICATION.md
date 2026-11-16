@@ -1,54 +1,54 @@
-# Android 1.0.0 verification — 2026-11-16
+# Android 1.3.0 verification - 16 November 2026
 
-Native Java APK, application ID `nl.bitsbytes.transcription`, versionCode 1,
-minSdk 26, targetSdk 36. No native ABI libraries or third-party runtime dependencies.
+Native Java APK, application ID `nl.bitsbytes.transcription`, versionCode 2,
+minSdk 26, targetSdk 36. No native ABI libraries, Google Play Services, or
+separate runtime installation is required. ZXing is bundled for QR decoding.
 
-## Automated checks
+## Checks performed
 
-- `assembleRelease`, `lintRelease`, and `lintDebug` passed. Lint has no errors;
-  remaining warnings advertise newer versions of the test-only dependencies.
-- All **10 instrumentation scenarios passed on Android 8.0 / API 26 and Android
-  16 / API 36 x86_64 emulators**. The initial 9-scenario suite also passed on
-  Android 15 / API 35 before the received-response cache test was added.
-- Actual native codec testing encodes 301 seconds of PCM to AAC/M4A, splits it
-  into two request parts, decodes the M4A back to PCM, and checks duration.
-- Persistence tests recover audio after uncommitted manifest updates; reconstruct
-  text and costs with both manifests corrupted; preserve missing-cost semantics;
-  skip completed requests; and project a saved provider response after a simulated
-  crash without another upload.
-- Tests validate actual streamed Base64 request JSON and diarization options,
-  structured speaker labels, encrypted settings through Android Keystore, and
-  cancellation without an upload.
-- Installed UI test: explicit Start at 00:00, recording across Home/lock/wake,
-  Finish, automatic transcription, clipboard copy, and native playback.
-
-The deterministic transcription tests inject a transport returning fixed provider
-responses. No real user audio or OpenRouter credits were used. Live-provider
-speech accuracy, speaker accuracy, and hardware microphone behavior remain
-unverified; those depend on the phone, network, provider, and recording conditions.
-
-## Signed APK checks
-
-- APK Signature Scheme v2 verified using Android `apksigner`; suitable for the
-  minimum Android version. Certificate subject: `CN=Derk Ottersberg,
-  OU=BitsBytes Transcription`.
-- Certificate SHA-256:
+- Signed `assembleRelease` and `lintRelease` passed; lint has no errors.
+- The 13 stability scenarios were validated on Android 8 / API 26 and Android
+  16 / API 36 emulators, including separate picker reruns after test-selector
+  fixes. They cover saved audio and corrupted manifests, retained text/costs,
+  Keystore settings, durable encrypted pairing/outbox state, pause/recovery and
+  append, searchable model/language choices, streamed Base64/options,
+  cancellation, provider failure, and saved-response recovery without reupload.
+- Real native codec testing encodes 301 seconds of PCM into AAC/M4A, splits
+  plain-mode requests, decodes the audio, and checks duration and part reuse.
+- The installed UI test verifies explicit Start, microphone capture across
+  Home/lock, Pause/Resume, Finish, automatic transcription, clipboard and playback.
+- Real phone-to-Windows integration passed on Android 8 and Android 16. It
+  decodes the Windows-generated QR bitmap using ZXing, rejects an incorrect TLS
+  pin, pairs with the actual receiver, and sends through the Send to PC button.
+  The PC clipboard receives all 1,122,000 UTF-8 bytes of multilingual text. Saved
+  acknowledgement state survives reopening, and retry does not overwrite a
+  newer clipboard. Android 8 was tested against the packaged Windows executable.
+- The emulator integration uses its host gateway for routing while retaining
+  the real certificate pin. It does not prove physical camera focus, multicast
+  routing, changing physical networks, or every router/firewall configuration.
+- Final signed APK installed over the previous release on Android 8 and Android
+  16. Version 1.3.0 opens successfully and existing recording libraries remain.
+- The final Android 16 release UI was inspected for ready, paused, settings and
+  saved recordings. Finish from Pause retains the recording and proceeds to
+  automatic transcription; missing credentials leave audio saved for retry.
+- APK Signature Scheme v2 verified with Android apksigner. Certificate SHA-256:
   `e223e3fcdde933d8c9cae2de4477e306365240f3d51ea50b18bd41088adb33f4`.
-- Installed the signed release APK on Android 8 and Android 16 emulators.
-- On Android 16, force-stopped the release app during capture, reopened it, and
-  recovered three committed seconds. Export through the system document picker
-  produced a valid 96,044-byte mono 16 kHz WAV with a RIFF header.
-- Reinstalling over the same signed application preserved its recording library.
-- The recording notification's Finish action worked while the Activity was
-  backgrounded. Automatic preparation retained the recording and displayed the
-  missing-key error with Resume available; no provider request was made.
-- Android 8's microphone permission dialog appears at Start. Denying it leaves
-  the app at 00:00 without beginning capture. The small-screen recorder was
-  inspected at 320 dp width; system navigation/keyboard insets are handled.
+  This is the same signing identity as Android 1.0.0, allowing in-place updates.
 
-These are emulator checks, not certification for every physical phone or OEM
-battery policy. Export audio before uninstalling or clearing app data. The
-release is directly distributed and self-signed; it is not Play Store verified.
+## Limits
 
-The private release keystore/password are kept outside the repository. They are
-not part of the APK, test report, source commit, or public release assets.
+Tests use emulators, generated audio, and injected transcription responses. No
+live paid-provider accuracy, physical microphone/camera matrix, or OEM battery
+policy certification is claimed. Android can delay background retries in Doze,
+under battery restrictions, and after force stop. Reopening attempts queued sends.
+
+Send to PC requires a reachable PC on the same local network. It does not use an
+internet relay. A 4 MiB UTF-8 transcript limit is checked before queueing; rejected
+text remains in the recording. The UI displays long text in sections, while Send
+reads the full saved transcript. The Android system clipboard may impose a lower
+transaction limit; Send to PC does not depend on that clipboard transaction.
+
+The APK is self-signed for direct distribution, not Play Store verified. Export
+recordings before uninstalling or clearing app data, which removes private audio,
+transcripts, pairing credentials and the Android Keystore key. The private release
+key and password are outside the repository and are never public release assets.

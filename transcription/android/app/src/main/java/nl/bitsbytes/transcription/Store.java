@@ -34,10 +34,11 @@ final class Store {
     }
     static JSONObject copy(JSONObject value) { try { return new JSONObject(value.toString()); } catch (Exception error) { throw new IllegalArgumentException(error); } }
     static void set(JSONObject row, String key, Object value) { try { row.put(key, value); } catch (Exception error) { throw new IllegalArgumentException(error); } }
-    static JSONObject read(File file) {
+    static JSONObject read(File file) { return read(file, 20_000_000); }
+    static JSONObject read(File file, int maximum) {
         try (FileInputStream input = new AtomicFile(file).openRead()) {
-            if (input.getChannel().size() > 20_000_000) return null;
-            return new JSONObject(new String(bytes(input, 20_000_000), StandardCharsets.UTF_8));
+            if (input.getChannel().size() > maximum) return null;
+            return new JSONObject(new String(bytes(input, maximum), StandardCharsets.UTF_8));
         } catch (Exception error) { return null; }
     }
     static byte[] bytes(InputStream input, int maximum) throws Exception {
@@ -165,7 +166,7 @@ final class Store {
             set(row, "chunks", count); if (count > 0) set(row, "duration", bytes / 32000.0);
             File[] originals = folder.listFiles((directory, name) -> name.matches("original\\.[a-z0-9]+"));
             if (originals != null && originals.length > 0) set(row, "source", originals[0].getName());
-            if (Arrays.asList("recording", "transcribing", "importing", "preparing").contains(row.optString("status"))) {
+            if (Arrays.asList("recording", "paused", "transcribing", "importing", "preparing").contains(row.optString("status"))) {
                 set(row, "status", "interrupted"); set(row, "error", "recovered_error");
             }
             save(row);

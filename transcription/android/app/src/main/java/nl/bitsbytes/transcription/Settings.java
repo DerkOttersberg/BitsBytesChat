@@ -54,4 +54,13 @@ final class Settings {
         }
         return (SecretKey) store.getKey(alias, null);
     }
+    synchronized JSONObject seal(String text) throws Exception {
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.ENCRYPT_MODE, secret());
+        return Store.object("iv", Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP), "ciphertext", Base64.encodeToString(cipher.doFinal(text.getBytes(java.nio.charset.StandardCharsets.UTF_8)), Base64.NO_WRAP));
+    }
+    synchronized String unseal(JSONObject encrypted) throws Exception {
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.DECRYPT_MODE, secret(), new GCMParameterSpec(128, Base64.decode(encrypted.getString("iv"), Base64.NO_WRAP)));
+        return new String(cipher.doFinal(Base64.decode(encrypted.getString("ciphertext"), Base64.NO_WRAP)), java.nio.charset.StandardCharsets.UTF_8);
+    }
 }

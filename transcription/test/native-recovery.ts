@@ -45,6 +45,7 @@ try {
   assert.equal(after.state.value.recordings[0].status, "interrupted")
   assert.ok(after.state.value.recordings[0].duration >= 1)
   assert.equal(after.state.value.activeId, undefined)
+  assert.equal(after.state.value.link.enabled, true, "the phone receiver must survive a renderer crash")
   const folders = await readdir(path.join(data, "recordings"))
   assert.equal(folders.length, 1)
   assert.ok((await readdir(path.join(data, "recordings", folders[0]))).includes("recording.wav"))

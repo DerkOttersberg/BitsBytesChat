@@ -44,6 +44,8 @@ export class Library {
         preferences: { model: "elevenlabs/scribe-v2", language: "", microphone: "", speakers: false }
       }
       row.preferences.speakers = row.preferences.speakers === true
+      const origin = await readJSON<{ peerId: string; recordingId: string; deviceName: string; duration: number; title: string }>(path.join(directory, "origin.json"))
+      if (origin && typeof origin.peerId === "string" && typeof origin.recordingId === "string") { row.origin = origin; row.hasAudio = false; row.duration = origin.duration; row.title = origin.title }
       const imported = (await readdir(directory)).find(file => /^original\.[a-z0-9]+$/.test(file))
       if (imported) row.source = imported
       if (row.source === "importing") { row.status = "error"; row.error = "prepare" }
@@ -73,6 +75,7 @@ export class Library {
       }
       if (chunks.length) row.duration = bytes / 2 / row.rate
       if (["recording", "transcribing"].includes(row.status) || !valid) { row.status = "interrupted"; row.error = "recovered" }
+      if (row.hasAudio === false && row.completedParts) { row.status = "complete"; row.error = "" }
       this.records.set(row.id, row)
       await this.save(row)
     }
@@ -94,6 +97,17 @@ export class Library {
     const previous = await readJSON<Recording>(file)
     if (previous) await atomicWrite(path.join(this.directory(row.id), "recording.backup.json"), JSON.stringify(previous))
     await atomicWrite(file, JSON.stringify(row))
+  }
+  async receiveTranscript(delivery: { recordingId: string; title: string; text: string; duration: number }, peer: { id: string; name: string }) {
+    const hex = createHash("sha256").update(peer.id + ":" + delivery.recordingId).digest("hex").slice(0, 32)
+    const id = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+    await mkdir(this.directory(id), { recursive: true })
+    const row: Recording = { id, title: delivery.title, created: this.records.get(id)?.created ?? new Date().toISOString(), rate: 16000,
+      duration: delivery.duration, status: "complete", error: "", transcript: "", completedParts: 0,
+      preferences: { model: "elevenlabs/scribe-v2", language: "", microphone: "", speakers: false }, hasAudio: false,
+      origin: { peerId: peer.id, recordingId: delivery.recordingId, deviceName: peer.name } }
+    await atomicWrite(path.join(this.directory(id), "origin.json"), JSON.stringify({ ...row.origin, duration: row.duration, title: row.title }))
+    this.records.set(id, row); await this.savePart(id, 0, delivery.text); return row
   }
   async append(id: string, sequence: number, data: Buffer) {
     const row = this.get(id)

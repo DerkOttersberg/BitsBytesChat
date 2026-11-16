@@ -29,10 +29,11 @@ import static org.junit.Assert.assertTrue;
 public class StabilityTest {
     @org.junit.Rule public androidx.test.rule.GrantPermissionRule microphone = androidx.test.rule.GrantPermissionRule.grant("android.permission.RECORD_AUDIO");
     private Context context() { return ApplicationProvider.getApplicationContext(); }
+    private String repeated(String value, int count) { StringBuilder result = new StringBuilder(); for (int i = 0; i < count; i++) result.append(value); return result.toString(); }
     private void tap(UiDevice device, String label) {
         for (int attempt = 0; attempt < 3; attempt++) {
-            androidx.test.uiautomator.UiObject2 control = device.wait(Until.findObject(By.pkg(context().getPackageName()).text(label)), 5000);
-            assertNotNull(label, control);
+            androidx.test.uiautomator.UiObject2 control = device.wait(Until.findObject(By.pkg(context().getPackageName()).text(label)), 2000);
+            if (control == null) { androidx.test.uiautomator.UiObject2 scroll = device.findObject(By.scrollable(true)); if (scroll != null) scroll.scroll(androidx.test.uiautomator.Direction.DOWN, .7f); continue; }
             try { control.click(); return; }
             catch (androidx.test.uiautomator.StaleObjectException transition) { SystemClock.sleep(100); }
         }
@@ -87,6 +88,37 @@ public class StabilityTest {
         assertEquals("test-secret-local-only", new Settings(context()).apiKey());
         String json = Store.read(new File(context().getFilesDir(), "settings.json")).toString();
         assertFalse(json.contains("test-secret-local-only"));
+    }
+    @Test public void queuedTranscriptAndPairingSecretSurviveRestart() throws Exception {
+        File root = new File(context().getCacheDir(), "link-test-" + UUID.randomUUID()); assertTrue(root.mkdirs());
+        Context isolated = new android.content.ContextWrapper(context()) { @Override public File getFilesDir() { return root; } };
+        Settings settings = new Settings(isolated); LinkStore links = new LinkStore(isolated, settings);
+        String pc = UUID.randomUUID().toString(); String secret = repeated("q", 43);
+        JSONObject pair = Store.object("v", 1, "id", pc, "peerId", UUID.randomUUID().toString(), "pin", repeated("0", 64), "token", secret, "port", 47831, "addresses", new JSONArray(), "name", "Test PC");
+        String code = "bitsbytes://link/" + android.util.Base64.encodeToString(pair.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.URL_SAFE | android.util.Base64.NO_WRAP | android.util.Base64.NO_PADDING);
+        links.add(code); JSONObject recording = Store.object("id", UUID.randomUUID().toString(), "created", 0, "duration", 3600, "transcript", repeated("Long text café 中文 🤖\n", 10000));
+        String id = links.enqueue(recording, pc); LinkStore reopened = new LinkStore(isolated, settings);
+        assertEquals(links.phoneId(), reopened.phoneId()); assertEquals(secret, reopened.token(pc)); assertEquals(recording.getString("transcript"), reopened.job(id).getString("text"));
+        assertFalse(Store.read(new File(root, "pc-links.json")).toString().contains(secret));
+        assertEquals(id, reopened.enqueue(recording, pc)); reopened.state(id, "sent", "");
+        assertFalse(new LinkStore(isolated, settings).job(id).has("text")); assertEquals("sent", reopened.latest(recording.getString("id")).getString("state"));
+    }
+    @Test public void pausedAudioCanRecoverAndAppendWithoutAGap() throws Exception {
+        Store store = isolated(); String id = recording(store, 2); store.append(id, 2, new byte[16000]); store.update(id, "status", "paused");
+        Store reopened = new Store(store.root); assertEquals("interrupted", reopened.get(id).getString("status")); assertEquals(2.5, reopened.get(id).getDouble("duration"), .001);
+        reopened.update(id, "status", "recording"); reopened.append(id, 3, new byte[32000]); assertEquals(3.5, reopened.get(id).getDouble("duration"), .001); assertEquals(112044, AudioFiles.wav(reopened, id).length());
+    }
+    @Test public void modelAndLanguageCanBePickedWithoutTypingCodes() throws Exception {
+        BitsApp app = (BitsApp) context(); app.settings.save("elevenlabs/scribe-v2", "", false, "");
+        UiDevice device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()); androidx.test.uiautomator.Configurator.getInstance().setWaitForIdleTimeout(100);
+        context().startActivity(new Intent(context(), MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK)); tap(device, "Settings");
+        tap(device, Catalog.label(app.catalog.models(), "elevenlabs/scribe-v2"));
+        androidx.test.uiautomator.UiObject2 search = device.wait(Until.findObject(By.desc("Search").pkg(context().getPackageName())), 5000); assertNotNull(search); search.setText("whisper-1");
+        androidx.test.uiautomator.UiObject2 model = device.wait(Until.findObject(By.clazz("android.widget.TextView").textContains("Whisper 1").pkg(context().getPackageName())), 5000); assertNotNull(model); model.click();
+        tap(device, "Automatic"); search = device.wait(Until.findObject(By.desc("Search").pkg(context().getPackageName())), 5000); assertNotNull(search); search.setText("Dutch");
+        androidx.test.uiautomator.UiObject2 language = device.wait(Until.findObject(By.clazz("android.widget.TextView").textContains("Dutch").pkg(context().getPackageName())), 5000); assertNotNull(language); language.click(); tap(device, "Save settings");
+        long saved = SystemClock.elapsedRealtime() + 5000; while (!app.settings.preferences().optString("model").equals("openai/whisper-1") && SystemClock.elapsedRealtime() < saved) SystemClock.sleep(50);
+        assertEquals("openai/whisper-1", app.settings.preferences().getString("model")); assertEquals("nl", app.settings.preferences().getString("language"));
     }
     @Test public void uploadJsonStreamsExactBase64AndSpeakerOptions() throws Exception {
         File file = new File(context().getCacheDir(), "payload-test.m4a"); byte[] bytes = new byte[]{0, 1, 2, -1, 42}; Store.write(file, bytes);
@@ -156,6 +188,11 @@ public class StabilityTest {
             tap(device, "Start recording");
             long deadline = SystemClock.elapsedRealtime() + 10000; while (app.activeId == null && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(50);
             assertNotNull(app.activeId); String id = app.activeId;
+            androidx.test.uiautomator.UiObject2 pause = device.wait(Until.findObject(By.pkg(context().getPackageName()).desc("Pause recording")), 5000); assertNotNull(pause); pause.click();
+            deadline = SystemClock.elapsedRealtime() + 5000; while (!app.paused && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(50);
+            assertTrue(app.paused); double pausedAt = app.store.get(id).getDouble("duration"); SystemClock.sleep(1200); assertEquals(pausedAt, app.store.get(id).getDouble("duration"), .001);
+            androidx.test.uiautomator.UiObject2 resume = device.wait(Until.findObject(By.pkg(context().getPackageName()).desc("Resume recording")), 5000); assertNotNull(resume); resume.click();
+            deadline = SystemClock.elapsedRealtime() + 5000; while (app.paused && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(50); assertFalse(app.paused);
             device.pressHome(); device.sleep(); SystemClock.sleep(2300); device.wakeUp(); device.pressMenu();
             context().startActivity(new Intent(context(), MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             tap(device, "Finish recording");

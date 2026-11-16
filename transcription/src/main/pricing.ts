@@ -1,26 +1,33 @@
 import path from "node:path"
-import type { Rate } from "../shared.js"
+import type { Choice, Rate } from "../shared.js"
+import { models } from "../catalog.js"
 import { supportsSpeakers } from "../speakers.js"
 import { atomicWrite, readJSON } from "./storage.js"
 
 export class Pricing {
   rates: Record<string, Rate> = {}
+  models: Choice[] = [...models]
+  private fetched = 0
   constructor(private root: string, private request: typeof fetch = fetch) {}
   async initialize() {
+    const catalog = await readJSON<{ models: Choice[]; fetched: number }>(path.join(this.root, "models.json"))
+    if (catalog?.models?.length) { this.models = catalog.models; this.fetched = catalog.fetched }
     const stored = await readJSON<Record<string, Rate>>(path.join(this.root, "pricing.json"))
     if (stored) for (const [model, rate] of Object.entries(stored)) {
       if (supportsSpeakers(model) && rate && Number.isFinite(rate.perSecond) && rate.perSecond >= 0 && typeof rate.updated === "string" && Date.now() - Date.parse(rate.updated) < 86400000) this.rates[model] = rate
     }
   }
   async refresh() {
-    if (["elevenlabs/scribe-v2", "elevenlabs/scribe-v2-medical"].every(model => this.rates[model])) return
+    if (Date.now() - this.fetched < 86400000) return
     const response = await this.request("https://openrouter.ai/api/v1/models?output_modalities=transcription", { signal: AbortSignal.timeout(10000) })
     if (!response.ok) return
     const body: unknown = await response.json()
     if (!body || typeof body !== "object" || !("data" in body) || !Array.isArray(body.data)) return
+    const choices: Choice[] = []
     for (const value of body.data) {
       if (!value || typeof value !== "object") continue
       const row = value as Record<string, unknown>
+      if (typeof row.id === "string" && /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:/-]{0,180}$/i.test(row.id)) choices.push({ id: row.id, name: typeof row.name === "string" ? row.name.slice(0, 240) : row.id })
       // Scribe's prompt price is explicitly per audio second. Other STT models
       // can bill per token/hour, so their estimates must not reuse this unit.
       if (typeof row.id !== "string" || !supportsSpeakers(row.id) || !row.pricing || typeof row.pricing !== "object") continue
@@ -30,6 +37,7 @@ export class Pricing {
       if (!Number.isFinite(perSecond) || perSecond < 0 || perSecond > 1) continue
       this.rates[row.id] = { perSecond, updated: new Date().toISOString() }
     }
+    if (choices.length) { this.models = choices.sort((a, b) => a.name.localeCompare(b.name)); this.fetched = Date.now(); await atomicWrite(path.join(this.root, "models.json"), JSON.stringify({ models: this.models, fetched: this.fetched })) }
     await atomicWrite(path.join(this.root, "pricing.json"), JSON.stringify(this.rates))
   }
 }

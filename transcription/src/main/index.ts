@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, net, powerMonitor, powerSaveBlocker, protocol } from "electron"
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, Notification, powerMonitor, powerSaveBlocker, protocol, Tray } from "electron"
 import path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { Application } from "./ipc.js"
@@ -16,10 +16,22 @@ let service: Application | undefined
 let closing = false
 let allowClose = false
 let blocker: number | undefined
+let tray: Tray | undefined
+function openWindow() { if (window?.isMinimized()) window.restore(); window?.show(); window?.focus() }
+function updateLogin() {
+  if (process.platform === "win32" && app.isPackaged && !process.env.BITSBYTES_TEST_DATA)
+    app.setLoginItemSettings({ openAtLogin: service?.snapshot().settings.launchAtLogin !== false, name: "BitsBytesTranscription", path: process.execPath, args: ["--background"] })
+  tray?.setContextMenu(Menu.buildFromTemplate([
+    { label: "Open BitsBytes Transcription", click: openWindow },
+    { label: "Link phone", click: () => { openWindow(); window?.webContents.send("show-link") } },
+    { label: "Start with Windows", type: "checkbox", checked: service?.snapshot().settings.launchAtLogin !== false, click: item => { void service?.setLaunchAtLogin(item.checked) } },
+    { type: "separator" }, { label: "Quit", click: () => app.quit() }
+  ]))
+}
 
 if (!app.requestSingleInstanceLock()) app.quit()
 else {
-  app.on("second-instance", () => { if (window?.isMinimized()) window.restore(); window?.show(); window?.focus() })
+  app.on("second-instance", () => openWindow())
   app.whenReady().then(async () => {
     Menu.setApplicationMenu(null)
     window = new BrowserWindow({ width: 1140, height: 780, minWidth: 760, minHeight: 540, backgroundColor: "#171717", title: copy.app, show: false, autoHideMenuBar: true, icon: path.join(base, "../../assets/icon.png"), webPreferences: { preload: path.join(base, "../preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
@@ -29,6 +41,12 @@ else {
     window.webContents.session.setPermissionCheckHandler((contents, permission, _origin, details) => contents === window?.webContents && permission === "media" && details.mediaType !== "video")
     service = new Application(root, window, app.getVersion())
     await service.initialize(); service.register()
+    service.loginChanged = updateLogin
+    service.copiedFromPhone = () => {
+      if (Notification.isSupported()) new Notification({ title: "Transcript copied from phone", body: "Ready to paste on this PC.", silent: true }).show()
+    }
+    tray = new Tray(path.join(base, "../../assets/icon.ico")); tray.setToolTip(copy.app)
+    tray.on("double-click", openWindow); tray.on("click", openWindow); updateLogin()
     protocol.handle("bb-audio", request => {
       const url = new URL(request.url)
       const id = url.pathname.slice(1)
@@ -43,6 +61,11 @@ else {
       if (!service?.activeId && blocker !== undefined) { powerSaveBlocker.stop(blocker); blocker = undefined }
     }
     window.on("close", event => {
+      if (allowClose) return
+      event.preventDefault()
+      window?.hide()
+    })
+    app.on("before-quit", event => {
       if (allowClose) return
       event.preventDefault()
       if (closing) return
@@ -70,19 +93,20 @@ else {
           }
         }
         await service.shutdown()
-        allowClose = true; window.destroy(); app.quit()
+        allowClose = true; tray?.destroy(); window.destroy(); app.quit()
       })().catch(() => { closing = false; if (service) service.willClose = false; dialog.showErrorBox(copy.app, copy.errors.storage) })
     })
     window.webContents.on("render-process-gone", () => {
       void (async () => {
-        await service?.shutdown().catch(() => undefined)
+        await service?.shutdown(false).catch(() => undefined)
         if (!closing && window && !window.isDestroyed()) window.webContents.reload()
       })().catch(() => { if (window && !window.isDestroyed()) window.webContents.reload() })
     })
     powerMonitor.on("suspend", () => { window?.webContents.send("prepare-close", "recovered") })
-    app.on("before-quit", event => { if (!allowClose && window && !window.isDestroyed()) { event.preventDefault(); window.close() } })
-    app.on("window-all-closed", () => app.quit())
+    powerMonitor.on("resume", () => { try { service?.link.advertise() } catch { /* reconnect on the network monitor */ } })
+    window.on("query-session-end", () => { if (service) service.willClose = true; window?.webContents.send("prepare-close", "recovered") })
+    app.on("window-all-closed", () => { if (allowClose) app.quit() })
     await window.loadFile(path.join(base, "../renderer/index.html"))
-    window.show()
+    if (!process.argv.includes("--background")) window.show()
   }).catch(() => { dialog.showErrorBox(copy.fatalTitle, copy.fatalBody); allowClose = true; app.quit() })
 }

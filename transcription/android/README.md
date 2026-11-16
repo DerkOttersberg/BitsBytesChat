@@ -1,115 +1,25 @@
 # BitsBytes Transcription for Android
 
-A standalone native Android recorder with the same Cream and Ink design as the
-Windows app. No desktop server, browser companion, chat engine, FFmpeg, or account
-with BitsBytes is required. Android 8.0 (API 26) or newer; one universal APK for
-ARM, ARM64, x86, and x86_64 devices. A microphone, internet access for transcription,
-and an OpenRouter API key with credits are required.
+Android 8.0+ native recorder with the same Cream and Ink fonts, icons, dotted surfaces, and mint controls as Windows. Download the signed APK from the [unified release](https://github.com/DerkOttersberg/BitsBytes-Transcription/releases/tag/transcription-v1.3.0). No desktop server setup or Google Play Services is required.
 
-Download the signed APK from the
-[Android release](https://github.com/DerkOttersberg/BitsBytesChat/releases/tag/transcription-android-v1.0.0).
-Open it on your phone and allow installation from the browser or file manager
-when Android asks. This is a directly distributed APK, not a Google Play listing.
-Future updates must use the same application ID and signing certificate; install
-over the existing app to preserve its data. Do not uninstall to update.
+Open Settings to save an OpenRouter API key and pick a model/language. The model picker refreshes from OpenRouter's transcription catalog and keeps a cached/bundled fallback. The searchable language picker includes Automatic. Language support varies by model. Scribe v2 and Scribe v2 Medical support the people-icon speaker toggle.
 
-## Use
+Record opens at 00:00 without microphone access. Start recording, use the small square Pause/Resume control, and Finish separately. Pausing commits the partial audio chunk, releases the microphone capture and wake lock, and excludes paused time from the recorded duration. Foreground notification controls work while the Activity is backgrounded or the phone is locked. Finish and completed imports automatically transcribe after saving audio. Recovered unfinished captures can resume recording before transcription.
 
-1. Save your OpenRouter API key in Settings. The default model is
-   `elevenlabs/scribe-v2`. Language can be blank, `nl`, `en`, or another supported
-   two-letter code.
-2. Open Record. The microphone remains closed at 00:00 until Start recording.
-   The people-icon switch enables speaker separation (Scribe v2 / v2 Medical).
-3. Finish recording automatically saves and transcribes. Import audio copies
-   the source to the app before preparing and transcribing it.
-4. Open a recording to listen, copy the transcript, see progress/reported USD
-   cost, export audio, or delete it. Save audio and Delete are text actions together.
+To send a finished transcript, use **Send to PC**. First pair using **Settings → Link PC → Scan PC code**, with the Windows app's Link phone QR on the same local network. The text is saved to an outbox before delivery. Copied to PC clipboard is shown only after the PC acknowledges the exact complete text. Background network jobs retry queued work; reopening the app or Retry connection also attempts it. The link is direct LAN access, not a hosted internet relay. See the [protocol and reliability details](../LINK_PROTOCOL.md).
 
-Allow microphone access at Start. Notifications provide Finish/Stop controls
-while the app is minimized. The microphone foreground service continues while
-the screen is locked or you switch apps; leaving the screen does not finish a
-recording. Tap Finish or use its notification action. Force stop, Android's
-foreground-service Stop control, device shutdown, and manufacturer battery
-restrictions can terminate it. The app does not secretly restart the microphone.
+Audio, API credentials, and settings stay device-local. Only an explicitly sent transcript goes to the paired PC. Android Keystore protects API/pairing credentials; cloud backup and device transfer are disabled. **Export audio before uninstalling or clearing data**: Android deletes private recordings, outbox data, and Keystore entries on uninstall. Normal updates preserve them; install the new APK over the existing one, using the same signing key.
 
-Speaker labels distinguish voices within one recording; they do not identify
-people or match identities across recordings. Speaker mode uploads one compressed
-M4A, capped at 24 MB, to keep labels consistent. Plain transcription uses five-minute
-parts. No price is guessed: provider-reported USD usage is persisted with each
-result; missing or partially reported costs are marked accordingly.
+Captures use 16 kHz mono PCM committed every second, with the partial second also committed at Pause/Finish. Finished recordings retain WAV and native AAC/M4A, with original imports preserved. A killed process can lose the current uncommitted fraction. Startup reconstructs audio and transcript parts from committed files and never automatically re-uploads an interrupted transcription. Responses are saved before transcript projection, so a valid received response can finish locally on Resume without another paid request. An in-flight request not committed locally might already have been charged.
 
-## Durability and privacy
+Long text is displayed in sections. Copy and Send use the full saved text. Android's clipboard transaction limit can be smaller than PC delivery; Send avoids that Android clipboard limit. The PC protocol accepts 4 MiB of UTF-8 text and never silently truncates it.
 
-- `AudioRecord` captures 16 kHz mono PCM. Each second is committed to an atomic,
-  synced file in private app storage. Finish also commits the final partial second
-  and creates a playable WAV. Native Android codecs prepare AAC/M4A for upload.
-- A killed process can lose the current uncommitted second and pending disk writes.
-  On reopening, saved chunks reconstruct duration; independently committed
-  transcript parts reconstruct text, speaker turns, and costs, even if manifests
-  are damaged. Interrupted jobs require explicit Resume. Reopening never uploads.
-- Resume skips committed responses. A request interrupted before its response was
-  committed might already have been charged; retrying that request can cost again.
-- Received JSON is committed before transcript projection. Resume can finish
-  projecting a valid saved response without another request, including after a crash
-  between receiving the result and saving its transcript part.
-- Original imports, PCM, compressed audio, and successful transcript parts remain
-  available after errors and cancellation. The original imported file is only
-  considered copied after flush and rename. Source formats depend on the Android
-  device's installed decoders (WAV, MP3, M4A/AAC, FLAC, and supported Ogg variants).
-- New jobs snapshot their model/language/speaker choice. Changing Settings does
-  not silently change an existing job; updated API credentials are used on Resume.
-- The API key is encrypted using AES-GCM and Android Keystore. It is never logged
-  or included in recording metadata. Android cloud backup and device transfer are
-  disabled; data remains private to this installation.
-- **Export audio before uninstalling, clearing app data, or replacing the phone.**
-  Android removes private app storage on uninstall, unlike the Windows app.
-  Uninstalling or clearing data also removes the Keystore key.
+## Architecture and builds
 
-Audio remains local while recording; Finish and completed imports send it over
-HTTPS to OpenRouter and its selected provider. There is no paid transcription
-credential bundled in the APK. Export uses Android's file picker and requires no
-broad storage permission. Delete explicitly removes that recording's local data.
+`AudioService` owns microphone capture and work across Activity lifetimes. `Store` owns atomic recordings/recovery; `AudioFiles` streams native codec preparation; `Transcriber` saves provider responses and parts. `LinkStore` owns encrypted pairing metadata and durable outbox jobs; `LinkClient` owns pinned HTTPS and network discovery; `LinkDeliveryService` handles an immediate send and `LinkJobService` handles deferred work. `ScanActivity` uses the bundled ZXing QR reader, and `Catalog` supplies cached models/shared language choices. `MainActivity` owns navigation/playback and adapts safe system/keyboard insets.
 
-## Architecture
+Development requires JDK 21 and Android SDK platform 36 with `ANDROID_HOME` configured. The checked-in wrapper pins Gradle 8.13 by SHA-256, with AGP 8.13.2. From this directory run `./gradlew.bat assembleDebug lintDebug` and, with an owned emulator, `./gradlew.bat connectedDebugAndroidTest`. Tests use fixed provider responses and spend no OpenRouter credits. Actual network/clipboard integration is driven from `transcription/test/phone-desktop.ts` with `ADB`, `ANDROID_SERIAL`, and installed debug/test APKs on an emulator.
 
-`MainActivity` owns phone navigation and playback, with safe system/keyboard insets
-and scrollable layouts. `AudioService` owns microphone capture, notification
-controls, wake lock, imports, and transcription across Activity lifetimes.
-`BitsApp` maintains a single serialized worker; no concurrent capture/import jobs.
-`Store` owns atomic local persistence/recovery. `AudioFiles` streams native
-encode/decode/resampling without loading a full recording into memory.
-`Transcriber` streams Base64 JSON to the fixed HTTPS endpoint, parses structured
-speaker output, and commits each response. `Settings` owns Keystore encryption.
-`Ink` adapts the unmodified Cream and Ink font/texture assets for native widgets.
-There are no third-party runtime libraries; AndroidX is used only for tests.
+For a signed release, set `BITSBYTES_ANDROID_KEYSTORE` and `BITSBYTES_ANDROID_PASSWORD_FILE` to private files outside the repository, then run `./Build-Android.ps1 -OutputDirectory <directory>`. Alias: `bitsbytes`. The script checks lint, verifies signing, and emits the APK/checksum using the version in `app/build.gradle`. Increment versionCode/versionName for updates. Keep an independent private signing backup; never put its key/password in source or release assets.
 
-## Build and verify
-
-Install JDK 21, Android SDK platform 36 and build tools, and set `ANDROID_HOME`.
-The checked-in Gradle wrapper pins Gradle 8.13 with its distribution SHA-256;
-Android Gradle Plugin is 8.13.2. From this directory:
-
-```powershell
-./gradlew.bat assembleDebug lintDebug
-# Start an Android emulator or attach an authorized test device:
-./gradlew.bat connectedDebugAndroidTest
-```
-
-Tests exercise actual local storage, native codecs, upload JSON, speaker labels,
-Keystore encryption, resuming without duplicate requests, and the installed UI's
-Start → lock/background → Finish → automatic transcription → copy/playback flow.
-Provider responses in these deterministic tests use an injected transport; they
-do not spend OpenRouter credits or validate real-world speech accuracy.
-
-To produce a release, set `BITSBYTES_ANDROID_KEYSTORE` and
-`BITSBYTES_ANDROID_PASSWORD_FILE` to private files outside the repository. The
-key alias is `bitsbytes`. Run `./Build-Android.ps1 -OutputDirectory <directory>`.
-It checks release lint, verifies the APK signature, and emits the APK and checksum.
-Keep an independent private backup of the keystore and its password: losing them
-prevents normal updates for existing installations. Never upload either as a
-GitHub release asset. Version name/code are in `app/build.gradle`; increment both
-before shipping updates and update the script's artifact name.
-
-Cream and Ink assets come from the existing vendored snapshot
-`da4036afb1736878413720391d36f4d6ba5bfa65`; font licenses, notices, and original
-asset checksums are bundled under `app/src/main/assets/`.
+Cream and Ink assets retain the vendored commit `da4036afb1736878413720391d36f4d6ba5bfa65`, Apache-licensed fonts, textures, and provenance. ZXing 3.5.4 is bundled under Apache 2.0. Notices are included in APK assets.

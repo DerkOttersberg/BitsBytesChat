@@ -30,6 +30,7 @@ export const copy = {
   exportTitle: "Save audio copy", importTitle: "Import audio", audioFiles: "Audio files", audioFile: "Audio", allFiles: "All files",
   fatalTitle: "The app could not open", fatalBody: "Your saved recordings have not been deleted. Check that your recordings folder is available, then open the app again.",
   errors: {
+    clipboard: "Windows clipboard is busy. The transcript is saved and the phone can retry delivery.",
     storage: "Audio could not be saved. Check free disk space and folder access. Recording has stopped; previously saved audio is retained.",
     invalid: "That action could not be completed. Reopen the recording and try again.",
     active: "Finish the current recording first.", busy: "Wait for the current audio task to finish, or stop transcription.",

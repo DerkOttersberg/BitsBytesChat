@@ -28,7 +28,7 @@ app.whenReady().then(async () => {
       ], usage: { cost: 0.0012 }
     } : { text: "Automatically transcribed after the audio was saved.", usage: { cost: 0.0007 } })
   }
-  const catalog: typeof fetch = async () => Response.json({ data: [{ id: "elevenlabs/scribe-v2", pricing: { prompt: "0.0000611111111111" } }, { id: "elevenlabs/scribe-v2-medical", pricing: { prompt: "0.0000611111111111" } }] })
+  const catalog: typeof fetch = async () => Response.json({ data: [{ id: "elevenlabs/scribe-v2", pricing: { prompt: "0.0000611111111111" } }, { id: "elevenlabs/scribe-v2-medical", pricing: { prompt: "0.0000611111111111" } }, { id: "openai/whisper-1", name: "OpenAI: Whisper 1" }] })
   const service = new Application(root, window, "1.2.0", request, catalog)
   await service.initialize(); service.register()
   await window.loadFile(path.resolve("dist/renderer/index.html"))

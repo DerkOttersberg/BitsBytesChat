@@ -14,9 +14,12 @@ try {
     & "$($taskTools.FullName)/apksigner.bat" verify --verbose --print-certs $taskApk
     if ($LASTEXITCODE -ne 0) { throw 'APK signature verification failed.' }
     New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
-    $taskDestination = Join-Path $OutputDirectory 'BitsBytes-Transcription-Android-1.0.0.apk'
+    $taskVersion = [regex]::Match((Get-Content -LiteralPath "$PSScriptRoot/app/build.gradle" -Raw), "versionName '([0-9.]+)'").Groups[1].Value
+    if (!$taskVersion) { throw 'Android versionName is missing.' }
+    $taskName = "BitsBytes-Transcription-Android-$taskVersion.apk"
+    $taskDestination = Join-Path $OutputDirectory $taskName
     Copy-Item -LiteralPath $taskApk -Destination $taskDestination
     $taskHash = (Get-FileHash -LiteralPath $taskDestination -Algorithm SHA256).Hash.ToLowerInvariant()
-    [IO.File]::WriteAllText((Join-Path $OutputDirectory 'SHA256SUMS.txt'), "$taskHash  BitsBytes-Transcription-Android-1.0.0.apk`n")
+    [IO.File]::WriteAllText((Join-Path $OutputDirectory 'SHA256SUMS.txt'), "$taskHash  $taskName`n")
     Write-Output $taskDestination
 } finally { Pop-Location }

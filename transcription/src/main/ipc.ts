@@ -8,14 +8,20 @@ import { atomicWrite, Library, readJSON } from "./storage.js"
 import { Transcriber } from "./transcriber.js"
 import { supportsSpeakers } from "../speakers.js"
 import { Pricing } from "./pricing.js"
+import { PhoneLink } from "./phone-link.js"
 
-type StoredSettings = Preferences & { encryptedKey?: string }
-const defaults: StoredSettings = { model: "elevenlabs/scribe-v2", language: "", microphone: "", speakers: false }
+type StoredSettings = Preferences & { encryptedKey?: string; launchAtLogin?: boolean }
+const defaults: StoredSettings = { model: "elevenlabs/scribe-v2", language: "", microphone: "", speakers: false, launchAtLogin: true }
 
 export class Application {
   library: Library
   transcriber: Transcriber
   pricing: Pricing
+  link: PhoneLink
+  loginChanged?: () => void
+  copiedFromPhone?: (title: string) => void
+  private linkError?: string
+  private copiedCount = 0
   activeId?: string
   busyId?: string
   willClose = false
@@ -31,6 +37,18 @@ export class Application {
     this.library = new Library(root)
     this.transcriber = new Transcriber(this.library, () => this.changed(), request)
     this.pricing = new Pricing(root, catalog)
+    this.link = new PhoneLink(root, {
+      protect: text => { if (!safeStorage.isEncryptionAvailable()) throw new AppError("encryption"); return safeStorage.encryptString(text).toString("base64") },
+      unprotect: text => safeStorage.decryptString(Buffer.from(text, "base64")),
+      receive: async (delivery, peer) => { await this.library.receiveTranscript(delivery, peer) },
+      clipboard: async text => {
+        for (let attempt = 0; attempt < 6; attempt++) {
+          try { clipboard.writeText(text); if (clipboard.readText() === text) return } catch { /* another application may temporarily own the clipboard */ }
+          await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)))
+        }
+        throw new AppError("clipboard")
+      }, changed: () => this.changed()
+    })
   }
   async initialize() {
     await mkdir(this.root, { recursive: true })
@@ -39,12 +57,15 @@ export class Application {
     await this.library.initialize()
     await this.pricing.initialize()
     void this.pricing.refresh().then(() => this.changed()).catch(() => undefined)
+    await this.link.start(process.env.BITSBYTES_TEST_DATA ? 0 : 47831, !process.env.BITSBYTES_TEST_DATA).catch(() => { this.linkError = "Receiver unavailable. Reopen the app to retry." })
   }
   changed() {
+    const received = this.link?.snapshot().received ?? 0
+    if (received > this.copiedCount) { this.copiedCount = received; this.copiedFromPhone?.("Phone transcript copied") }
     if (!this.window.isDestroyed() && !this.window.webContents.isDestroyed() && !this.window.webContents.isCrashed()) this.window.webContents.send("changed")
   }
   snapshot(): Snapshot {
-    return { recordings: [...this.library.records.values()].sort((a, b) => b.created.localeCompare(a.created)).map(row => ({ ...row })), settings: { model: this.settings.model, language: this.settings.language, microphone: this.settings.microphone, speakers: this.settings.speakers, hasKey: !!this.settings.encryptedKey, storagePath: path.join(this.root, "recordings") }, activeId: this.activeId, busyId: this.busyId, version: this.version, rates: this.pricing.rates }
+    return { recordings: [...this.library.records.values()].sort((a, b) => b.created.localeCompare(a.created)).map(row => ({ ...row })), settings: { model: this.settings.model, language: this.settings.language, microphone: this.settings.microphone, speakers: this.settings.speakers, hasKey: !!this.settings.encryptedKey, storagePath: path.join(this.root, "recordings"), launchAtLogin: this.settings.launchAtLogin !== false }, activeId: this.activeId, busyId: this.busyId, version: this.version, rates: this.pricing.rates, models: this.pricing.models, link: { ...this.link.snapshot(), ...(this.linkError ? { error: this.linkError } : {}) } }
   }
   private idle() {
     if (this.activeId) throw new AppError("active")
@@ -60,6 +81,7 @@ export class Application {
     this.settingsWrites = operation
     return operation
   }
+  async setLaunchAtLogin(enabled: boolean) { await this.updateSettings(current => ({ ...current, launchAtLogin: enabled })); this.loginChanged?.() }
   finish(id: string, error?: string): Promise<void> {
     if (this.finishing) return this.finishing
     const pending = this.finishRecording(id, error)
@@ -103,12 +125,13 @@ export class Application {
       await this.library.save(row); this.changed()
     }
   }
-  async shutdown() {
+  async shutdown(closeLink = true) {
     await this.settingsWrites.catch(() => undefined)
     await this.starting?.catch(() => undefined)
     if (this.activeId) await this.finish(this.activeId, "recovered")
     this.transcriber.cancel()
     await this.task
+    if (closeLink) await this.link.close()
   }
   register() {
     const handle = (name: string, action: (...args: never[]) => unknown) => {
@@ -119,6 +142,9 @@ export class Application {
       })
     }
     handle("snapshot", () => this.snapshot())
+    handle("pairing", () => this.link.pairing())
+    handle("revokePhone", (id: string) => this.link.revoke(id))
+    handle("launchAtLogin", async (enabled: boolean) => { if (typeof enabled !== "boolean") throw new AppError("invalid"); await this.setLaunchAtLogin(enabled) })
     handle("start", async () => {
       this.idle()
       // Claim the recorder synchronously before the first disk await.
@@ -144,7 +170,7 @@ export class Application {
       if (typeof input.speakers !== "boolean") throw new AppError("settings")
       if (input.speakers && !supportsSpeakers(input.model.trim())) throw new AppError("speakerModel")
       const encryptedKey = input.key.trim() ? safeStorage.encryptString(input.key.trim()).toString("base64") : undefined
-      await this.updateSettings(current => ({ model: input.model.trim(), language: input.language.trim(), microphone: input.microphone, speakers: input.speakers, encryptedKey: encryptedKey ?? current.encryptedKey }))
+      await this.updateSettings(current => ({ ...current, model: input.model.trim(), language: input.language.trim(), microphone: input.microphone, speakers: input.speakers, encryptedKey: encryptedKey ?? current.encryptedKey }))
     })
     handle("setSpeakers", async (enabled: boolean) => {
       this.idle()

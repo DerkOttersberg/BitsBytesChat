@@ -1,8 +1,8 @@
 - To regenerate the legacy JavaScript SDK, run `./packages/sdk/js/script/build.ts`.
 - After changing the public Protocol or Server `HttpApi`, run `bun run generate` from `packages/client`. Do not edit `src/generated` or `src/generated-effect` directly.
 - Keep runtime dependencies directed from Schema to Core and Protocol, then from Core and Protocol to Server. Client runtime code may depend on Schema and Protocol but never Core or Server; `sdk-next` composes Client, Core, and Server.
-- The default and active branch in this BitsBytesChat fork is `main`.
-- Use `main` or `origin/main` for diffs; the upstream `dev` branch is not present in this fork.
+- The default branch is `transcription-only`. The historical chat branch is preserved as the `legacy-chat-main` tag.
+- Use `origin/transcription-only` for diffs; the `main` branch has been removed at the owner's request.
 
 ## Branch Names
 

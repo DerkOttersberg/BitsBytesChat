@@ -13,3 +13,5 @@ Cream and Ink UI is vendored at commit da4036afb1736878413720391d36f4d6ba5bfa65
 from https://git.derkdev.nl/derk/cream-ink-ui at the owner's request. Its fonts,
 textures, upstream notices, provenance manifest and Apache 2.0 font license are
 preserved under dist/renderer/cream-ink-ui in the application archive.
+
+The Windows phone link additionally bundles selfsigned (MIT), qrcode (MIT), bonjour-service (MIT) and their JavaScript dependencies. Their license/notice files remain in the packaged node_modules. The Android app bundles ZXing core 3.5.4 (Apache 2.0); its notices and license are in Android assets/licenses. No Google Play Services runtime is used.

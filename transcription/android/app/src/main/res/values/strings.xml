@@ -14,7 +14,20 @@
     <string name="language_hint">Automatic, or a code such as nl or en</string>
     <string name="speakers">Separate speakers</string><string name="speaker_short">Speakers</string><string name="speaker">Speaker %1$d</string>
     <string name="unknown_speaker">Unknown speaker</string><string name="speaker_model">Speaker separation requires Scribe v2 or Scribe v2 Medical.</string>
-    <string name="privacy">Finish sends audio to OpenRouter and uses your credits.</string>
+    <string name="pause_recording">Pause recording</string><string name="resume_recording">Resume recording</string><string name="paused">Paused</string>
+    <string name="link_pc">Link PC</string><string name="scan_pc">Scan PC code</string><string name="paste_pairing">Paste pairing code</string>
+    <string name="search">Search</string><string name="send_pc">Send to PC</string><string name="sending_pc">Sending to PC…</string>
+    <string name="pc_queue_note">The transcript stays saved until the PC confirms it is copied.</string>
+    <string name="pc_code_error">This is not a valid BitsBytes PC pairing code. Open Link phone on the PC and scan its QR code.</string>
+    <string name="pc_link_hint">Open Link phone in the Windows app. Scan its QR code on the same local network. The PC can stay in the system tray.</string>
+    <string name="pc_unlinked">Link needs attention. Open Link phone on the PC and scan a new code.</string>
+    <string name="pc_pairing">Waiting for PC…</string><string name="pc_paired">Paired</string><string name="pc_retry">Retry connection</string>
+    <string name="pc_unlink">Unlink</string><string name="pc_unlink_confirm">Unlink this PC and cancel its pending sends?</string>
+    <string name="pc_text_limit">This transcript exceeds the 4 MiB transfer limit. The complete text remains saved on this phone.</string>
+    <string name="pc_delivery_error">PC delivery is unavailable. The transcript remains saved; reopen the app and retry.</string>
+    <string name="pc_sent">Copied to PC clipboard</string><string name="pc_queued">Queued — waiting for PC</string>
+    <string name="clipboard_error">Android could not copy this long text. Use Send to PC to copy the complete transcript on your computer.</string>
+    <string name="previous_section">Previous section</string><string name="next_section">Next section</string>
     <string name="storage_note">Recordings stay on this device. Export audio before uninstalling; Android removes private app data on uninstall.</string>
     <string name="recording">Recording</string><string name="saved">Saved</string><string name="complete">Transcribed</string>
     <string name="interrupted">Recovered</string><string name="error">Needs attention</string>

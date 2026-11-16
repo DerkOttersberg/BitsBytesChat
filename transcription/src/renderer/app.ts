@@ -1,5 +1,6 @@
 import { copy, AppError } from "../copy.js"
-import type { Recording, Snapshot } from "../shared.js"
+import type { Pairing, Recording, Snapshot } from "../shared.js"
+import { languages } from "../catalog.js"
 import { Recorder, unwrap } from "./recorder.js"
 import { Waveform } from "./waveform.js"
 import { speakerName, supportsSpeakers } from "../speakers.js"
@@ -7,7 +8,8 @@ import { speakerName, supportsSpeakers } from "../speakers.js"
 const root = document.querySelector<HTMLDivElement>("#app")!
 let snapshot: Snapshot
 let selected: string | undefined
-let view: "recordings" | "settings" | "ready" = "recordings"
+let view: "recordings" | "settings" | "ready" | "link" = "recordings"
+let pairing: Pairing | undefined
 let starting = false
 let refreshing = false
 let refreshAgain = false
@@ -28,6 +30,7 @@ const recorder = new Recorder(peak => waveform.update(peak), seconds => {
 }, showError)
 
 const icons = {
+  phone: '<svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 18h4"/></svg>',
   mic: '<svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
   import: '<svg viewBox="0 0 24 24"><path d="M12 3v12m-4-4 4 4 4-4M5 16v5h14v-5"/></svg>',
@@ -160,7 +163,7 @@ function renderSidebar() {
   const footer = el("div", "sidebar-footer")
   const settings = button(copy.settings, () => { view = "settings"; settingsDirty = false; render(); void microphones() }, `subtle ${view === "settings" ? "active" : ""}`, "settings")
   settings.title = `${copy.app} ${snapshot.version}`
-  footer.append(settings)
+  footer.append(button("Link phone", () => { view = "link"; settingsDirty = false; render() }, "subtle", "phone"), settings)
   aside.append(footer)
   if (existing) existing.replaceWith(aside); else root.prepend(aside)
   window.CreamInk.mount(aside)
@@ -173,6 +176,7 @@ function render() {
   const main = el("main"); root.append(main)
   main.dataset.ciSurface = "paper"
   renderDictation()
+  if (view === "link") { renderLink(main); window.CreamInk.mount(main); return }
   if (view === "settings") { renderSettings(main); window.CreamInk.mount(main); return }
   if (view === "ready") {
     const header = el("header", "recording-header"); header.dataset.ciSurface = "header"
@@ -204,7 +208,7 @@ function render() {
   const copyButton = button(copy.copy, async () => { unwrap(await window.api.copy(row.id)); toast(copy.copied) }, "secondary", "copy")
   copyButton.disabled = !row.transcript
   if (row.transcript) toolbar.append(copyButton)
-  if (row.status !== "recording" && row.duration > 0) {
+  if (row.status !== "recording" && row.duration > 0 && row.hasAudio !== false) {
     const playback = el("div", "playback")
     const play = button(copy.listen, async () => {
       if (playerId !== row.id || !player) {
@@ -229,6 +233,7 @@ function render() {
     processing.append(spinner, el("span", "", label)); main.append(processing)
   }
   if (row.error && row.error in copy.errors) main.append(el("div", "notice", copy.errors[row.error as keyof typeof copy.errors]))
+  if (row.origin) main.append(el("div", "phone-origin", `From ${row.origin.deviceName}`))
   const body = el("section", "transcript")
   body.setAttribute("aria-label", copy.transcript)
   const text = el("div", row.transcript ? "transcript-text" : "transcript-placeholder", row.transcript || copy.noTranscript)
@@ -248,7 +253,8 @@ function render() {
   save.disabled = !!snapshot.activeId || !!snapshot.busyId
   const remove = iconButton(copy.remove, async () => { unwrap(await window.api.remove(row.id)); await refresh() }, "subtle danger", "trash")
   remove.disabled = !!snapshot.activeId || !!snapshot.busyId
-  footer.append(save, remove); if (row.status !== "recording") main.append(footer)
+  if (row.hasAudio !== false) footer.append(save)
+  footer.append(remove); if (row.status !== "recording") main.append(footer)
   window.CreamInk.mount(main)
 }
 function renderSettings(main: HTMLElement) {
@@ -261,9 +267,15 @@ function renderSettings(main: HTMLElement) {
     wrapper.append(caption, input); if (hint) wrapper.append(el("p", "hint", hint)); form.append(wrapper); return input
   }
   const key = field(copy.key, "key", "", undefined, "password"); key.placeholder = snapshot.settings.hasKey ? copy.keySaved : copy.keyPlaceholder
-  const model = field(copy.model, "model", snapshot.settings.model)
-  const language = field(copy.language, "language", snapshot.settings.language)
-  language.placeholder = copy.languageHint
+  function choices(label: string, name: string, value: string, rows: { id: string; name: string }[]) {
+    const wrapper = el("div", "field"); const caption = el("label", "", label); caption.htmlFor = name
+    const select = el("select", "ci-field"); select.id = name; select.name = name
+    const options = rows.some(row => row.id === value) ? rows : [{ id: value, name: value }, ...rows]
+    for (const row of options) { const option = el("option", "", row.name); option.value = row.id; select.append(option) }
+    select.value = value; select.addEventListener("change", () => { settingsDirty = true }); wrapper.append(caption, select); form.append(wrapper); return select
+  }
+  const model = choices(copy.model, "model", snapshot.settings.model, snapshot.models)
+  choices(copy.language, "language", snapshot.settings.language, languages)
   const microphoneField = el("div", "field"); const label = el("label", "", copy.microphone); label.htmlFor = "microphone"
   const select = el("select", "ci-field"); select.id = "microphone"; select.name = "microphone"
   const option = el("option", "", copy.defaultMic); option.value = ""; select.append(option)
@@ -283,7 +295,7 @@ function renderSettings(main: HTMLElement) {
     toggle.title = supported ? separate ? copy.speakersOn : copy.speakersOff : copy.speakerModelHint
     window.CreamInk.mount(toggle)
   }
-  model.addEventListener("input", updateToggle)
+  model.addEventListener("change", updateToggle)
   speakerField.append(toggle, el("span", "", copy.speakers)); form.append(speakerField)
   form.append(el("p", "privacy", copy.privacy))
   const submit = el("button", "ci-button primary", copy.save); submit.dataset.ciSurface = "primary"; submit.type = "submit"; form.append(submit)
@@ -295,8 +307,28 @@ function renderSettings(main: HTMLElement) {
     }).catch(showError).finally(() => { submit.disabled = false })
   })
   main.append(form)
+  const startup = el("label", "startup-option ci-toggle"); const checkbox = el("input"); checkbox.type = "checkbox"; checkbox.checked = snapshot.settings.launchAtLogin
+  checkbox.addEventListener("change", () => { void window.api.launchAtLogin(checkbox.checked).then(unwrap).catch(showError) })
+  startup.append(checkbox, el("span", "", "Start with Windows in the background")); main.append(startup)
   const storage = el("div", "storage"); const folder = button(copy.folder, async () => { unwrap(await window.api.folder()) }, "subtle", "folder"); folder.title = snapshot.settings.storagePath; storage.append(folder); main.append(storage)
   void microphones()
+}
+function renderLink(main: HTMLElement) {
+  const header = el("header", "settings-header"); header.dataset.ciSurface = "header"; header.append(el("h1", "", "Link phone")); main.append(header)
+  const panel = el("section", "link-panel")
+  panel.append(el("p", "", "On your phone, open Settings → Link PC and scan this code. Both devices need to be on the same local network."))
+  if (snapshot.link.error) panel.append(el("div", "notice", snapshot.link.error))
+  if (pairing && pairing.expires > Date.now()) {
+    const image = el("img", "pairing-qr"); image.src = pairing.qr; image.alt = "Pair this PC with your phone"; panel.append(image)
+    const advanced = el("details"); advanced.append(el("summary", "", "Manual pairing code")); const code = el("textarea", "pairing-code"); code.value = pairing.code; code.readOnly = true; advanced.append(code); panel.append(advanced)
+    panel.append(el("p", "hint", "This code expires after 10 minutes. Keep it private."))
+  }
+  const generate = button(pairing ? "New QR code" : "Show QR code", async () => { pairing = unwrap(await window.api.pairing()); render() }, "primary", "phone"); generate.disabled = !snapshot.link.enabled; panel.append(generate)
+  for (const peer of snapshot.link.peers) {
+    const phone = el("div", "linked-phone"); phone.append(icon("phone"), el("span", "", peer.name), button("Unlink", async () => { unwrap(await window.api.revokePhone(peer.id)); await refresh() }, "subtle danger")); panel.append(phone)
+  }
+  panel.append(el("p", "hint", "Closing this window keeps the app available in the system tray. Sent transcripts are copied to this PC and kept in Recordings."))
+  main.append(panel)
 }
 async function microphones() {
   const select = document.querySelector<HTMLSelectElement>("#microphone")
@@ -310,6 +342,7 @@ async function microphones() {
   select.value = value
 }
 window.api.onChange(() => { void refresh() })
+window.api.onShowLink(() => { view = "link"; settingsDirty = false; render() })
 window.api.onClose(error => recorder.finish(error))
 window.addEventListener("keydown", event => {
   if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.code === "KeyC" && selected) { event.preventDefault(); void window.api.copy(selected).then(reply => { unwrap(reply); toast(copy.copied) }).catch(showError) }
